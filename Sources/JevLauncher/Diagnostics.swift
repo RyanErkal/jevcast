@@ -26,7 +26,7 @@ enum Diagnostics {
     }
     static func run() {
         let start = CFAbsoluteTimeGetCurrent()
-        let apps = AppCatalogue.scan(roots: ["/Applications", "/System/Applications", "/System/Library/CoreServices/Applications", "/System/Library/CoreServices/Finder.app", NSHomeDirectory() + "/Applications"])
+        let apps = AppCatalogue.scan(roots: AppCatalogue.standardRoots)
         let discovery = (CFAbsoluteTimeGetCurrent() - start) * 1000
         let phrases = ["Safari", "open safari", "left half", "move this to the right half", "top left", "middle third", "tile all", "next monitor", "full screen", "terminal"]
         var timings: [Double] = []

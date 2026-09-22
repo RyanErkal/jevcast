@@ -97,9 +97,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     /// slow step cannot make two captures share one state. Snapshot mode does not
     /// take key focus, activate the app, block clicks, or show windows on screen.
     private func runSnapshots(to directory: String) {
-        let rig = LauncherSnapshotRig(catalogue: catalogue)
+        let demo = DemoData.isEnabled
+        let rig = LauncherSnapshotRig(catalogue: catalogue, demo: demo)
         rig.open()
         let model = rig.model
+        // Demo Settings and welcome captures use the rig's fresh preferences, not this Mac's.
+        let shownPreferences = demo ? model.preferences : preferences
+        let shownModel = demo ? model : self.model
         let launcher: () -> NSView? = { rig.panel.hostedView }
         let settingsView: () -> NSView? = { [weak self] in self?.settings?.window?.contentView }
         var steps: [(name: String, wait: Double, view: () -> NSView?, action: () -> Void)] = [
@@ -107,7 +111,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             ("launcher-suggestions", 0.6, launcher, { rig.seedSuggestions() }),
             ("launcher-query", 0.8, launcher, { model.updateQuery("saf", typed: true) }),
             ("launcher-calculator", 0.6, launcher, { model.updateQuery("10 km in mi", typed: true) }),
-            ("launcher-files-loading", 0.05, launcher, { model.updateQuery("kind:pdf in:downloads", typed: true) }),
+            ("launcher-sum", 0.6, launcher, { model.updateQuery("12 * (8 + 2)", typed: true) }),
+            ("launcher-windows", 0.6, launcher, { model.updateQuery("left", typed: true) }),
+            ("launcher-files-loading", 0.05, launcher, { model.updateQuery(demo ? "in:downloads" : "kind:pdf in:downloads", typed: true) }),
             ("launcher-files", 2.0, launcher, {}),
             ("launcher-files-empty", 2.0, launcher, { model.updateQuery("find file zzqxv-no-match", typed: true) }),
             ("launcher-clipboard", 0.6, launcher, { rig.seedClipboard(); model.updateQuery("clip", typed: true) }),
@@ -119,7 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         steps.append(("", 0, { nil }, { [weak self] in
             guard let self else { return }
             rig.close()
-            self.settings = SettingsWindow(preferences: self.preferences, model: self.model, catalogue: self.catalogue, status: self.status, updates: self.updates, changed: {})
+            self.settings = SettingsWindow(preferences: shownPreferences, model: shownModel, catalogue: shownModel.catalogue, status: self.status, updates: self.updates, changed: {})
             self.settings?.window?.alphaValue = 0
             self.settings?.window?.ignoresMouseEvents = true
             self.settings?.window?.orderFrontRegardless()
@@ -130,13 +136,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         steps.append(("welcome", 0.9, { [weak self] in self?.welcome?.window?.contentView }, { [weak self] in
             guard let self else { return }
             self.settings?.window?.orderOut(nil)
-            self.welcome = WelcomeWindow(preferences: self.preferences, model: self.model, status: self.status, changed: {}, openSettings: {})
+            self.welcome = WelcomeWindow(preferences: shownPreferences, model: shownModel, status: self.status, changed: {}, openSettings: {})
             self.welcome?.window?.alphaValue = 0
             self.welcome?.window?.ignoresMouseEvents = true
             self.welcome?.window?.orderFrontRegardless()
         }))
         func run(_ index: Int) {
-            guard index < steps.count else { NSApp.terminate(nil); return }
+            guard index < steps.count else { rig.removePreferences(); NSApp.terminate(nil); return }
             let step = steps[index]
             step.action()
             DispatchQueue.main.asyncAfter(deadline: .now() + step.wait) {

@@ -369,7 +369,7 @@ final class LauncherModel: ObservableObject {
     /// The containing folder, short: "~/Downloads" when it has two components
     /// or fewer, otherwise "…/" and the last two. Copy Path, Reveal, and Quick
     /// Look still use the full path.
-    nonisolated static func folderDetail(_ path: String, home: String = NSHomeDirectory()) -> String {
+    nonisolated static func folderDetail(_ path: String, home: String = displayHome) -> String {
         var folder = (path as NSString).deletingLastPathComponent
         let homePrefix = home.hasSuffix("/") ? String(home.dropLast()) : home
         if folder == homePrefix { return "~" }
@@ -378,6 +378,10 @@ final class LauncherModel: ObservableObject {
         guard parts.count > 2 else { return folder }
         return "…/" + parts.suffix(2).joined(separator: "/")
     }
+    /// The folder shown as "~". Demo captures point it at their sample files.
+    nonisolated(unsafe) static var displayHome = NSHomeDirectory()
+    /// Replaces the frontmost app's name on window rows, so demo captures name a neutral app.
+    func overrideTargetName(_ name: String) { targetName = name }
     /// A URL's host without "www.", such as "github.com".
     nonisolated static func hostDetail(_ url: URL) -> String {
         let host = url.host ?? ""

@@ -21,10 +21,15 @@ final class AppCatalogue: ObservableObject {
     private var sources: [DispatchSourceFileSystemObject] = []
     private var runningTokens: [NSObjectProtocol] = []
     private var extraFolders: [String] = []
-    private let cacheURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("JevLauncher/apps.json")
-    init(loadCache: Bool = true) {
-        if loadCache, let data = try? Data(contentsOf: cacheURL), let cached = try? JSONDecoder().decode([AppEntry].self, from: data) {
+    nonisolated static let standardRoots = ["/Applications", "/System/Applications", "/System/Library/CoreServices/Applications", "/System/Library/CoreServices/Finder.app", NSHomeDirectory() + "/Applications"]
+    private let baseRoots: [String]
+    /// Nil for a catalogue that must not replace the user's cache, such as the demo one.
+    private let cacheURL: URL?
+    init(loadCache: Bool = true, roots: [String] = AppCatalogue.standardRoots, persistsCache: Bool = true) {
+        baseRoots = roots
+        cacheURL = persistsCache ? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("JevLauncher/apps.json") : nil
+        if loadCache, let cacheURL, let data = try? Data(contentsOf: cacheURL), let cached = try? JSONDecoder().decode([AppEntry].self, from: data) {
             entries = cached
         }
         runningApplications = NSWorkspace.shared.runningApplications
@@ -42,7 +47,7 @@ final class AppCatalogue: ObservableObject {
         rescan.cancel()
         task?.cancel()
         scanning = true
-        let roots = Array(Set(["/Applications", "/System/Applications", "/System/Library/CoreServices/Applications", "/System/Library/CoreServices/Finder.app", NSHomeDirectory() + "/Applications"] + extra))
+        let roots = Array(Set(baseRoots + extra))
         let cache = cacheURL
         let scan = Task.detached(priority: .utility) { () -> [AppEntry]? in
             let apps = Self.scan(roots: roots)
@@ -61,6 +66,7 @@ final class AppCatalogue: ObservableObject {
             self.entries = result
             self.scanning = false
             self.watch(roots: roots)
+            guard let cache else { return }
             Task.detached(priority: .utility) {
                 do {
                     try FileManager.default.createDirectory(at: cache.deletingLastPathComponent(), withIntermediateDirectories: true)

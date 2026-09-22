@@ -36,7 +36,8 @@ enum UISnapshots {
 
 /// A launcher for `--snapshot-ui` with its own preferences and a fake
 /// pasteboard, so captures do not depend on, or change, the user's favourites,
-/// recent items, or clipboard. Files still come from the home folder.
+/// recent items, or clipboard. Files come from the home folder, or with
+/// `--demo` from invented sample files, with Apple apps only.
 @MainActor
 final class LauncherSnapshotRig {
     static let suite = "JevLauncher.snapshots"
@@ -45,20 +46,33 @@ final class LauncherSnapshotRig {
     let model: LauncherModel
     private let defaults: UserDefaults
     private let pasteboard = SnapshotPasteboard()
+    private let demo: Bool
 
-    init(catalogue: AppCatalogue) {
+    init(catalogue: AppCatalogue, demo: Bool) {
+        self.demo = demo
         defaults = UserDefaults(suiteName: Self.suite)!
         defaults.removePersistentDomain(forName: Self.suite)
         let preferences = Preferences(defaults: defaults)
         preferences.voiceEnabled = false
         preferences.jevEnabled = false
-        model = LauncherModel(preferences: preferences, catalogue: catalogue, keys: JevKeyCache(key: nil),
+        var catalogue = catalogue
+        var files: FileSearching?
+        if demo {
+            catalogue = AppCatalogue(loadCache: false, roots: DemoData.appRoots, persistsCache: false)
+            catalogue.refresh(extra: [])
+            files = DemoData.makeFileSearch()
+            LauncherModel.displayHome = DemoData.home
+            preferences.fileFolders = ["Documents", "Downloads", "Desktop"].map { NSHomeDirectory() + "/" + $0 }
+        }
+        model = LauncherModel(preferences: preferences, catalogue: catalogue, files: files, keys: JevKeyCache(key: nil),
                               clipboard: ClipboardHistory(pasteboard: pasteboard))
         panel.acceptsKey = false; panel.alphaValue = 0; panel.ignoresMouseEvents = true
         panel.host(LauncherView(model: model, speech: model.speech, catalogue: catalogue, actions: {}))
     }
     func open() {
         model.begin(); model.pauseListening()
+        // Window rows name the frontmost app; a demo names a neutral one.
+        if demo { model.overrideTargetName("Notes") }
         panel.place(on: NSScreen.main)
         panel.orderFrontRegardless()
     }
@@ -72,13 +86,16 @@ final class LauncherSnapshotRig {
         model.rebuild()
     }
     func seedClipboard() {
-        for text in ["https://github.com/ryanerkal/jev-launcher/pull/42", "Meeting moved to Thursday at 10:00\nRoom 4B", "£1,240.00"] {
+        for text in DemoData.clipboard {
             pasteboard.text = text; pasteboard.changeCount += 1
             model.clipboard.poll()
         }
     }
     func close() {
         model.end(); panel.orderOut(nil)
+    }
+    /// Demo Settings captures still read these preferences, so removal waits for the last capture.
+    func removePreferences() {
         defaults.removePersistentDomain(forName: Self.suite)
     }
 }

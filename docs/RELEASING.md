@@ -1,32 +1,26 @@
 # Releasing
 
-Releases are built, signed, and notarized on a Mac. The signing certificate never goes to GitHub.
+The public install route is the source repository:
+`https://github.com/RyanErkal/jevcast`.
 
-## One-time setup
+## Before publishing
 
-1. **Developer ID certificate.** At [developer.apple.com](https://developer.apple.com/account/resources/certificates/list), create a **Developer ID Application** certificate (Account Holder role needed) and install it in your login keychain. Check it with `security find-identity -v -p codesigning`.
-2. **Notary profile.** Create an app-specific password at [account.apple.com](https://account.apple.com), then run:
+1. Set the version with `scripts/release.sh --version 1.1.0`.
+2. Add a `## [1.1.0] - YYYY-MM-DD` section to `CHANGELOG.md`, or replace
+   `Unreleased` with the date.
+3. Run `swift test`.
+4. Run `scripts/build.sh` on a Mac with Xcode 26 or later.
+5. Verify the built app with:
 
    ```sh
-   xcrun notarytool store-credentials jev-launcher-notary --apple-id <apple-id> --team-id <team-id>
+   codesign --verify --deep --strict --verbose=2 "dist/Jevcast.app"
    ```
 
-3. **GitHub CLI.** `gh auth status` must show a login with the `repo` scope.
-4. **Homebrew tap.** A public repository named `homebrew-tap` with a `Casks/` folder.
+6. Do the hands-on checks below with the built app from `dist/`.
+7. Publish the source and release notes on GitHub.
 
-## Each release
-
-1. Set the version: `scripts/release.sh --version 1.1.0`.
-2. Add a `## [1.1.0] - YYYY-MM-DD` section to `CHANGELOG.md`, or replace `Unreleased` with the date.
-3. Commit both files.
-4. Run `scripts/release.sh --draft-release`. It runs the tests, builds, signs, notarizes, staples, runs the Gatekeeper checks, pushes the tag, and creates a draft release with `Jev-Launcher.dmg` and its checksum.
-5. Do the hands-on checks below with the DMG from `dist/`.
-6. Publish the draft on GitHub.
-7. Copy `dist/jev-launcher.rb` to `Casks/jev-launcher.rb` in the tap repository and push it.
-
-The website needs no change. Its download link always points to the newest release.
-
-To check packaging without signing, run `scripts/release.sh --unsigned --skip-tests`. Never publish that DMG.
+The website and README must keep the source install prompt current. Keep
+release notes accurate about the artifacts that are available.
 
 ## Hands-on checks
 
@@ -34,7 +28,8 @@ Unit tests cannot prove these. Do them on a Mac with a real keyboard, and record
 
 **First run, on a macOS user account that has never run the app:**
 
-- [ ] The DMG opens with no Gatekeeper warning, and the app opens from Applications with no warning.
+- [ ] The app opens from `/Applications` without bypassing Gatekeeper or
+      changing macOS security settings.
 - [ ] The welcome window opens by itself, and the "try it" line turns green after the shortcut opens the launcher.
 - [ ] Accessibility, Microphone, and Speech Recognition prompts open the right System Settings pages.
 - [ ] Open at login works after a restart.

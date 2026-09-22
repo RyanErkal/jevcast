@@ -4,34 +4,35 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>
-      Jev Launcher: a free keyboard launcher and window manager for Mac
+      Jevcast: a free keyboard launcher and window manager for Mac
     </title>
     <meta
       name="description"
       content="Open apps, find files, do sums and conversions, move windows, and reuse what you copied, all from one shortcut. Free and open source for macOS 14 or later."
     />
-    <link rel="canonical" href="https://jev-launcher.vercel.app/" />
+    <!-- Planned deployment URL: https://jevcast.vercel.app/ -->
+    <link rel="canonical" href="/" />
     <meta name="theme-color" content="#dadde2" />
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="Jev Launcher" />
+    <meta property="og:site_name" content="Jevcast" />
     <meta
       property="og:title"
-      content="Jev Launcher: one shortcut for your apps, files, sums, and windows"
+      content="Jevcast: one shortcut for your apps, files, sums, and windows"
     />
     <meta
       property="og:description"
       content="A free, open-source keyboard launcher and window manager for Mac."
     />
-    <meta property="og:url" content="https://jev-launcher.vercel.app/" />
+    <meta property="og:url" content="/" />
     <meta
       property="og:image"
-      content="https://jev-launcher.vercel.app/images/og.png"
+      content="images/og.png"
     />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="Three black keycaps, Control, Shift, and Space, above the Jev Launcher search panel."
+      content="Two black keycaps, Option and Space, above the Jevcast search panel."
     />
     <meta name="twitter:card" content="summary_large_image" />
     <link
@@ -57,14 +58,14 @@
     <header class="top wrap">
       <a class="brand" href="#top">
         <img src="images/icon-64.png" width="32" height="32" alt="" />
-        <span>Jev Launcher</span>
+        <span>Jevcast</span>
       </a>
       <nav class="top-nav" aria-label="Sections">
         <a href="#type">What you can type</a>
         <a href="#windows">Windows</a>
         <a href="#privacy">Privacy</a>
         <a href="#install">Install</a>
-        <a class="top-github" href="https://github.com/RyanErkal/jev-launcher"
+        <a class="top-github" href="https://github.com/RyanErkal/jevcast"
           >GitHub</a
         >
       </nav>
@@ -78,13 +79,10 @@
             type="button"
             aria-expanded="true"
             aria-controls="launcher"
-            aria-label="Control, Shift, Space: open or close the launcher preview"
+            aria-label="Option, Space: open or close the launcher preview"
           >
-            <span class="key key-control" data-key="control" aria-hidden="true"
-              ><span class="sym">⌃</span><span class="word">control</span></span
-            >
-            <span class="key key-shift" data-key="shift" aria-hidden="true"
-              ><span class="sym">⇧</span><span class="word">shift</span></span
+            <span class="key key-option" data-key="option" aria-hidden="true"
+              ><span class="sym">⌥</span><span class="word">option</span></span
             >
             <span
               class="key key-space"
@@ -96,14 +94,14 @@
             One shortcut for your apps, files, sums, and windows.
           </h1>
           <p class="lead">
-            Press <kbd>⌃</kbd><kbd>⇧</kbd><kbd>Space</kbd>, type what you want,
-            and press Return. Jev&nbsp;Launcher opens apps, finds files, answers sums
-            and conversions, moves windows, and brings back what you copied.
+            Press <kbd>⌥</kbd><kbd>Space</kbd>, type what you want, and press
+            Return. Jevcast opens apps, finds files, answers sums and
+            conversions, moves windows, and brings back what you copied.
           </p>
           <div class="get">
             <a
               class="button"
-              href="https://github.com/RyanErkal/jev-launcher/releases/latest/download/Jev-Launcher.dmg"
+              href="#install"
             >
               <svg
                 width="18"
@@ -120,22 +118,13 @@
                   stroke-linejoin="round"
                 />
               </svg>
-              Download for Mac
+              Install from source
             </a>
-            <div class="brew">
-              <code id="brew-hero"
-                >brew install --cask ryanerkal/tap/jev-launcher</code
-              >
-              <button class="copy" type="button" data-copy="brew-hero">
-                Copy
-              </button>
-            </div>
           </div>
           <p class="specs">
             Free under the MIT license <span aria-hidden="true">·</span> macOS
             14 or later <span aria-hidden="true">·</span> Apple silicon and
-            Intel <span aria-hidden="true">·</span> Signed and notarized by
-            Apple
+            Intel <span aria-hidden="true">·</span> Build needs Xcode 26 or later on a supported Mac
           </p>
         </div>
 
@@ -157,7 +146,7 @@
                 type="button"
                 data-src="images/launcher-query.png"
                 data-h="354"
-                data-alt="Jev Launcher with “saf” typed. Results: Safari under Applications, the files Safari trip.heic and Safety checklist.numbers, and Search Google."
+                data-alt="Jevcast with “saf” typed. Results: Safari under Applications, the files Safari trip.heic and Safety checklist.numbers, and Search Google."
               >
                 <code>saf</code><span>Apps</span>
               </button>
@@ -170,7 +159,7 @@
                 type="button"
                 data-src="images/launcher-files.png"
                 data-h="354"
-                data-alt="Jev Launcher with “in:downloads” typed. Six files from the Downloads folder, including Brand guidelines 2026.key and Quarterly report Q3.numbers."
+                data-alt="Jevcast with “in:downloads” typed. Six files from the Downloads folder, including Brand guidelines 2026.key and Quarterly report Q3.numbers."
               >
                 <code>in:downloads</code><span>Files</span>
               </button>
@@ -183,7 +172,7 @@
                 type="button"
                 data-src="images/launcher-convert.png"
                 data-h="194"
-                data-alt="Jev Launcher with “10 km in mi” typed. The answer, 6.2137 mi, is ready to copy."
+                data-alt="Jevcast with “10 km in mi” typed. The answer, 6.2137 mi, is ready to copy."
               >
                 <code>10 km in mi</code><span>Sums and conversions</span>
               </button>
@@ -196,7 +185,7 @@
                 type="button"
                 data-src="images/launcher-windows.png"
                 data-h="438"
-                data-alt="Jev Launcher with “left” typed. Window layouts for Notes: Left Half, Left Third, Left Two Thirds, two quarters, and two sixths."
+                data-alt="Jevcast with “left” typed. Window layouts for Notes: Left Half, Left Third, Left Two Thirds, two quarters, and two sixths."
               >
                 <code>left</code><span>Windows</span>
               </button>
@@ -209,7 +198,7 @@
                 type="button"
                 data-src="images/launcher-clip.png"
                 data-h="252"
-                data-alt="Jev Launcher with “clip” typed. Three recent clipboard items: £1,240.00, a meeting note, and a GitHub link."
+                data-alt="Jevcast with “clip” typed. Three recent clipboard items: £1,240.00, a meeting note, and a GitHub link."
               >
                 <code>clip</code><span>Clipboard</span>
               </button>
@@ -226,12 +215,12 @@
                 src="images/launcher-query.png"
                 width="680"
                 height="354"
-                alt="Jev Launcher with “saf” typed. Results: Safari under Applications, the files Safari trip.heic and Safety checklist.numbers, and Search Google."
+                alt="Jevcast with “saf” typed. Results: Safari under Applications, the files Safari trip.heic and Safety checklist.numbers, and Search Google."
               />
             </div>
             <p class="stage-hint" hidden>
-              Closed, as after Escape. Press <kbd>⌃</kbd><kbd>⇧</kbd
-              ><kbd>Space</kbd> or click the keys to open it again.
+              Closed, as after Escape. Press <kbd>⌥</kbd><kbd>Space</kbd> or
+              click the keys to open it again.
             </p>
           </div>
         </div>
@@ -605,7 +594,7 @@
                   A request for the newest version number. GitHub sees your IP
                   address, as with any web request. Nothing is downloaded.
                   <a
-                    href="https://github.com/RyanErkal/jev-launcher/blob/main/Sources/JevLauncher/UpdateService.swift"
+                    href="https://github.com/RyanErkal/jevcast/blob/main/Sources/JevLauncher/UpdateService.swift"
                     >Read the code</a
                   >
                 </td>
@@ -622,7 +611,7 @@
                   file paths, folders, or audio. The reply can only choose one
                   of those candidates.
                   <a
-                    href="https://github.com/RyanErkal/jev-launcher/blob/main/Sources/JevLauncher/JevService.swift"
+                    href="https://github.com/RyanErkal/jevcast/blob/main/Sources/JevLauncher/JevService.swift"
                     >Read the code</a
                   >
                 </td>
@@ -653,34 +642,33 @@
               <li>
                 <span class="step-key" aria-hidden="true">1</span>
                 <div>
-                  <h3>Download the app</h3>
+                  <h3>Clone the official source</h3>
                   <p>
-                    Get
-                    <a
-                      href="https://github.com/RyanErkal/jev-launcher/releases/latest/download/Jev-Launcher.dmg"
-                      >Jev-Launcher.dmg</a
-                    >
-                    from GitHub. The app is signed and notarized by Apple.
+                    On a Mac that can run Xcode 26 or later, clone
+                    <a href="https://github.com/RyanErkal/jevcast"
+                      >github.com/RyanErkal/jevcast</a
+                    >. Verify the remote before you run the build.
                   </p>
                 </div>
               </li>
               <li>
                 <span class="step-key" aria-hidden="true">2</span>
                 <div>
-                  <h3>Drag it to Applications</h3>
+                  <h3>Test and build</h3>
                   <p>
-                    Open the disk image, drag Jev&nbsp;Launcher to the Applications
-                    folder, and open it from there.
+                    Run <code>swift test</code> and
+                    <code>scripts/build.sh</code>. Verify the app code
+                    signature before you install it.
                   </p>
                 </div>
               </li>
               <li>
                 <span class="step-key" aria-hidden="true">3</span>
                 <div>
-                  <h3>Follow the welcome window</h3>
+                  <h3>Install and open</h3>
                   <p>
-                    Choose a shortcut and try it. Allow Accessibility only if
-                    you want window layouts. Voice is optional.
+                    Copy <code>dist/Jevcast.app</code> to Applications without
+                    deleting existing settings, then open it.
                   </p>
                 </div>
               </li>
@@ -688,25 +676,42 @@
           </div>
           <div class="alt">
             <div class="alt-box">
-              <h3>Homebrew</h3>
+              <h3>Install with an agent</h3>
               <div class="brew">
-                <code id="brew-install"
-                  >brew install --cask ryanerkal/tap/jev-launcher</code
+                <code id="agent-install-prompt"
+                  >Install Jevcast from the official source repository:
+                  https://github.com/RyanErkal/jevcast. Check that this Mac
+                  can run Xcode 26 or later and has it installed; otherwise
+                  stop and report the requirement. Clone the repository and
+                  check out its latest published release tag; if there is no
+                  release tag, stop. Verify that `git remote get-url origin` resolves exactly to
+                  `https://github.com/RyanErkal/jevcast.git`, run `swift test`
+                  and `scripts/build.sh`, then verify the app with `codesign
+                  --verify --deep --strict --verbose=2
+                  "dist/Jevcast.app"`. After those checks pass, quit any running
+                  Jev Launcher or Jevcast. Back up an existing
+                  `/Applications/Jevcast.app` before replacing it, keep all
+                  preferences and settings, install the new app, and open it. Do not bypass
+                  Gatekeeper or change macOS security settings.</code
                 >
-                <button class="copy" type="button" data-copy="brew-install">
+                <button
+                  class="copy"
+                  type="button"
+                  data-copy="agent-install-prompt"
+                >
                   Copy
                 </button>
               </div>
             </div>
             <div class="alt-box">
               <h3>Build it yourself</h3>
-              <pre><code>git clone https://github.com/RyanErkal/jev-launcher.git
-cd jev-launcher
+              <pre><code>git clone https://github.com/RyanErkal/jevcast.git
+cd jevcast
 scripts/build.sh</code></pre>
               <p>
                 Needs Xcode 26 or later. The
                 <a
-                  href="https://github.com/RyanErkal/jev-launcher#build-from-source"
+                  href="https://github.com/RyanErkal/jevcast#build-from-source"
                   >README</a
                 >
                 has the details.
@@ -727,10 +732,9 @@ scripts/build.sh</code></pre>
               <summary>Does it replace Spotlight or Raycast?</summary>
               <p>
                 It works next to them and never changes their shortcuts. The
-                default shortcut is <kbd>⌃</kbd><kbd>⇧</kbd><kbd>Space</kbd>.
-                You can choose <kbd>⌥</kbd><kbd>Space</kbd> instead, or
-                <kbd>⌘</kbd><kbd>Space</kbd> after you turn off the Spotlight
-                shortcut in System Settings.
+                shortcut is <kbd>⌥</kbd><kbd>Space</kbd>. If another app already
+                uses it, choose a different shortcut in the welcome window or in
+                Settings.
               </p>
             </details>
             <details>
@@ -782,7 +786,7 @@ scripts/build.sh</code></pre>
               <p>
                 Yes. The code is open source under the MIT license. You can read
                 it, build it, and change it on
-                <a href="https://github.com/RyanErkal/jev-launcher">GitHub</a>.
+                <a href="https://github.com/RyanErkal/jevcast">GitHub</a>.
               </p>
             </details>
           </div>
@@ -792,10 +796,11 @@ scripts/build.sh</code></pre>
       <section class="section closing" aria-labelledby="closing-title">
         <div class="wrap closing-inner">
           <h2 id="closing-title">
-            Download it, then press <kbd>⌃</kbd><kbd>⇧</kbd><kbd>Space</kbd></h2>
+            Build it from source, then press <kbd>⌥</kbd><kbd>Space</kbd>
+          </h2>
           <a
             class="button"
-            href="https://github.com/RyanErkal/jev-launcher/releases/latest/download/Jev-Launcher.dmg"
+            href="#install"
           >
             <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
               <path
@@ -807,7 +812,7 @@ scripts/build.sh</code></pre>
                 stroke-linejoin="round"
               />
             </svg>
-            Download for Mac
+            Install from source
           </a>
           <p class="specs">
             Free under the MIT license <span aria-hidden="true">·</span> macOS
@@ -822,21 +827,21 @@ scripts/build.sh</code></pre>
       <div class="wrap foot-row">
         <a class="brand" href="#top">
           <img src="images/icon-64.png" width="28" height="28" alt="" />
-          <span>Jev Launcher</span>
+          <span>Jevcast</span>
         </a>
         <nav class="foot-nav" aria-label="Project">
-          <a href="https://github.com/RyanErkal/jev-launcher">Source</a>
-          <a href="https://github.com/RyanErkal/jev-launcher/releases"
+          <a href="https://github.com/RyanErkal/jevcast">Source</a>
+          <a href="https://github.com/RyanErkal/jevcast/releases"
             >Releases</a
           >
           <a
-            href="https://github.com/RyanErkal/jev-launcher/blob/main/CHANGELOG.md"
+            href="https://github.com/RyanErkal/jevcast/blob/main/CHANGELOG.md"
             >Changelog</a
           >
-          <a href="https://github.com/RyanErkal/jev-launcher/issues"
+          <a href="https://github.com/RyanErkal/jevcast/issues"
             >Report an issue</a
           >
-          <a href="https://github.com/RyanErkal/jev-launcher/security/policy"
+          <a href="https://github.com/RyanErkal/jevcast/security/policy"
             >Security</a
           >
         </nav>

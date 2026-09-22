@@ -1,4 +1,4 @@
-// Jev Launcher site: the launcher preview, its query tabs, the window-layout
+// Jevcast site: the launcher preview, its query tabs, the window-layout
 // diagram, and copy buttons. No network requests and no storage.
 (() => {
   const root = document.documentElement;
@@ -40,14 +40,14 @@
 
   document.addEventListener("keydown", (event) => {
     if (isTyping(event.target)) return;
-    if (event.key === "Control") setDown("control", true);
-    if (event.key === "Shift") setDown("shift", true);
+    if (event.key === "Alt") setDown("option", true);
+    // Option–Space. The code, not the key, because Option changes the typed character.
     if (
       event.code === "Space" &&
-      event.ctrlKey &&
-      event.shiftKey &&
-      !event.metaKey &&
-      !event.altKey
+      event.altKey &&
+      !event.ctrlKey &&
+      !event.shiftKey &&
+      !event.metaKey
     ) {
       event.preventDefault();
       setDown("space", true);
@@ -56,8 +56,7 @@
     if (event.key === "Escape" && isOpen() && heroInView) setOpen(false);
   });
   document.addEventListener("keyup", (event) => {
-    if (event.key === "Control") setDown("control", false);
-    if (event.key === "Shift") setDown("shift", false);
+    if (event.key === "Alt") setDown("option", false);
     if (event.code === "Space") setDown("space", false);
   });
   window.addEventListener("blur", () =>

@@ -2,9 +2,9 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
-## [1.0.0] - Unreleased
+## [1.0.0] - 2026-09-22
 
-First public release.
+First public source release. Build on a Mac with Xcode 26 or later. No signed binary is included.
 
 ### Added
 
@@ -16,6 +16,8 @@ First public release.
 
 ### Changed
 
+- The public-facing app name is now Jevcast, and the repository is `RyanErkal/jevcast`. Internal bundle and executable identifiers stay stable.
+- The shortcut on a new install is Option–Space. Earlier installs keep the shortcut they had.
 - Voice input starts off on a new install. Earlier installs keep their setting.
 - On macOS 26, Settings and the welcome window use the current system design.
 - Preferences, the Keychain item, and logs share one identifier. A stored TypeSafe key moves to the new Keychain item automatically.

@@ -9,7 +9,7 @@ You need Xcode 26 or later. The app runs on macOS 14 or later.
 ```sh
 swift test                      # all tests
 ARCHS=arm64 scripts/build.sh    # fast local build (scripts/build.sh builds both architectures)
-open "dist/Jev Launcher.app"
+open "dist/Jevcast.app"
 ```
 
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) explains the code layout and the diagnostic flags.

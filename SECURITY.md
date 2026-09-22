@@ -4,11 +4,11 @@
 
 Report security problems privately. Do not open a public issue.
 
-Use **Report a vulnerability** on the repository's [Security tab](https://github.com/RyanErkal/jev-launcher/security/advisories/new). Include the app version (About Jev Launcher), your macOS version, and the steps that show the problem.
+Use **Report a vulnerability** on the repository's [Security tab](https://github.com/RyanErkal/jevcast/security/advisories/new). Include the app version (About Jevcast), your macOS version, and the steps that show the problem.
 
 ## Supported versions
 
-Only the newest release gets security fixes. Update from **Check for Updates…** in the app menu or from the [releases page](https://github.com/RyanErkal/jev-launcher/releases).
+Only the newest release gets security fixes. Update from **Check for Updates…** in the app menu or from the [releases page](https://github.com/RyanErkal/jevcast/releases).
 
 ## What is in scope
 

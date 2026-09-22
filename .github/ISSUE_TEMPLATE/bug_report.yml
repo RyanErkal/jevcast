@@ -14,7 +14,7 @@ body:
     attributes:
       label: Steps
       placeholder: |
-        1. Open the launcher with Control-Shift-Space
+        1. Open the launcher with Option-Space
         2. Type "left half"
         3. Press Return
     validations:
@@ -23,7 +23,7 @@ body:
     id: version
     attributes:
       label: App version
-      description: In the menu bar, choose About Jev Launcher.
+      description: In the menu bar, choose About Jevcast.
       placeholder: "1.0.0"
     validations:
       required: true

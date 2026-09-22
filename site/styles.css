@@ -1,4 +1,4 @@
-/* Jev Launcher site. The page is the top of a MacBook: an aluminium deck, black
+/* Jevcast site. The page is the top of a MacBook: an aluminium deck, black
    keycaps, and the launcher panel at its real size. The only colour is the blue
    from the app icon. */
 
@@ -315,7 +315,7 @@ kbd {
   font-size: 0.875rem;
 }
 
-/* The keycaps: control, shift, and space, sitting in a well in the deck. */
+/* The keycaps: option and space, sitting in a well in the deck. */
 
 .keys {
   --u: 1;
@@ -346,16 +346,12 @@ kbd {
     box-shadow 90ms ease-out;
 }
 
-.key-control {
-  width: calc(88px * var(--u));
-}
-
-.key-shift {
-  width: calc(120px * var(--u));
+.key-option {
+  width: calc(96px * var(--u));
 }
 
 .key-space {
-  width: calc(300px * var(--u));
+  width: calc(340px * var(--u));
 }
 
 .key .sym {
@@ -366,10 +362,6 @@ kbd {
   line-height: 1;
 }
 
-.key-shift .sym {
-  right: auto;
-  left: calc(11px * var(--u));
-}
 
 .key .word {
   position: absolute;
@@ -505,20 +497,16 @@ kbd {
 
 /* Opening sequence: the three keys go down, the launcher opens, the keys come up. */
 @media (prefers-reduced-motion: no-preference) {
-  .intro .key-control {
-    animation: press 540ms var(--ease-out) 320ms both;
-  }
-
-  .intro .key-shift {
-    animation: press 470ms var(--ease-out) 400ms both;
+  .intro .key-option {
+    animation: press 520ms var(--ease-out) 320ms both;
   }
 
   .intro .key-space {
-    animation: press 400ms var(--ease-out) 480ms both;
+    animation: press 440ms var(--ease-out) 400ms both;
   }
 
   .intro .launcher-frame {
-    animation: open 160ms ease-out 600ms both;
+    animation: open 160ms ease-out 520ms both;
   }
 }
 

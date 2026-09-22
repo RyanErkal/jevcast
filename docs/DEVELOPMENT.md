@@ -23,7 +23,7 @@ Change `AppIdentity.swift` and the `APP_NAME` and `BUNDLE_ID` lines in `scripts/
 
 ## Diagnostic flags
 
-Run the executable inside the app bundle, for example `"dist/Jev Launcher.app/Contents/MacOS/JevLauncher" --diagnose`.
+Run the executable inside the app bundle, for example `"dist/Jevcast.app/Contents/MacOS/JevLauncher" --diagnose`.
 
 | Flag                                       | Result                                                                                                 |
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------ |

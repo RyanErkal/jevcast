@@ -1,4 +1,4 @@
-# Jev Launcher
+# Jevcast
 
 A keyboard launcher and window manager for macOS. Open apps, find files, do quick sums and conversions, move windows, and reuse what you copied, all from one shortcut. Free and open source under the MIT License.
 
@@ -8,23 +8,33 @@ A keyboard launcher and window manager for macOS. Open apps, find files, do quic
 - macOS 14 or later. Apple silicon and Intel.
 - No account, no analytics. Search, clipboard history, and voice stay on your Mac.
 
-Website: [jev-launcher.vercel.app](https://jev-launcher.vercel.app)
+Website: planned at `https://jevcast.vercel.app` (deployment pending).
 
 ## Install
 
-**Download:** get `Jev-Launcher.dmg` from the [latest release](https://github.com/RyanErkal/jev-launcher/releases/latest), open it, and drag **Jev Launcher** to **Applications**. The app is signed with a Developer ID and notarized by Apple.
+**Agent install prompt:**
 
-**Homebrew:**
+```
+Install Jevcast from the official source repository:
+https://github.com/RyanErkal/jevcast
 
-```sh
-brew install --cask ryanerkal/tap/jev-launcher
+First check that this Mac can run Xcode 26 or later and has it installed. If
+not, report the requirement and stop. Clone the repository and check out its
+latest published release tag. If there is no release tag, stop. Verify that `git remote get-url origin`
+resolves exactly to `https://github.com/RyanErkal/jevcast.git`. Run `swift test`
+and `scripts/build.sh`. Verify the built app code signature with
+`codesign --verify --deep --strict --verbose=2 "dist/Jevcast.app"` and report
+the result. After those checks pass, quit any running Jev Launcher or Jevcast.
+Back up an existing `/Applications/Jevcast.app` before replacing it, and keep
+all preferences and settings. Install the new app at `/Applications/Jevcast.app`
+and open it. Do not bypass Gatekeeper or change macOS security settings.
 ```
 
 Open the app from Applications. A welcome window helps you choose a shortcut and allow what you need. After that, the app lives in the menu bar. Open **Help › Welcome Guide** to see the window again.
 
 ## Use
 
-Press **Control–Shift–Space** (change it in Settings) and type:
+Press **Option–Space** and type. If another app already uses that shortcut, choose a different one in the welcome window or in Settings.
 
 | Type                                                       | What happens                                                             |
 | ---------------------------------------------------------- | ------------------------------------------------------------------------ |
@@ -110,14 +120,14 @@ Allow each one from the welcome window, Settings, or the **Permissions** menu in
 You need Xcode 26 or later (it includes the macOS 26 SDK). The built app runs on macOS 14 or later.
 
 ```sh
-git clone https://github.com/RyanErkal/jev-launcher.git
-cd jev-launcher
+git clone https://github.com/RyanErkal/jevcast.git
+cd jevcast
 swift test
 scripts/build.sh            # universal build; ARCHS=arm64 scripts/build.sh builds one architecture
-open "dist/Jev Launcher.app"
+open "dist/Jevcast.app"
 ```
 
-A local build has an ad-hoc signature. macOS can ask for permissions again after each rebuild. See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the code layout and diagnostic flags, and [docs/RELEASING.md](docs/RELEASING.md) for signed releases.
+A local build can ask for permissions again after each rebuild. See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the code layout and diagnostic flags, and [docs/RELEASING.md](docs/RELEASING.md) for the source release process.
 
 ## Contributing
 

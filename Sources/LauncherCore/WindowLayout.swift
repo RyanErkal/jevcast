@@ -131,7 +131,7 @@ public enum WindowAction: String, CaseIterable, Identifiable, Sendable {
         case .rightTwoThirds: return "rectangle.split.2x1.fill"
         case .topLeftSixth, .topCenterSixth, .topRightSixth,
              .bottomLeftSixth, .bottomCenterSixth, .bottomRightSixth:
-            return "rectangle.split.3x2.fill"
+            return "rectangle.grid.3x2.fill"
         case .maximize: return "rectangle.inset.filled"
         case .almostMaximize: return "macwindow"
         case .center: return "rectangle.center.inset.filled"

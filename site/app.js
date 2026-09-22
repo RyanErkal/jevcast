@@ -4,11 +4,10 @@
   const root = document.documentElement;
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
-  // Launcher preview. The keycaps and the real shortcut open and close it,
-  // and Escape closes it, as in the app.
+  // Launcher preview. The keycaps and the real shortcut press the keys and
+  // replay the panel opening. The preview always stays visible.
   const keysButton = document.querySelector(".keys");
   const frame = document.getElementById("launcher");
-  const hint = document.querySelector(".stage-hint");
   const img = frame.querySelector("img");
   const keys = {};
   for (const key of document.querySelectorAll(".key"))
@@ -18,20 +17,16 @@
   frame.addEventListener("animationend", endIntro, { once: true });
   if (reduceMotion.matches) endIntro();
 
-  const isOpen = () => !frame.classList.contains("is-closed");
-  const setOpen = (open) => {
+  const replay = () => {
     endIntro();
-    frame.classList.toggle("is-closed", !open);
-    hint.hidden = open;
-    keysButton.setAttribute("aria-expanded", String(open));
+    if (reduceMotion.matches) return;
+    frame.animate(
+      [{ transform: "scale(0.97)" }, { transform: "none" }],
+      { duration: 220, easing: "cubic-bezier(0.16, 1, 0.3, 1)" },
+    );
   };
 
-  keysButton.addEventListener("click", () => setOpen(!isOpen()));
-
-  let heroInView = true;
-  new IntersectionObserver(([entry]) => {
-    heroInView = entry.isIntersecting;
-  }).observe(document.querySelector(".hero"));
+  keysButton.addEventListener("click", replay);
 
   const isTyping = (target) =>
     target instanceof Element &&
@@ -51,9 +46,8 @@
     ) {
       event.preventDefault();
       setDown("space", true);
-      if (!event.repeat) setOpen(!isOpen());
+      if (!event.repeat) replay();
     }
-    if (event.key === "Escape" && isOpen() && heroInView) setOpen(false);
   });
   document.addEventListener("keyup", (event) => {
     if (event.key === "Alt") setDown("option", false);
@@ -82,7 +76,6 @@
       img.src = tab.dataset.src;
       img.alt = tab.dataset.alt;
       img.height = Number(tab.dataset.h);
-      if (!isOpen()) setOpen(true);
       if (reduceMotion.matches) return;
       // Top edge fixed, height eased, as the app resizes its panel.
       const to = frame.getBoundingClientRect().height;
@@ -142,25 +135,31 @@
     pad.addEventListener("mouseenter", () => show(pad));
   }
 
-  // Copy buttons.
+  // Copy buttons. The label and icon change for a moment after a copy.
   const status = document.getElementById("copy-status");
   for (const button of document.querySelectorAll(".copy")) {
+    const label = button.querySelector(".copy-label");
+    const idle = label.textContent;
+    let timer;
     button.addEventListener("click", async () => {
       const source = document.getElementById(button.dataset.copy);
+      // Hidden prose copies as one line; the visible command keeps its lines.
+      const text = source.hidden
+        ? source.textContent.replace(/\s+/g, " ").trim()
+        : source.textContent.trim();
       try {
-        await navigator.clipboard.writeText(source.textContent.trim());
-        button.textContent = "Copied";
-        status.textContent = "Command copied to the clipboard.";
+        await navigator.clipboard.writeText(text);
+        label.textContent = "Copied";
+        button.classList.add("is-copied");
+        status.textContent = "Copied to the clipboard.";
       } catch {
-        const range = document.createRange();
-        range.selectNodeContents(source);
-        getSelection().removeAllRanges();
-        getSelection().addRange(range);
-        button.textContent = "Press ⌘C";
-        status.textContent = "Command selected. Press Command C to copy it.";
+        label.textContent = "Copy failed";
+        status.textContent = "Could not copy. Select the text and press Command C.";
       }
-      setTimeout(() => {
-        button.textContent = "Copy";
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        label.textContent = idle;
+        button.classList.remove("is-copied");
       }, 1800);
     });
   }

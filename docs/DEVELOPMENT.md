@@ -4,14 +4,17 @@
 
 The package has two targets.
 
-- `Sources/LauncherCore`: pure logic with no AppKit, so tests are fast and exact. Calculator and unit conversion, file-query parsing, search ranking, frecency, and window geometry. Tests are in `Tests/LauncherCoreTests`.
+- `Sources/LauncherCore`: pure logic with no AppKit, so tests are fast and exact. Calculator and unit conversion, file-query parsing, search ranking, frecency, window geometry, the built-in command list (`SystemCommands.swift`), and port-query and `lsof` parsing (`Ports.swift`). Tests are in `Tests/LauncherCoreTests`.
 - `Sources/JevLauncher`: the app.
   - `App.swift`: app delegate, global shortcuts, open and close, snapshot runs.
   - `LauncherModel.swift`: builds, ranks, and runs results.
   - `LauncherPanel.swift`, `LauncherView.swift`, `ResultList.swift`: the panel. It is a non-activating key panel, so typing works without activating the app.
   - `FileSearch.swift`: Spotlight queries inside the configured folders.
   - `WindowManager.swift`: Accessibility window moves, snapping, and undo.
+  - `LauncherModel+Commands.swift`: command, custom-command, and port rows.
+  - `CommandRunner.swift`: runs built-in commands without a shell, the user's own commands with `zsh -lc`, and `lsof`.
   - `SpeechService.swift`: on-device speech recognition.
+  - `SpeakerGuard.swift`: mutes the built-in speakers while the microphone listens.
   - `JevService.swift`: TypeSafe Jev selection. Validates every reply before use.
   - `UpdateService.swift`, `UpdateChecker.swift`: the daily GitHub release check.
   - `Settings*.swift`, `WelcomeWindow.swift`, `StatusMenu.swift`, `AppMenus.swift`: windows and menus.

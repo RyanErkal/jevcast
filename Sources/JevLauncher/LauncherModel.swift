@@ -10,6 +10,9 @@ struct LauncherResult: Identifiable {
         case url(URL)
         case copy(String)
         case clipboard(ClipboardItem)
+        case command(SystemCommand)
+        case custom(CustomCommand)
+        case stopProcess(ListeningPort)
     }
     let id: String
     let title: String
@@ -27,7 +30,7 @@ struct LauncherResult: Identifiable {
         case .app(let app): return app.launchURL == nil ? .applications : .commands
         case .file: return .files
         case .clipboard: return .clipboard
-        case .window, .url, .copy: return .commands
+        case .window, .url, .copy, .command, .custom, .stopProcess: return .commands
         }
     }
     /// Calculator answers and clipboard entries keep a second line; other rows are single-line.
@@ -37,10 +40,18 @@ struct LauncherResult: Identifiable {
     var path: String? {
         switch action { case .app(let app): return app.path; case .file(let file): return file.path; default: return nil }
     }
+    /// Disruptive actions run only after a second Return.
+    var needsConfirmation: Bool {
+        switch action {
+        case .command(let command): return command.confirm
+        case .stopProcess: return true
+        default: return false
+        }
+    }
     /// Calculator answers, typed URLs, web searches, and clipboard text are not remembered for ranking.
     var learnsFromUse: Bool {
         switch action {
-        case .copy, .clipboard: return false
+        case .copy, .clipboard, .stopProcess: return false
         case .url: return id.hasPrefix("quicklink:")
         default: return true
         }
@@ -96,6 +107,10 @@ final class LauncherModel: ObservableObject {
         if case .window = selected?.action, !WindowManager.hasPermission {
             return Notice(symbol: "macwindow.badge.plus", text: "Window control needs Accessibility access.", tone: .info, action: .allowAccessibility)
         }
+        if let pending = selected, pending.id == pendingConfirmID {
+            return Notice(symbol: "exclamationmark.circle", text: "Press Return again to " + Self.confirmPhrase(pending) + ".", tone: .warning)
+        }
+        if let portNotice { return Notice(symbol: "network", text: portNotice, tone: .info) }
         if let aiError { return Notice(symbol: "sparkles", text: aiError, tone: .info) }
         if isFileSearch && fileStatus.hasSuffix(FileSearch.narrowHint) && !results.isEmpty {
             return Notice(symbol: "info.circle", text: "Showing recent matches. Add a name or folder to narrow the search.", tone: .info)
@@ -116,6 +131,8 @@ final class LauncherModel: ObservableObject {
             }
             return "Open URL"
         case .copy, .clipboard: return "Copy"
+        case .command, .custom: return selected.id == pendingConfirmID ? "Confirm" : "Run Command"
+        case .stopProcess: return selected.id == pendingConfirmID ? "Confirm" : "Stop Process"
         }
     }
     func perform(_ action: Notice.Action) {
@@ -140,13 +157,19 @@ final class LauncherModel: ObservableObject {
     private var previousFileResults: [FileEntry] = []
     private var work: Task<Void, Never>?
     private var aiWork: Task<Void, Never>?
-    private var revision = UUID()
-    private var visible = false
+    var revision = UUID()
+    var visible = false
     private var acceptsSpeech = true
     private var startWork: Task<Void, Never>?
     private var manualSelection = false
-    private var promotedID: String?
-    private var semanticResult: LauncherResult?
+    var promotedID: String?
+    var semanticResult: LauncherResult?
+    /// The port query in the search field, if any, and what lsof found for it.
+    var portQuery: PortQuery?
+    var listeners: [ListeningPort] = []
+    var isLoadingPorts = false
+    /// The row that is waiting for a second Return.
+    @Published var pendingConfirmID: String?
     private var subscriptions = Set<AnyCancellable>()
 
     init(preferences: Preferences, catalogue: AppCatalogue, files: FileSearching? = nil,
@@ -177,6 +200,7 @@ final class LauncherModel: ObservableObject {
         visible = true; acceptsSpeech = true; manualSelection = false; query = ""; message = nil; voiceError = nil
         parsedFileQuery = FileSearchQuery(text: ""); fileStatus = ""
         previousFileResults = []; fileResults = []; promotedID = nil; semanticResult = nil; revision = UUID()
+        portQuery = nil; listeners = []; isLoadingPorts = false; pendingConfirmID = nil
         rebuild()
         startWork?.cancel()
         startWork = Task { [weak self] in
@@ -213,6 +237,7 @@ final class LauncherModel: ObservableObject {
             if !fileResults.isEmpty { previousFileResults = fileResults }
         } else { previousFileResults = [] }
         query = text; message = nil; manualSelection = false; fileResults = []; promotedID = nil; semanticResult = nil
+        pendingConfirmID = nil; portQuery = PortQuery.parse(text); listeners = []
         revision = UUID(); let current = revision
         work?.cancel(); aiWork?.cancel(); files.stop(); aiStatus = ""; aiError = nil
         if typed { voiceError = nil }
@@ -221,7 +246,8 @@ final class LauncherModel: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         // Clipboard filters and keyword searches with text stay local and skip file search.
         guard !trimmed.isEmpty, !isClipboardSearch, Quicklink.match(trimmed, in: preferences.quicklinks)?.query.isEmpty ?? true else { return }
-        if isFileSearch || trimmed.count >= 3 {
+        if let portQuery { loadPorts(portQuery, revision: current, promoteFirst: false) }
+        if portQuery == nil && (isFileSearch || trimmed.count >= 3) {
             work = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 120_000_000)
                 guard !Task.isCancelled, let self, self.revision == current else { return }
@@ -231,7 +257,10 @@ final class LauncherModel: ObservableObject {
                 }
             }
         }
-        if !isFileSearch && preferences.jevEnabled && trimmed.count >= 5 && trimmed.contains(" ") && (results.first?.score ?? 0) < 99 {
+        // Jev reads every settled query, typed or spoken. Sums, typed URLs, keyword searches,
+        // and port lookups already have one clear answer, so they skip the request.
+        if !isFileSearch && preferences.jevEnabled && portQuery == nil && trimmed.count >= 2
+            && (results.first?.score ?? 0) < Self.definiteScore {
             aiWork = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 280_000_000)
                 guard !Task.isCancelled, let self, self.revision == current else { return }
@@ -278,7 +307,7 @@ final class LauncherModel: ObservableObject {
             let score = isFileSearch ? 200 - Double(index) : nameScore * 100 - 3 - Double(index) * 0.01
             rows.append(Self.fileRow(file, score: score, isCurrent: filesAreCurrent))
         }
-        if !isFileSearch { rows += quicklinkRows(q) }
+        if !isFileSearch { rows += quicklinkRows(q) + commandRows(q) + portRows() }
         let answer = isFileSearch ? nil : Calculator.evaluate(q)
         // A finished sum or conversion is the answer. Beside it, keep only whole-name and
         // prefix matches (90 and up), so "12 * (8 + 2)" does not list "Left Two Thirds"
@@ -344,6 +373,7 @@ final class LauncherModel: ObservableObject {
             guard let link = preferences.quicklinks.first(where: { "quicklink:" + $0.id == id }), let url = link.url(for: "") else { return nil }
             return LauncherResult(id: id, title: "Search " + link.name, detail: Self.hostDetail(url), symbol: "link", action: .url(url), score: 0)
         }
+        if let row = commandRow(id: id, score: 0) { return row }
         if id.hasPrefix("file:") {
             let path = String(id.dropFirst("file:".count))
             var isDirectory: ObjCBool = false
@@ -483,6 +513,10 @@ final class LauncherModel: ObservableObject {
             let chosen = reply.flatMap { ids[$0] }
             aiStatus = chosen == nil ? "No clear AI match" : "Jev matched"
             guard let chosen else { return }
+            // A whole-name match the user typed stays first.
+            if let top = results.first(where: \.isCurrent), top.score >= 100, top.id != chosen, chosen != Self.portsCandidateID {
+                aiStatus = "Kept exact match"; return
+            }
             promote(chosen)
         } catch {
             guard !Task.isCancelled, visible, revision == current else { return }
@@ -491,35 +525,56 @@ final class LauncherModel: ObservableObject {
     }
     /// Candidates for Jev under opaque IDs. Files are sent by name only, and no
     /// path (app, running app, or file) appears in any ID, title, or description.
+    /// Custom commands are sent by name, never by their command text.
     private func jevCandidates() -> (candidates: [JevCandidate], ids: [String: String]) {
         var entries: [(id: String, title: String, detail: String)] = []
+        var included = Set<String>()
+        func add(_ id: String, _ title: String, _ detail: String) {
+            guard entries.count < Self.jevCandidateLimit, included.insert(id).inserted else { return }
+            entries.append((id, title, detail))
+        }
         for row in results where row.isCurrent {
             switch row.action {
-            case .app: entries.append((row.id, row.title, "Open installed application"))
-            case .file(let file): entries.append((row.id, file.name, file.isDirectory ? "Folder" : "File"))
-            case .window(let action, _): entries.append((row.id, action.title, "Arrange the active window"))
-            case .url where row.id.hasPrefix("quicklink:"): entries.append((row.id, row.title, "Search a website"))
-            case .url, .copy, .clipboard: continue
+            case .app: add(row.id, row.title, "Open installed application")
+            case .file(let file): add(row.id, file.name, file.isDirectory ? "Folder" : "File")
+            case .window(let action, _): add(row.id, action.title, "Arrange the active window")
+            case .url where row.id.hasPrefix("quicklink:"): add(row.id, row.title, "Search a website")
+            case .command(let command): add(row.id, command.title, command.detail)
+            case .custom(let command): add(row.id, command.name, "Run the user's own command")
+            case .url, .copy, .clipboard, .stopProcess: continue
             }
         }
-        var included = Set(entries.map(\.id))
-        // All built-in window actions remain available even when phrasing has no literal match.
-        for action in WindowAction.allCases where !included.contains("window:" + action.rawValue) {
-            entries.append(("window:" + action.rawValue, action.title, "Arrange the active window"))
+        // Every action stays available even when the phrasing has no literal match.
+        for action in WindowAction.allCases { add("window:" + action.rawValue, action.title, "Arrange the active window") }
+        for command in SystemCommands.all { add("command:" + command.id, command.title, command.detail) }
+        for command in preferences.customCommands { add("custom:" + command.id, command.name, "Run the user's own command") }
+        add(Self.portsCandidateID, "Stop the process on a port", "Find the app or server listening on a local TCP port and stop it")
+        // Apps the user is likely to mean come first, so the list stays short and fast.
+        let running = Set(catalogue.runningApplications.compactMap(\.bundleURL).map(\.path))
+        let likely = Set(preferences.favourites + preferences.recentIDs)
+        let apps = catalogue.entries.sorted { lhs, rhs in
+            let l = (likely.contains(lhs.id) ? 2 : 0) + (running.contains(lhs.path) ? 1 : 0)
+            let r = (likely.contains(rhs.id) ? 2 : 0) + (running.contains(rhs.path) ? 1 : 0)
+            return l != r ? l > r : lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
         }
-        included = Set(entries.map(\.id))
-        for app in catalogue.entries where !included.contains(app.id) && entries.count < 220 {
-            entries.append((app.id, app.name, "Open installed application"))
-        }
+        for app in apps { add(app.id, app.name, "Open installed application") }
         var ids: [String: String] = [:]
-        let candidates = entries.prefix(240).enumerated().map { index, entry in
+        let candidates = entries.enumerated().map { index, entry in
             ids["c\(index)"] = entry.id
             return JevCandidate(id: "c\(index)", title: entry.title, detail: entry.detail)
         }
         return (candidates, ids)
     }
+    static let jevCandidateLimit = 120
+    static let portsCandidateID = "ports"
+    /// Rows at or above this score are a definite answer: a sum, a typed URL, a keyword search, or a port.
+    static let definiteScore = 1000.0
     /// Puts Jev's choice first. A choice outside the current rows is added, then the list regroups around it.
     private func promote(_ chosen: String) {
+        if chosen == Self.portsCandidateID {
+            loadPorts(PortQuery(port: PortQuery.firstPort(in: query)), revision: revision, promoteFirst: true)
+            return
+        }
         promotedID = chosen
         if !results.contains(where: { $0.id == chosen }) {
             if let app = catalogue.entries.first(where: { $0.id == chosen }) {
@@ -527,6 +582,8 @@ final class LauncherModel: ObservableObject {
                 semanticResult = Self.appRow(app, running: running, score: 0)
             } else if let action = WindowAction.allCases.first(where: { "window:" + $0.rawValue == chosen }) {
                 semanticResult = windowRow(action, target: namedTarget(in: query), score: 0)
+            } else if let row = commandRow(id: chosen, score: 0) {
+                semanticResult = row
             }
         }
         rebuild()
@@ -536,15 +593,18 @@ final class LauncherModel: ObservableObject {
         guard !available.isEmpty else { return }
         let index = available.firstIndex(where: { $0.id == selectedID }) ?? 0
         selectedID = available[min(max(index + delta, 0), available.count - 1)].id
-        manualSelection = true
+        manualSelection = true; pendingConfirmID = nil
     }
     func select(_ id: String) {
         guard results.contains(where: { $0.id == id && $0.isCurrent }) else { selectedID = nil; return }
+        if selectedID != id { pendingConfirmID = nil }
         selectedID = id; manualSelection = true
     }
     var selected: LauncherResult? { results.first { $0.id == selectedID && $0.isCurrent } }
     func execute() {
         guard let result = selected else { message = "Choose an action first."; return }
+        if result.needsConfirmation && pendingConfirmID != result.id { pendingConfirmID = result.id; return }
+        pendingConfirmID = nil
         // Freeze the visible action before stopping speech or accepting an async response.
         revision = UUID(); work?.cancel(); aiWork?.cancel(); speech.stop(); files.stop()
         do {
@@ -566,10 +626,13 @@ final class LauncherModel: ObservableObject {
                 guard NSWorkspace.shared.open(url) else { throw LauncherError("The URL could not be opened.") }
             case .copy(let text): copy(text)
             case .clipboard(let item): clipboard.restore(item)
+            case .command(let command): run(command)
+            case .custom(let command): run(command)
+            case .stopProcess(let listener): try CommandRunner.stop(listener)
             }
             if result.learnsFromUse { preferences.record(result.id, query: query) }
             switch result.action {
-            case .copy, .clipboard: onClose?(true)
+            case .copy, .clipboard, .command, .custom, .stopProcess: onClose?(true)
             case .window(_, let pid):
                 onClose?(pid == nil)
                 if let pid { NSRunningApplication(processIdentifier: pid)?.activate(options: []) }
@@ -577,7 +640,7 @@ final class LauncherModel: ObservableObject {
             }
         } catch { message = error.localizedDescription }
     }
-    private func showFailure(_ text: String) {
+    func showFailure(_ text: String) {
         if let onFailure { onFailure(text) } else { message = text }
     }
     func revealSelected() {
@@ -585,7 +648,7 @@ final class LauncherModel: ObservableObject {
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]); onClose?(false)
     }
     func copyPath() { if let path = selected?.path { copy(path); message = "Path copied" } }
-    private func copy(_ text: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
+    func copy(_ text: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
 }
 extension LauncherResult {
     func adding(_ boost: Double) -> LauncherResult {

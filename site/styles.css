@@ -1087,6 +1087,74 @@ kbd {
   color: var(--signal-text);
 }
 
+/* What's new */
+
+.news {
+  background: var(--deck-sunk);
+}
+
+.news-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  align-items: start;
+  gap: clamp(32px, 6vw, 88px);
+}
+
+.news-lead {
+  color: var(--graphite);
+}
+
+.releases {
+  display: grid;
+  gap: var(--space-md);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.release {
+  padding: 20px 24px;
+  border-radius: 20px;
+  background: var(--deck-raised);
+  box-shadow:
+    0 0 0 1px rgb(19 21 24 / 0.08),
+    0 1px 2px rgb(19 21 24 / 0.06);
+}
+
+.release-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.release-tag {
+  padding: 3px 10px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, var(--key-face), var(--key));
+  box-shadow: var(--key-up);
+  color: var(--key-legend);
+  font: 600 0.875rem/1.4 var(--font-mono);
+}
+
+.release time {
+  color: var(--graphite);
+  font-size: 0.875rem;
+}
+
+.release ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 1.1em;
+  color: var(--graphite);
+  font-size: 0.9375rem;
+}
+
+.release strong {
+  color: var(--ink);
+}
+
 /* Questions */
 
 .faq-grid {
@@ -1225,6 +1293,7 @@ kbd {
 
   .type-grid,
   .windows-grid,
+  .news-grid,
   .faq-grid {
     grid-template-columns: minmax(0, 1fr);
   }

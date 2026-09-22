@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Shared frame for the small add/edit sheets: a grouped form and a
 /// Cancel/confirm button row.
-private struct SettingsSheet<Content: View>: View {
+struct SettingsSheet<Content: View>: View {
     let confirmTitle: String
     let canConfirm: Bool
     let confirm: () -> Void

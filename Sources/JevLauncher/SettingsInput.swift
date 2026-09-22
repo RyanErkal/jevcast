@@ -49,7 +49,7 @@ struct InputSettings: View {
                     get: { keys.hasKey && preferences.jevEnabled }, set: { preferences.jevEnabled = $0 }
                 )).disabled(!keys.hasKey)
                 Text(keys.hasKey
-                     ? "Local results come first. Jev gets the request text and candidate names, never file paths or audio."
+                     ? "Jev reads each request after a short pause, typed or spoken. It gets the text and candidate names, never file paths, command text, or audio."
                      : "Add a key to turn this on.")
                     .font(.caption).foregroundStyle(.secondary)
             }

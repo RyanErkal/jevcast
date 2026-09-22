@@ -2,6 +2,22 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.1.0] - 2026-09-23
+
+### Added
+
+- Port commands. Type `port 3000`, `kill 5173`, or `:8080` to see which process listens on that local TCP port, then press Return twice to stop it. `ports` lists every listener.
+- Built-in commands: Sleep Display, Sleep Mac, Toggle Dark Mode, Show and Hide Hidden Files, Restart Finder, Restart Dock, Empty Trash, Eject All Disks, Mute and Unmute Sound, Screenshot Area to Clipboard, Copy Local IP Address, and Keep Mac Awake for 1 Hour. They run fixed programs with fixed arguments and no shell.
+- Your own commands in Settings › Search › Your commands. Type a command's name to run it with `zsh -lc` from your home folder.
+- Disruptive actions, such as Empty Trash and stopping a process, need a second Return. The strip says what will happen.
+
+### Changed
+
+- Jev now reads every request after a short pause, typed or spoken, not only long phrases. Sums, typed URLs, keyword searches, and port lookups skip it because they already have one answer. A whole-name match you typed stays first.
+- Jev can choose built-in commands, your own commands by name, and the port command. It never sees or writes command text.
+- Jev requests are smaller: at most 120 candidates, with favourite, recent, and running apps first.
+- While voice input listens, the MacBook's built-in speakers are muted, so their sound is not transcribed. They come back when listening stops. Headphones and other outputs are not changed.
+
 ## [1.0.0] - 2026-09-22
 
 First public source release. Build on a Mac with Xcode 26 or later. No signed binary is included.

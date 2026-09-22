@@ -387,6 +387,87 @@ final class LauncherFlowTests: XCTestCase {
             XCTAssertTrue(model.results.contains { $0.id == "window:left-third" })
         }
     }
+    @MainActor func testJevRunsOnShortSingleWordQueries() async throws {
+        let jev = HeldJev()
+        let (model, _, defaults, suite) = makeModel(jev: jev)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        model.begin(); defer { model.end() }
+        let asked = expectation(description: "Jev asked")
+        jev.onChoose = { asked.fulfill() }
+        model.updateQuery("brow", typed: true)
+        await fulfillment(of: [asked], timeout: 2)
+        jev.reply(nil)
+    }
+    @MainActor func testJevSkipsDefiniteAnswersAndPorts() async throws {
+        let jev = HeldJev()
+        let files = InstantFileSearch()
+        let (model, _, defaults, suite) = makeModel(jev: jev, files: files)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        model.begin(); defer { model.end() }
+        model.updateQuery("12 * (8 + 2)", typed: true)
+        try await Task.sleep(nanoseconds: 450_000_000)
+        let searchesBefore = files.searches
+        model.updateQuery("port 3000", typed: true)
+        try await Task.sleep(nanoseconds: 450_000_000)
+        XCTAssertTrue(jev.candidates.isEmpty, "Sums and port lookups do not call Jev.")
+        XCTAssertEqual(files.searches, searchesBefore, "Port lookups skip Spotlight.")
+    }
+    @MainActor func testJevCannotDisplaceAnExactMatch() async throws {
+        let jev = HeldJev()
+        let (model, _, defaults, suite) = makeModel(jev: jev)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        model.begin(); defer { model.end() }
+        let asked = expectation(description: "Jev asked")
+        jev.onChoose = { asked.fulfill() }
+        model.updateQuery("left half", typed: true)
+        await fulfillment(of: [asked], timeout: 2)
+        let id = try XCTUnwrap(jev.candidates.first { $0.title == WindowAction.maximize.title }?.id)
+        jev.reply(id)
+        try await waitUntil { model.aiStatus == "Kept exact match" }
+        XCTAssertEqual(model.selected?.id, "window:left-half")
+    }
+    @MainActor func testCustomCommandsReachJevByNameOnly() async throws {
+        let jev = HeldJev()
+        let (model, preferences, defaults, suite) = makeModel(jev: jev)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        preferences.customCommands = [CustomCommand(name: "Deploy site", command: "cd ~/secret-project && ./deploy.sh")]
+        model.begin(); defer { model.end() }
+        let asked = expectation(description: "Jev asked")
+        jev.onChoose = { asked.fulfill() }
+        model.updateQuery("ship the website", typed: true)
+        await fulfillment(of: [asked], timeout: 2)
+        let candidates = jev.candidates
+        let id = try XCTUnwrap(candidates.first { $0.title == "Deploy site" }?.id)
+        XCTAssertFalse(candidates.contains { ($0.title + $0.detail).contains("secret") })
+        XCTAssertTrue(candidates.contains { $0.title == "Stop the process on a port" })
+        XCTAssertTrue(candidates.contains { $0.title == "Empty Trash" })
+        XCTAssertLessThanOrEqual(candidates.count, LauncherModel.jevCandidateLimit)
+        jev.reply(id)
+        try await waitUntil { model.selected?.title == "Deploy site" }
+    }
+    @MainActor func testDisruptiveCommandsNeedASecondReturn() {
+        withModel { model in
+            model.updateQuery("empty trash", typed: true)
+            XCTAssertEqual(model.selected?.id, "command:empty-trash")
+            XCTAssertEqual(model.primaryActionTitle, "Run Command")
+            model.execute()
+            XCTAssertEqual(model.pendingConfirmID, "command:empty-trash")
+            XCTAssertEqual(model.primaryActionTitle, "Confirm")
+            XCTAssertTrue(model.notice?.text.contains("Press Return again") == true)
+            model.moveSelection(1)
+            XCTAssertNil(model.pendingConfirmID, "Moving the selection cancels the confirmation.")
+            model.updateQuery("empty trash", typed: true)
+            XCTAssertNil(model.pendingConfirmID)
+        }
+    }
+    @MainActor func testBuiltInCommandsMatchByAlias() {
+        withModel { model in
+            model.updateQuery("caffeinate", typed: true)
+            XCTAssertEqual(model.selected?.id, "command:keep-awake")
+            model.updateQuery("dark mode", typed: true)
+            XCTAssertEqual(model.selected?.id, "command:dark-mode")
+        }
+    }
 }
 
 @MainActor private func waitUntil(timeout: TimeInterval = 2, _ condition: () -> Bool) async throws {

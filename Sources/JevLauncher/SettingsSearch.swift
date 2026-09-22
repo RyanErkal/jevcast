@@ -68,6 +68,7 @@ struct SearchSettings: View {
                 Text("Type a keyword and a search in the launcher, for example “gh swiftui”.")
                     .font(.caption).foregroundStyle(.secondary)
             } header: { Text("Search keywords") }
+            CustomCommandsSection(preferences: preferences)
             Section {
                 // Disclosed content is one cell in a grouped Form, so stack and divide the rows here.
                 DisclosureGroup("Advanced") {

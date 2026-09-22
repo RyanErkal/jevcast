@@ -50,3 +50,7 @@ Unit tests cannot prove these. Do them on a Mac with a real keyboard, and record
 - [ ] Voice input transcribes speech and stops when you type.
 - [ ] With a TypeSafe key, a loose request such as "make this window bigger" selects a window action.
 - [ ] **Check for Updates…** reports the right result.
+- [ ] `port <n>` lists a real local server, and two Returns stop it.
+- [ ] A built-in command, such as Toggle Dark Mode, runs. Empty Trash asks for a second Return.
+- [ ] A command added in Settings › Search runs from the launcher.
+- [ ] With voice on and sound playing through the built-in speakers, the speakers mute while listening and come back after. Headphones are not muted.

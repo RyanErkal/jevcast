@@ -48,6 +48,9 @@ Press **Option–Space** and type. If another app already uses that shortcut, ch
 | `gh swiftui`, `yt piano`, `maps cafes`, `wiki moon`        | Searches a site. Add your own keywords in Settings › Search.             |
 | `clip`                                                     | Shows the last 50 text items you copied. Return copies one again.        |
 | `wi-fi settings`                                           | Opens that System Settings pane.                                         |
+| `port 3000`, `kill 5173`, `ports`                          | Lists what listens on a local port. Return twice stops it.               |
+| `dark mode`, `caffeinate`, `empty trash`, `my ip`          | Runs a built-in command. Disruptive ones ask for a second Return.        |
+| The name of your own command                               | Runs a command you added in Settings › Search.                           |
 
 **Move a window** by typing a layout:
 
@@ -61,7 +64,7 @@ Press **Option–Space** and type. If another app already uses that shortcut, ch
 
 Jevcast finds apps, files, and actions locally. To match a loose request to one of those actions, add your own [TypeSafe AI](https://typesafe.ai) API key in Settings › Input and turn on **Use Jev for natural-language matching**. The key is kept in your macOS Keychain. Local results never wait for Jev.
 
-Jev receives the text you typed and a short list of candidate names, including app, action, site, file, and folder names. It can only choose from that list or return no match. It cannot run commands. Jevcast does not add file or folder paths, clipboard text, or audio to the request. Any path you type yourself is part of the text sent. See [Privacy](#privacy) for the full network details.
+Jev reads each request after a short pause, typed or spoken. It receives that text and a short list of candidate names: apps, window actions, built-in commands, your own commands by name, sites, files, and folders. It can only choose from that list or return no match. It never writes a command. A whole-name match you typed stays first. Jevcast does not add file or folder paths, clipboard text, or audio to the request. Any path you type yourself is part of the text sent. See [Privacy](#privacy) for the full network details.
 
 ## Use
 
@@ -106,7 +109,11 @@ Press a half again to cycle its size: 1/2, 2/3, then 1/3. The middle third cycle
 
 ### Voice
 
-Turn on **Listen when the launcher opens** in Settings › Input and allow Microphone and Speech Recognition. The launcher then listens each time it opens. Typing stops listening. Recognition runs on your Mac only, and audio is not saved. If on-device recognition is not available for your language, the app tells you and typing still works.
+Turn on **Listen when the launcher opens** in Settings › Input and allow Microphone and Speech Recognition. The launcher then listens each time it opens. Typing stops listening. While it listens, the MacBook's built-in speakers are muted so their sound is not transcribed, and they come back when listening stops. Headphones are not muted. Recognition runs on your Mac only, and audio is not saved. If on-device recognition is not available for your language, the app tells you and typing still works.
+
+### Commands
+
+Type `port 3000` to see what listens on that port, then press Return twice to stop it. `ports` lists every listener. Built-in commands, such as **Toggle Dark Mode**, **Keep Mac Awake for 1 Hour**, and **Copy Local IP Address**, run fixed programs with fixed arguments and no shell. Add your own in Settings › Search › Your commands. Those run with `zsh -lc` from your home folder. Jev can choose any command by its name, but it never sees or writes command text.
 
 ## Privacy
 
@@ -115,7 +122,7 @@ The app has no account, no analytics, and no crash reporting. It connects to the
 | When                                                                             | Where                                | What is sent                                                                                                                                                                                                          |
 | -------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Once a day, if **Check for updates automatically** is on (default: on)           | `api.github.com`                     | A request for the newest release, with the app version. GitHub sees your IP address, as with any web request. Nothing is downloaded.                                                                                  |
-| When you type a loose request, if natural-language matching is on (default: off) | `api.typesafe.ai`, with your own key | The text you typed and a short list of candidate names: apps, window actions, search sites, files, and folders. Jevcast does not add file or folder paths, clipboard text, or audio. A path you type yourself is included in the query. Jev can only choose one of the supplied candidates. It cannot run commands. |
+| After each pause in typing or speech, if natural-language matching is on (default: off) | `api.typesafe.ai`, with your own key | The text you typed or said and a short list of candidate names: apps, window actions, commands, search sites, files, and folders. Jevcast does not add file or folder paths, command text, clipboard text, or audio. A path you type yourself is included in the query. Jev can only choose one of the supplied candidates. |
 | When you open a web search or a URL                                              | Your default browser                 | Whatever you chose to open.                                                                                                                                                                                           |
 
 Everything else stays on your Mac. Clipboard history is kept in memory only, holds plain text only, and skips items that password managers mark as concealed. The app writes one file of its own: a cache of your app list in `~/Library/Caches/JevLauncher`.

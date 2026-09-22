@@ -17,6 +17,8 @@ final class Preferences: ObservableObject {
     @Published var favourites: [String] { didSet { defaults.set(favourites, forKey: "favourites") } }
     @Published var aliases: [String: String] { didSet { defaults.set(aliases, forKey: "aliases") } }
     @Published var quicklinks: [Quicklink] { didSet { defaults.set(try? JSONEncoder().encode(quicklinks), forKey: "quicklinks") } }
+    /// Commands the user writes. Only their names go to Jev.
+    @Published var customCommands: [CustomCommand] { didSet { defaults.set(try? JSONEncoder().encode(customCommands), forKey: "customCommands") } }
     @Published var clipboardHistory: Bool { didSet { defaults.set(clipboardHistory, forKey: "clipboardHistory") } }
     @Published var checksForUpdates: Bool { didSet { defaults.set(checksForUpdates, forKey: "checksForUpdates") } }
     /// Set once the welcome window has been shown, so it opens by itself only on a new install.
@@ -51,6 +53,7 @@ final class Preferences: ObservableObject {
         favourites = d.stringArray(forKey: "favourites") ?? []
         aliases = d.dictionary(forKey: "aliases") as? [String: String] ?? [:]
         quicklinks = d.data(forKey: "quicklinks").flatMap { try? JSONDecoder().decode([Quicklink].self, from: $0) } ?? Quicklink.defaults
+        customCommands = d.data(forKey: "customCommands").flatMap { try? JSONDecoder().decode([CustomCommand].self, from: $0) } ?? []
         clipboardHistory = d.object(forKey: "clipboardHistory") as? Bool ?? true
         recentIDs = d.stringArray(forKey: "recentIDs") ?? []
         if let data = d.data(forKey: "frecency"), let stored = try? JSONDecoder().decode(Frecency.self, from: data) {

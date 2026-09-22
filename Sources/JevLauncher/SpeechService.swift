@@ -19,6 +19,8 @@ final class SpeechService: ObservableObject {
 
     private let recognizer = SFSpeechRecognizer(locale: Locale.current)
     private let captureWorker = CaptureWorker()
+    /// Mutes the built-in speakers while the microphone is open.
+    private let speakers = SpeakerGuard()
     private let logger = Logger(subsystem: AppIdentity.bundleID, category: "SpeechService")
     private var sessionToken: UInt64 = 0
     private var startRequestedAt: UInt64?
@@ -80,6 +82,7 @@ final class SpeechService: ObservableObject {
         let token = sessionToken
         isStarting = true
         errorMessage = nil
+        speakers.engage()
         startRequestedAt = DispatchTime.now().uptimeNanoseconds
         status = "Starting speech input…"
 
@@ -100,6 +103,7 @@ final class SpeechService: ObservableObject {
         status = "Speech input stopped."
         errorMessage = nil
         captureWorker.stop()
+        speakers.release()
     }
 
     private func receive(_ event: CaptureWorker.Event, token: UInt64) {
@@ -148,6 +152,7 @@ final class SpeechService: ObservableObject {
         self.status = status
         errorMessage = failed ? status : nil
         captureWorker.stop()
+        speakers.release()
     }
 }
 

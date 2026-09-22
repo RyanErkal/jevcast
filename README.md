@@ -15,7 +15,8 @@ The initial shortcut is **Control–Shift–Space**. Change it in Settings. Exis
 ## Core use
 
 - Type an app name or alias, a filename, a URL, a calculation, or a window action.
-- Return runs the selected result. Arrow keys select another result. Escape closes the panel.
+- Opening activates Jev and focuses search. Return runs the selected result. Arrow keys select another result. Escape closes the entire launcher, including its actions menu and preview.
+- An outside click closes Jev and is consumed. Background clicks and scrolling are blocked while it is open. Switching apps dismisses it. Cancellation restores the previous app.
 - Command–K opens actions for the selected result. Command–Y toggles Quick Look. Command–R reveals a file/app in Finder. Command–Shift–C copies its path.
 - Right-click an app to add a favourite. Set app aliases and additional app/search folders in Settings.
 - App names and built-in commands rank locally. Files use Spotlight for filename, kind, folder, and modified-date search. Exact local commands and explicit file searches do not call Jev.

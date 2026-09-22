@@ -19,7 +19,7 @@ final class FilePreview {
                                  styleMask: [.titled, .closable, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.title = URL(fileURLWithPath: path).lastPathComponent
         panel.isReleasedWhenClosed = false
-        panel.level = .floating
+        panel.level = parent.level
         guard let preview = QLPreviewView(frame: panel.contentView!.bounds, style: .normal) else { return }
         preview.autoresizingMask = [.width, .height]
         preview.autostarts = false
@@ -49,12 +49,19 @@ final class FilePreview {
 @MainActor
 final class ResultActions {
     private var callbacks: [() -> Void] = []
-    func show(model: LauncherModel, in view: NSView, preview: @escaping () -> Void) {
+    private var activeMenu: NSMenu?
+    private var performedAction = false
+    private var dismissedByOwner = false
+    func dismiss() {
+        dismissedByOwner = true
+        activeMenu?.cancelTrackingWithoutAnimation()
+    }
+    func show(model: LauncherModel, in view: NSView, preview: @escaping () -> Void, dismissed: () -> Void) {
         guard let result = model.selected else { return }
         // Pause recognition so the menu always acts on the row the user opened.
         model.pauseListening()
         let menu = NSMenu()
-        callbacks = []
+        callbacks = []; performedAction = false; dismissedByOwner = false; activeMenu = menu
         func add(_ title: String, key: String = "", action: @escaping () -> Void) {
             let item = NSMenuItem(title: title, action: #selector(invoke(_:)), keyEquivalent: key)
             item.target = self; item.tag = callbacks.count
@@ -73,10 +80,12 @@ final class ResultActions {
             }
         }
         menu.popUp(positioning: nil, at: NSPoint(x: view.bounds.width - 195, y: 45), in: view)
-        callbacks = []
+        activeMenu = nil; callbacks = []
+        if !performedAction && !dismissedByOwner { dismissed() }
     }
     @objc private func invoke(_ item: NSMenuItem) {
         guard callbacks.indices.contains(item.tag) else { return }
+        performedAction = true
         callbacks[item.tag]()
     }
 }

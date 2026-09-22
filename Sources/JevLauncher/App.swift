@@ -34,31 +34,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var menuItem: NSStatusItem?
     private var keyMonitor: Any?
     private var wasVisible = false
+    private let backdrop = LauncherBackdrop()
+    private var previousApp: NSRunningApplication?
     private let preview = FilePreview()
     private let resultActions = ResultActions()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let content = LauncherView(model: model, speech: model.speech, catalogue: catalogue, settings: { [weak self] in self?.showSettings() }, actions: { [weak self] in self?.showActions() })
-        panel = LauncherPanel(contentRect: NSRect(x: 0, y: 0, width: 680, height: 548), styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView], backing: .buffered, defer: false)
+        panel = LauncherPanel(contentRect: NSRect(x: 0, y: 0, width: 680, height: 548), styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
         panel.title = "Jev Launcher"
         panel.titleVisibility = .hidden; panel.titlebarAppearsTransparent = true
         panel.standardWindowButton(.closeButton)?.isHidden = true
         panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
         panel.standardWindowButton(.zoomButton)?.isHidden = true
         panel.isMovableByWindowBackground = true
-        panel.level = .floating; panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.level = .popUpMenu; panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.hidesOnDeactivate = false; panel.isReleasedWhenClosed = false
         panel.contentView = NSHostingView(rootView: content)
         panel.delegate = self
-        model.onClose = { [weak self] in self?.hide() }
+        model.onClose = { [weak self] restore in self?.hide(restoreFocus: restore) }
         configureMenu()
         configureHotkeys()
         catalogue.refresh(extra: preferences.appFolders)
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, self.panel.isVisible, event.window === self.panel else { return event }
+            guard let self, self.wasVisible else { return event }
             switch event.keyCode {
             case 53:
-                if self.preview.isVisible { self.preview.close() } else { self.hide() }
+                self.hide()
                 return nil
             case 36, 76: self.model.execute(); return nil
             case 125: self.model.moveSelection(1); self.preview.update(path: self.model.selected?.path); return nil
@@ -114,6 +116,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard !panel.isVisible else { return }
         let trace = PerformanceTrace.start("PanelOpen")
         defer { PerformanceTrace.end("PanelOpen", trace) }
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        previousApp = frontmost?.processIdentifier == getpid() ? nil : frontmost
         model.begin()
         let pointer = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { $0.frame.contains(pointer) } ?? NSScreen.main
@@ -121,24 +125,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             panel.setFrameOrigin(NSPoint(x: frame.midX - panel.frame.width / 2, y: frame.maxY - panel.frame.height - max(40, frame.height * 0.12)))
         }
         wasVisible = true
+        backdrop.show { [weak self] in self?.hide() }
+        NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
+        model.focusSearch?()
+        traceInteraction("opened")
         panel.displayIfNeeded()
         NotificationCenter.default.post(name: .launcherDidOpen, object: nil)
     }
     private func showActions() {
         guard let view = panel.contentView else { return }
-        resultActions.show(model: model, in: view, preview: { [weak self] in self?.togglePreview() })
+        resultActions.show(model: model, in: view, preview: { [weak self] in self?.togglePreview() }, dismissed: { [weak self] in self?.hide() })
     }
     private func togglePreview() {
         model.pauseListening()
         preview.toggle(path: model.selected?.path, beside: panel)
     }
-    private func hide() { preview.close(); model.end(); wasVisible = false; panel.orderOut(nil) }
-    func windowDidResignKey(_ notification: Notification) {
-        if notification.object as? NSWindow === panel, wasVisible { hide() }
+    private func hide(restoreFocus: Bool = true) {
+        guard wasVisible else { return }
+        wasVisible = false
+        resultActions.dismiss()
+        preview.close(); model.end(); panel.orderOut(nil); backdrop.close()
+        let previous = previousApp
+        previousApp = nil
+        traceInteraction("closed")
+        if restoreFocus, NSApp.isActive, let previous, !previous.isTerminated {
+            previous.activate(options: [])
+        }
+    }
+    private func traceInteraction(_ event: String) {
+        guard CommandLine.arguments.contains("--trace-interaction") else { return }
+        let editing = panel.firstResponder is NSTextView
+        print("[Jev interaction] \(event) visible=\(wasVisible) active=\(NSApp.isActive) key=\(panel.isKeyWindow) editing=\(editing)")
+        fflush(stdout)
+    }
+    func applicationDidBecomeActive(_ notification: Notification) {
+        guard wasVisible else { return }
+        panel.makeKeyAndOrderFront(nil)
+        model.focusSearch?()
+    }
+    func windowDidBecomeKey(_ notification: Notification) {
+        if notification.object as? NSWindow === panel, wasVisible { model.focusSearch?(); traceInteraction("focused") }
+    }
+    func applicationDidResignActive(_ notification: Notification) {
+        hide(restoreFocus: false)
+    }
+    func applicationDidChangeScreenParameters(_ notification: Notification) {
+        // Never leave a stale click catcher after a display is disconnected.
+        hide()
     }
     @objc private func showSettings() {
-        hide()
+        hide(restoreFocus: false)
         if settingsWindow == nil {
             let content = SettingsView(preferences: preferences, model: model, speech: model.speech, catalogue: catalogue, changed: { [weak self] in self?.configureHotkeys() })
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 630, height: 650), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
@@ -151,6 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { show(); return true }
     func applicationWillTerminate(_ notification: Notification) {
+        backdrop.close(); resultActions.dismiss(); preview.close()
         model.end(); model.windows.stopEdgeSnapping(); hotkeys.clear()
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
     }

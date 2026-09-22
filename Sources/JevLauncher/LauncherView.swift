@@ -7,15 +7,11 @@ struct LauncherView: View {
     @ObservedObject var catalogue: AppCatalogue
     let settings: () -> Void
     let actions: () -> Void
-    @FocusState private var focused: Bool
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 14) {
                 Image(systemName: "command").font(.system(size: 24, weight: .medium)).foregroundStyle(.secondary)
-                TextField("Speak or type an action…", text: Binding(get: { model.query }, set: { model.updateQuery($0, typed: true) }))
-                    .textFieldStyle(.plain).font(.system(size: 25, weight: .regular))
-                    .focused($focused)
-                    .accessibilityIdentifier("launcher-query")
+                LauncherSearchField(model: model).frame(height: 34)
                 Button {
                     model.toggleListening()
                 } label: {
@@ -78,8 +74,6 @@ struct LauncherView: View {
             }.font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 22).padding(.vertical, 13)
         }
         .background(.regularMaterial)
-        .onAppear { focused = true }
-        .onReceive(NotificationCenter.default.publisher(for: .launcherDidOpen)) { _ in focused = true }
     }
 }
 

@@ -42,7 +42,8 @@ final class LauncherModel: ObservableObject {
     let catalogue: AppCatalogue
     let speech = SpeechService()
     let windows = WindowManager()
-    var onClose: (() -> Void)?
+    var onClose: ((Bool) -> Void)?
+    var focusSearch: (() -> Void)?
     private let files: FileSearching
     private let jev = JevService()
     private var fileResults: [FileEntry] = []
@@ -282,7 +283,13 @@ final class LauncherModel: ObservableObject {
             case .copy(let text): copy(text)
             }
             preferences.record(result.id)
-            onClose?()
+            switch result.action {
+            case .copy: onClose?(true)
+            case .window(_, let pid):
+                onClose?(pid == nil)
+                if let pid { NSRunningApplication(processIdentifier: pid)?.activate(options: []) }
+            default: onClose?(false)
+            }
         } catch { message = error.localizedDescription }
     }
     private func showFailure(_ text: String) {
@@ -290,7 +297,7 @@ final class LauncherModel: ObservableObject {
     }
     func revealSelected() {
         guard let path = selected?.path else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]); onClose?()
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]); onClose?(false)
     }
     func copyPath() { if let path = selected?.path { copy(path); message = "Path copied" } }
     private func copy(_ text: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }

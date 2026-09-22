@@ -7,7 +7,7 @@ final class SmartFeatureTests: XCTestCase {
         calendar.timeZone = TimeZone(identifier: "Europe/London")!
         let now = ISO8601DateFormatter().date(from: "2026-09-23T12:00:00Z")!
         func day(_ offset: Int, _ input: Int) -> (String, JevDayUsage) {
-            var usage = JevDayUsage(); usage.requests = 1; usage.inputTokens = input; usage.outputTokens = 20
+            var usage = JevDayUsage(); usage.requests = 1; usage.inputTokens = input; usage.outputTokens = 20; usage.cost = Double(input) * JevPricing.dollarsPerInputToken
             return (JevUsageLedger.key(for: calendar.date(byAdding: .day, value: -offset, to: now)!, calendar: calendar), usage)
         }
         let ledger = Dictionary(uniqueKeysWithValues: [day(0, 1000), day(6, 2000), day(7, 4000), day(40, 8000)])
@@ -18,6 +18,9 @@ final class SmartFeatureTests: XCTestCase {
         XCTAssertEqual(all.requests, 4)
         XCTAssertEqual(all.cost, 15000 * 0.042 / 1_000_000, accuracy: 1e-12)
         XCTAssertEqual(JevPricing.format(0.00063), "$0.000630")
+        // Days saved before costs were stored are priced from their tokens.
+        let old = try! JSONDecoder().decode(JevDayUsage.self, from: Data(#"{"requests":1,"inputTokens":1000000}"#.utf8))
+        XCTAssertEqual(old.cost, 0.042, accuracy: 1e-12)
         XCTAssertEqual(JevPricing.format(1.5), "$1.50")
     }
 

@@ -15,8 +15,11 @@ final class JevUsageLog: ObservableObject {
         ledger = defaults.data(forKey: Self.key).flatMap { try? JSONDecoder().decode([String: JevDayUsage].self, from: $0) } ?? [:]
     }
 
-    func record(inputTokens: Int, outputTokens: Int, now: Date = Date()) {
-        update(now) { $0.requests += 1; $0.inputTokens += max(inputTokens, 0); $0.outputTokens += max(outputTokens, 0) }
+    /// `cost` is the amount the service reported. Without one, the list price for the input tokens is used.
+    func record(inputTokens: Int, outputTokens: Int, cost: Double? = nil, now: Date = Date()) {
+        let input = max(inputTokens, 0)
+        let dollars = cost.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil } ?? Double(input) * JevPricing.dollarsPerInputToken
+        update(now) { $0.requests += 1; $0.inputTokens += input; $0.outputTokens += max(outputTokens, 0); $0.cost += dollars }
     }
 
     /// Jev's answer moved a result to the top.

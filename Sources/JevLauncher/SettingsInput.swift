@@ -32,9 +32,12 @@ struct InputSettings: View {
             }
             Section("API key") {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Optional. Jev, a model from TypeSafe, can match loose requests such as “make this window bigger”. It uses your own key.")
+                    Text("Optional. Jev, a model from TypeSafe, can match loose requests such as “make this window bigger”. Use your own TypeSafe key, or an OpenRouter key (sk-or-…) to run Jev through OpenRouter.")
                         .foregroundStyle(.secondary)
-                    Link("Get a key at typesafe.ai", destination: AppIdentity.typeSafe)
+                    HStack(spacing: 12) {
+                        Link("Get a TypeSafe key", destination: AppIdentity.typeSafe)
+                        Link("Get an OpenRouter key", destination: URL(string: "https://openrouter.ai/keys")!)
+                    }
                 }
                 .font(.caption)
                 keyRow
@@ -61,11 +64,11 @@ struct InputSettings: View {
     @ViewBuilder private var keyRow: some View {
         switch keys.state {
         case .unknown:
-            LabeledContent("TypeSafe key") { Text("Checking Keychain…").foregroundStyle(.secondary) }
+            LabeledContent("Jev key") { Text("Checking Keychain…").foregroundStyle(.secondary) }
         case .present:
-            LabeledContent("TypeSafe key") {
+            LabeledContent("Jev key") {
                 HStack(spacing: 8) {
-                    Text("Stored in Keychain").foregroundStyle(.secondary)
+                    Text(keys.provider.map { $0.name + " key in Keychain" } ?? "Stored in Keychain").foregroundStyle(.secondary)
                     Button(testing ? "Testing…" : "Test") { Task { await test() } }.disabled(testing)
                     Button("Remove", action: remove)
                 }
@@ -73,7 +76,7 @@ struct InputSettings: View {
             }
         case .missing, .failed:
             HStack(spacing: 8) {
-                SecureField("TypeSafe key", text: $key, prompt: Text("Paste key"))
+                SecureField("Jev key", text: $key, prompt: Text("Paste a TypeSafe or OpenRouter key"))
                     .onSubmit(save)
                 Button("Save", action: save).controlSize(.small).disabled(trimmedKey.isEmpty)
             }

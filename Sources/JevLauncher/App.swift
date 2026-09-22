@@ -7,6 +7,7 @@ import LauncherCore
 struct JevLauncherApp {
     @MainActor static func main() {
         if CommandLine.arguments.contains("--diagnose") { Diagnostics.run(); return }
+        if CommandLine.arguments.contains("--store-jev-key") { Diagnostics.storeJevKey(); return }
         if let index = CommandLine.arguments.firstIndex(of: "--diagnose-jev"), CommandLine.arguments.indices.contains(index + 1) {
             Diagnostics.jev(Array(CommandLine.arguments[(index + 1)...])); return
         }

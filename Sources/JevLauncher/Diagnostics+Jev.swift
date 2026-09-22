@@ -3,7 +3,7 @@ import LauncherCore
 
 extension Diagnostics {
     /// `--diagnose-jev "request" …`: runs each request through the launcher as if typed,
-    /// with the stored TypeSafe key, and prints Jev's pick, the top row, and the tokens used.
+    /// with the stored Jev key (TypeSafe or OpenRouter), and prints Jev's pick, the top row, and the tokens used.
     /// Prints titles only, never paths. Each request that reaches Jev is billed and counted in Settings › Usage.
     static func jev(_ requests: [String]) {
         let preferences = Preferences()
@@ -41,6 +41,21 @@ extension Diagnostics {
             exit(0)
         }
         RunLoop.main.run()
+    }
+
+    /// `--store-jev-key`: reads one TypeSafe or OpenRouter key from standard input and saves it
+    /// in the Keychain, as Settings › Input does. The key never appears in the arguments or the output.
+    static func storeJevKey() {
+        guard let line = readLine(strippingNewline: true)?.trimmingCharacters(in: .whitespacesAndNewlines), !line.isEmpty else {
+            print("No key on standard input."); exit(1)
+        }
+        do {
+            try KeychainStore.save(line)
+            print("Saved a \(JevProvider(key: line).name) key in the Keychain.")
+            exit(0)
+        } catch {
+            print("Could not save the key: \(error.localizedDescription)"); exit(1)
+        }
     }
 
     /// Never prints the key itself.

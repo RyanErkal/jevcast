@@ -117,6 +117,11 @@ enum KeychainStore {
 @MainActor
 final class JevKeyCache: ObservableObject {
     enum State: Equatable { case unknown, missing, present(String), failed(String) }
+    /// Where the stored key sends Jev requests, for Settings. Never exposes the key.
+    var provider: JevProvider? {
+        if case .present(let key) = state { return JevProvider(key: key) }
+        return nil
+    }
     static let shared = JevKeyCache()
     @Published private(set) var state: State = .unknown
     private let reader: @Sendable () throws -> String?

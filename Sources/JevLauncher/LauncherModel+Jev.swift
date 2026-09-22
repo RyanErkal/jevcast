@@ -58,7 +58,7 @@ extension LauncherModel {
         case .present(let value): key = value
         case .failed(let message): if revision == current && visible { aiStatus = message; aiError = message }; return
         case .missing, .unknown:
-            if revision == current && visible { aiStatus = "Add a TypeSafe key in Settings"; aiError = "Add a TypeSafe key in Settings › Input." }
+            if revision == current && visible { aiStatus = "Add a Jev key in Settings"; aiError = "Add a TypeSafe or OpenRouter key in Settings › Input." }
             return
         }
         guard !Task.isCancelled, visible, revision == current else { return }
@@ -114,7 +114,9 @@ extension LauncherModel {
         for route in Self.routes { add(route.id, route.title, route.detail) }
         for command in preferences.customCommands { add("custom:" + command.id, command.name, "Run the user's own command") }
         for workflow in preferences.workflows { add("workflow:" + workflow.id, workflow.name, "Run the user's saved workflow") }
-        for link in preferences.quicklinks { add("quicklink:" + link.id, "Search " + link.name, "Search the website " + link.name) }
+        for link in preferences.quicklinks {
+            add("quicklink:" + link.id, "Search " + link.name, "Search the website \(link.name) for the topic in the request, such as issues, videos, places, or articles")
+        }
         // 4. The rest of the pool, likely apps first.
         for entry in pool { add(entry.id, entry.title, entry.detail) }
         var ids: [String: String] = [:]
@@ -148,7 +150,9 @@ extension LauncherModel {
         case .app(let app): return (row.title, app.launchURL != nil ? "Open this System Settings pane" : "Open installed application")
         case .file(let file): return (file.name, file.isDirectory ? "Folder" : "File")
         case .window(let action, _): return (action.title, "Arrange the active window")
-        case .url where row.id.hasPrefix("quicklink:"): return (row.title, "Search a website")
+        case .url where row.id.hasPrefix("quicklink:"):
+            let site = row.title.replacingOccurrences(of: "Search ", with: "").components(separatedBy: " for ").first ?? row.title
+            return ("Search " + site, "Search the website \(site) for the topic in the request, such as issues, videos, places, or articles")
         case .command(let command): return (command.title, command.detail)
         case .custom(let command, nil): return (command.name, "Run the user's own command")
         case .appThenWindow(let app, let action): return ("Open \(app.name) in \(action.title)", "Open an app and arrange its window")

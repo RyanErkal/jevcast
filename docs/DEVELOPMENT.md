@@ -19,7 +19,7 @@ The package has two targets.
   - `LauncherModel+Extras.swift`: workflows, Shortcuts, snippets, timers, menu items, emoji, calculator history, and open-then-arrange.
   - `JevUsageLog.swift`, `SettingsUsage.swift`: token and cost counts for Settings › Usage.
   - `MenuScanner.swift`, `Notifier.swift`, `UserItems.swift`: front-app menus, local notifications and timers, and the user's commands, workflows, and snippets.
-  - `JevService.swift`: TypeSafe Jev selection. Validates every reply before use.
+  - `JevService.swift`: Jev selection through TypeSafe or OpenRouter, chosen by the key. Validates every reply before use.
   - `UpdateService.swift`, `UpdateChecker.swift`: the daily GitHub release check.
   - `Settings*.swift`, `WelcomeWindow.swift`, `StatusMenu.swift`, `AppMenus.swift`: windows and menus.
   - `AppIdentity.swift`: name, bundle ID, and project links.
@@ -37,6 +37,7 @@ Run the executable inside the app bundle, for example `"dist/Jevcast.app/Content
 | `--diagnose`                               | Prints catalogue size, first results for sample queries, and search timings. Opens nothing.            |
 | `--diagnose-files 'kind:pdf in:downloads'` | Prints file-search results from your folders for five seconds.                                         |
 | `--diagnose-jev 'request' …`               | Runs each request through the launcher with the stored TypeSafe key and prints the pick, the top row, and the tokens used. Billed, and counted in Settings › Usage. |
+| `echo KEY \| … --store-jev-key`            | Saves a TypeSafe or OpenRouter key in the Keychain from standard input, as Settings › Input does. The key is never an argument or printed. |
 | `--open`                                   | Shows the launcher at launch.                                                                          |
 | `--welcome`                                | Shows the welcome window at launch.                                                                    |
 | `--trace-latency`                          | Prints panel and result timings. No query text.                                                        |

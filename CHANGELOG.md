@@ -2,6 +2,19 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.2.1] - 2026-09-23
+
+### Added
+
+- Jev through OpenRouter. Paste an OpenRouter key (`sk-or-…`) in Settings › Input and Jevcast sends Jev requests to OpenRouter's proxy of the TypeSafe API, with the model `typesafe/jev-1.13`. A TypeSafe key still goes to TypeSafe directly.
+- Settings › Usage shows the cost OpenRouter reports for each request. TypeSafe requests are priced from their tokens.
+- `--store-jev-key` saves a key from standard input.
+
+### Fixed
+
+- A reply from a dated Jev build, such as `typesafe/jev-1.13-20260917`, was rejected.
+- An account without credits (HTTP 402) now says so.
+
 ## [1.2.0] - 2026-09-23
 
 ### Added

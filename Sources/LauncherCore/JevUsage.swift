@@ -9,7 +9,21 @@ public struct JevDayUsage: Codable, Equatable, Sendable {
     public var matches = 0
     /// Requests the launcher answered from memory instead of calling Jev.
     public var saved = 0
+    /// US dollars the service reported, plus the list price for requests without a reported cost.
+    public var cost = 0.0
     public init() {}
+
+    private enum CodingKeys: String, CodingKey { case requests, inputTokens, outputTokens, matches, saved, cost }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        requests = try c.decodeIfPresent(Int.self, forKey: .requests) ?? 0
+        inputTokens = try c.decodeIfPresent(Int.self, forKey: .inputTokens) ?? 0
+        outputTokens = try c.decodeIfPresent(Int.self, forKey: .outputTokens) ?? 0
+        matches = try c.decodeIfPresent(Int.self, forKey: .matches) ?? 0
+        saved = try c.decodeIfPresent(Int.self, forKey: .saved) ?? 0
+        // Days stored before costs were kept are priced from their tokens.
+        cost = try c.decodeIfPresent(Double.self, forKey: .cost) ?? Double(inputTokens) * JevPricing.dollarsPerInputToken
+    }
 }
 
 /// Totals for a window of days, with the cost at the published Jev price.
@@ -19,8 +33,8 @@ public struct JevUsageSummary: Equatable, Sendable {
     public var outputTokens = 0
     public var matches = 0
     public var saved = 0
-    /// US dollars. Jev charges input tokens only; output tokens are free.
-    public var cost: Double { Double(inputTokens) * JevPricing.dollarsPerInputToken }
+    /// US dollars, as reported by the service or at the list price.
+    public var cost = 0.0
     public var averageInputTokens: Int { requests == 0 ? 0 : inputTokens / requests }
 }
 
@@ -60,6 +74,7 @@ public enum JevUsageLedger {
             total.outputTokens += usage.outputTokens
             total.matches += usage.matches
             total.saved += usage.saved
+            total.cost += usage.cost
         }
         return total
     }

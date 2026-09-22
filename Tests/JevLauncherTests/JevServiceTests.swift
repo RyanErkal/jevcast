@@ -216,6 +216,28 @@ final class JevServiceTests: XCTestCase {
     }
 
     /// Each service gets its own endpoint URL so parallel tests never share a handler.
+    func testProviderFollowsTheKey() {
+        XCTAssertEqual(JevProvider(key: "sk-or-v1-abc"), .openRouter)
+        XCTAssertEqual(JevProvider(key: "ts-abc"), .typeSafe)
+        XCTAssertEqual(JevProvider.openRouter.endpoint.absoluteString, "https://openrouter.ai/api/v1/systemone")
+        XCTAssertEqual(JevProvider.openRouter.model, "typesafe/jev-1.13")
+        XCTAssertTrue(JevProvider.openRouter.accepts(replyModel: "typesafe/jev-1.13-20260917"))
+        XCTAssertFalse(JevProvider.openRouter.accepts(replyModel: "typesafe/jev-2"))
+        XCTAssertFalse(JevProvider.typeSafe.accepts(replyModel: "typesafe/jev-1.13-20260917"))
+    }
+
+    func testOpenRouterKeySendsItsModelAndAcceptsDatedReply() async throws {
+        let (service, session) = makeService { request in
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: try requestBodyData(from: request)) as? [String: Any])
+            XCTAssertEqual(object["model"] as? String, "typesafe/jev-1.13")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer sk-or-v1-test")
+            return jsonResponse(model: "typesafe/jev-1.13-20260917", choice: "a", probabilities: ["a": 0.9, "no_match": 0.1], confidence: 0.9)
+        }
+        defer { session.invalidateAndCancel() }
+        let chosen = try await service.choose(query: "q", candidates: [JevCandidate(id: "a", title: "A", detail: "")], apiKey: "sk-or-v1-test")
+        XCTAssertEqual(chosen, "a")
+    }
+
     @MainActor func testUsageIsRecordedFromTheReply() async throws {
         let suite = "JevLauncherTests." + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!

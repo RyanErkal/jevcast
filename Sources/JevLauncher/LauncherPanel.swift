@@ -17,7 +17,7 @@ final class LauncherPanel: NSPanel {
     init(glass: Bool = true) {
         surface = PanelSurface(glass: glass)
         super.init(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 120), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        title = "Jev Launcher"
+        title = AppIdentity.name
         isOpaque = false; backgroundColor = .clear; hasShadow = true
         isMovableByWindowBackground = false
         level = .popUpMenu; collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]

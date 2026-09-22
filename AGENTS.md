@@ -1,4 +1,4 @@
-# Jev Launcher
+# Jevcast
 Native macOS launcher and window manager. Swift Package, SwiftUI + AppKit, macOS 14+. Open source (MIT).
 Use small focused files. No external dependencies. Keep local actions off network paths.
 Only two features use the network: the daily GitHub update check and opt-in Jev matching. Never send paths, clipboard text, or audio.

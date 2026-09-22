@@ -1,6 +1,6 @@
 #!/bin/bash
 # Builds, signs, notarizes, and packages a release in dist/:
-#   Jev Launcher.app, Jev-Launcher.dmg, Jev-Launcher.dmg.sha256, and jev-launcher.rb (Homebrew cask)
+#   Jevcast.app, Jevcast.dmg, Jevcast.dmg.sha256, and jevcast.rb (optional Homebrew cask)
 #
 # Usage:
 #   scripts/release.sh --version X.Y.Z   set the version, raise the build number, and stop
@@ -10,13 +10,13 @@
 #     --draft-release   push the tag and create a draft GitHub release with the DMG and checksum
 # Environment:
 #   SIGNING_IDENTITY  default: the first "Developer ID Application" identity in the keychain
-#   NOTARY_PROFILE    notarytool keychain profile (default: jev-launcher-notary), made once with
-#                     xcrun notarytool store-credentials jev-launcher-notary --apple-id <id> --team-id <team>
+#   NOTARY_PROFILE    notarytool keychain profile (default: jevcast-notary), made once with
+#                     xcrun notarytool store-credentials jevcast-notary --apple-id <id> --team-id <team>
 set -euo pipefail
 cd "$(dirname "$0")/.."
-APP_NAME="Jev Launcher"
-DMG="dist/Jev-Launcher.dmg"
-NOTARY_PROFILE="${NOTARY_PROFILE:-jev-launcher-notary}"
+APP_NAME="Jevcast"
+DMG="dist/Jevcast.dmg"
+NOTARY_PROFILE="${NOTARY_PROFILE:-jevcast-notary}"
 UNSIGNED=0 SKIP_TESTS=0 DRAFT=0
 step() { printf '\n==> %s\n' "$*"; }
 fail() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -111,8 +111,8 @@ if [ "$UNSIGNED" = 1 ]; then
 fi
 
 sed -e "s/^  version \".*\"/  version \"$VERSION\"/" -e "s/^  sha256 \".*\"/  sha256 \"$SHA\"/" \
-  packaging/homebrew/jev-launcher.rb > dist/jev-launcher.rb
-echo "Cask:     dist/jev-launcher.rb (copy it to Casks/ in the homebrew-tap repository after the release is public)"
+  packaging/homebrew/jevcast.rb > dist/jevcast.rb
+echo "Cask:     dist/jevcast.rb (optional; publish only after the GitHub release is public)"
 
 if [ "$DRAFT" = 1 ]; then
   step "Draft GitHub release $TAG"

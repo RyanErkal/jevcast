@@ -1,11 +1,11 @@
 #!/bin/bash
-# Builds "dist/Jev Launcher.app".
+# Builds "dist/Jevcast.app".
 #   SIGNING_IDENTITY  codesign identity. "-" (the default) signs ad hoc for a local build.
 #   ARCHS             "arm64 x86_64" (the default, universal), or one architecture for a faster local build.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 # Must match Sources/JevLauncher/AppIdentity.swift. AppIdentityTests checks this.
-APP_NAME="Jev Launcher"
+APP_NAME="Jevcast"
 BUNDLE_ID="com.ryanerkal.jevlauncher"
 EXECUTABLE="JevLauncher"
 source scripts/version.env

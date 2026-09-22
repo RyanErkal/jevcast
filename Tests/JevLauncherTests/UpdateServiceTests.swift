@@ -28,7 +28,7 @@ final class UpdateServiceTests: XCTestCase {
     func testFindsNewerReleaseWithAPlainRequest() async throws {
         let service = makeService { request in
             XCTAssertEqual(request.httpMethod, "GET")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "User-Agent"), "JevLauncher/1.0.0")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "User-Agent"), "Jevcast/1.0.0")
             XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
             XCTAssertNil(request.httpBody)
             XCTAssertNil(request.url?.query, "Nothing about the user rides in the URL.")

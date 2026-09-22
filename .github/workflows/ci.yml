@@ -29,6 +29,6 @@ jobs:
         run: scripts/build.sh
       - name: Check architectures and signature
         run: |
-          BIN="dist/Jev Launcher.app/Contents/MacOS/JevLauncher"
+          BIN="dist/Jevcast.app/Contents/MacOS/JevLauncher"
           for arch in arm64 x86_64; do lipo "$BIN" -verify_arch "$arch"; done
-          codesign --verify --strict "dist/Jev Launcher.app"
+          codesign --verify --strict "dist/Jevcast.app"

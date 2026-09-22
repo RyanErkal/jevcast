@@ -4,14 +4,14 @@ import Foundation
 /// bundle ID, and a test checks that the two agree, so a rename touches this
 /// file, that script, and user-facing strings found by searching for the name.
 enum AppIdentity {
-    static let name = "Jev Launcher"
+    static let name = "Jevcast"
     /// Also the preferences domain, the Keychain service, and the log subsystem.
     static let bundleID = "com.ryanerkal.jevlauncher"
-    static let repository = URL(string: "https://github.com/RyanErkal/jev-launcher")!
-    static let website = URL(string: "https://jev-launcher.vercel.app")!
-    static let issues = URL(string: "https://github.com/RyanErkal/jev-launcher/issues")!
-    static let releases = URL(string: "https://github.com/RyanErkal/jev-launcher/releases")!
-    static let latestReleaseAPI = URL(string: "https://api.github.com/repos/RyanErkal/jev-launcher/releases/latest")!
+    static let repository = URL(string: "https://github.com/RyanErkal/jevcast")!
+    static let website = repository
+    static let issues = URL(string: "https://github.com/RyanErkal/jevcast/issues")!
+    static let releases = URL(string: "https://github.com/RyanErkal/jevcast/releases")!
+    static let latestReleaseAPI = URL(string: "https://api.github.com/repos/RyanErkal/jevcast/releases/latest")!
     static let typeSafe = URL(string: "https://typesafe.ai")!
 
     /// The app's marketing version, or "0.0.0" when this code runs outside the

@@ -5,12 +5,12 @@ final class FirstRunTests: XCTestCase {
     func testInstallLocationWarnings() {
         let home = "/Users/test"
         func warning(_ path: String) -> String? { InstallLocation.warning(for: URL(fileURLWithPath: path), home: home) }
-        XCTAssertNil(warning("/Applications/Jev Launcher.app"))
-        XCTAssertNil(warning("/Users/test/Applications/Jev Launcher.app"))
-        XCTAssertNotNil(warning("/Users/test/Downloads/Jev Launcher.app"))
-        XCTAssertNotNil(warning("/Users/tester/Applications/Jev Launcher.app"), "Another user's Applications folder is not this one.")
-        XCTAssertTrue(warning("/Volumes/Jev Launcher/Jev Launcher.app")?.contains("temporary") == true)
-        XCTAssertTrue(warning("/private/var/folders/xy/T/AppTranslocation/1A2B/d/Jev Launcher.app")?.contains("temporary") == true)
+        XCTAssertNil(warning("/Applications/Jevcast.app"))
+        XCTAssertNil(warning("/Users/test/Applications/Jevcast.app"))
+        XCTAssertNotNil(warning("/Users/test/Downloads/Jevcast.app"))
+        XCTAssertNotNil(warning("/Users/tester/Applications/Jevcast.app"), "Another user's Applications folder is not this one.")
+        XCTAssertTrue(warning("/Volumes/Jevcast/Jevcast.app")?.contains("temporary") == true)
+        XCTAssertTrue(warning("/private/var/folders/xy/T/AppTranslocation/1A2B/d/Jevcast.app")?.contains("temporary") == true)
     }
 
     @MainActor func testNewInstallStartsWithoutMicrophoneAndShowsWelcomeUntilShown() {
@@ -19,9 +19,11 @@ final class FirstRunTests: XCTestCase {
             XCTAssertFalse(first.voiceEnabled, "A new install does not listen until the user turns voice on.")
             XCTAssertFalse(first.welcomeShown)
             XCTAssertTrue(first.checksForUpdates)
+            XCTAssertEqual(first.hotkey, .optionSpace, "The website tells new users to press Option–Space.")
             let second = Preferences(defaults: defaults)
             XCTAssertFalse(second.voiceEnabled, "The second launch keeps the first launch's defaults.")
             XCTAssertFalse(second.welcomeShown, "Only showing the window marks it shown.")
+            XCTAssertEqual(second.hotkey, .optionSpace, "The second launch keeps the first launch's shortcut.")
         }
     }
 
@@ -31,6 +33,7 @@ final class FirstRunTests: XCTestCase {
             let preferences = Preferences(defaults: defaults)
             XCTAssertTrue(preferences.voiceEnabled, "Earlier versions listened by default.")
             XCTAssertTrue(preferences.welcomeShown)
+            XCTAssertEqual(preferences.hotkey, .controlShiftSpace, "An earlier install keeps the shortcut it had.")
         }
     }
 

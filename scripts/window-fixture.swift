@@ -6,9 +6,9 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         for index in 0..<2 {
             let window = NSWindow(contentRect: NSRect(x: 180 + index * 70, y: 180 + index * 70, width: 720, height: 480), styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
-            window.title = "Jev Window Test \(index + 1)"
+            window.title = "Jevcast Window Test \(index + 1)"
             window.isReleasedWhenClosed = false
-            let label = NSTextField(labelWithString: "Jev Launcher window test\n\nThis window contains no user data.\nTry halves, quarters, thirds, maximise, and restore.")
+            let label = NSTextField(labelWithString: "Jevcast window test\n\nThis window contains no user data.\nTry halves, quarters, thirds, maximise, and restore.")
             label.font = .systemFont(ofSize: 22)
             label.alignment = .center
             label.translatesAutoresizingMaskIntoConstraints = false

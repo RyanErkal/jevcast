@@ -1,13 +1,13 @@
 # Homebrew cask for the ryanerkal/homebrew-tap repository.
 # scripts/release.sh writes the version and checksum below.
-cask "jev-launcher" do
+cask "jevcast" do
   version "1.0.0"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
 
-  url "https://github.com/RyanErkal/jev-launcher/releases/download/v#{version}/Jev-Launcher.dmg"
-  name "Jev Launcher"
+  url "https://github.com/RyanErkal/jevcast/releases/download/v#{version}/Jevcast.dmg"
+  name "Jevcast"
   desc "Keyboard launcher and window manager"
-  homepage "https://jev-launcher.vercel.app"
+  homepage "https://github.com/RyanErkal/jevcast"
 
   livecheck do
     url :url
@@ -16,7 +16,7 @@ cask "jev-launcher" do
 
   depends_on macos: ">= :sonoma"
 
-  app "Jev Launcher.app"
+  app "Jevcast.app"
 
   zap trash: [
     "~/Library/Caches/JevLauncher",

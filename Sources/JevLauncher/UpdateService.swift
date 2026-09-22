@@ -36,7 +36,7 @@ struct UpdateService: Sendable {
         request.timeoutInterval = 10
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("JevLauncher/\(current)", forHTTPHeaderField: "User-Agent")
+        request.setValue("Jevcast/\(current)", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw UpdateServiceError.invalidResponse }
         // No release is published yet.

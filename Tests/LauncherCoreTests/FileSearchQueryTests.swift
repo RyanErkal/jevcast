@@ -34,8 +34,8 @@ final class FileSearchQueryTests: XCTestCase {
         XCTAssertEqual(direct.explicitPath, "/Users/example/Work Files/report.pdf")
         XCTAssertTrue(direct.isExplicitFileSearch)
 
-        let pasted = FileSearchQuery.parse("~/Downloads/Jev Launcher QA/notes.txt")
-        XCTAssertEqual(pasted.explicitPath, "~/Downloads/Jev Launcher QA/notes.txt")
+        let pasted = FileSearchQuery.parse("~/Downloads/Jevcast QA/notes.txt")
+        XCTAssertEqual(pasted.explicitPath, "~/Downloads/Jevcast QA/notes.txt")
     }
 
     func testAppWordsAndWindowPhrasesStayNonExplicit() {

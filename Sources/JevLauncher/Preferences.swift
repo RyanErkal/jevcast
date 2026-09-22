@@ -33,7 +33,10 @@ final class Preferences: ObservableObject {
         let d = defaults
         // Any key an earlier version always wrote. Read before this init saves anything.
         let existingInstall = ["frecency", "usage", "hotkey", "recentIDs"].contains { d.object(forKey: $0) != nil }
-        hotkey = Hotkey(rawValue: d.integer(forKey: "hotkey")) ?? .controlShiftSpace
+        // New installs start on Option–Space, the shortcut the website shows. An earlier install
+        // that never chose one was on Control–Shift–Space and keeps it.
+        hotkey = (d.object(forKey: "hotkey") as? Int).flatMap(Hotkey.init(rawValue:))
+            ?? (existingInstall ? .controlShiftSpace : .optionSpace)
         // New installs start with the microphone off; the welcome window offers it. Earlier installs keep listening.
         voiceEnabled = d.object(forKey: "voiceEnabled") as? Bool ?? existingInstall
         checksForUpdates = d.object(forKey: "checksForUpdates") as? Bool ?? true
@@ -58,6 +61,7 @@ final class Preferences: ObservableObject {
         }
         d.removeObject(forKey: "usage")
         // Stored now: the next launch counts as an existing install and must not flip these defaults.
+        d.set(hotkey.rawValue, forKey: "hotkey")
         d.set(voiceEnabled, forKey: "voiceEnabled")
         d.set(welcomeShown, forKey: "welcomeShown")
     }

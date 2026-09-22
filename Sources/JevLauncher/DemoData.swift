@@ -33,7 +33,7 @@ enum DemoData {
     }
 
     static let clipboard = [
-        "https://github.com/RyanErkal/jev-launcher", "Meeting moved to Thursday at 10:00\nRoom 4B", "£1,240.00"
+        "https://github.com/RyanErkal/jevcast", "Meeting moved to Thursday at 10:00\nRoom 4B", "£1,240.00"
     ]
 }
 

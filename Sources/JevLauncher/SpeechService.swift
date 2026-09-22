@@ -1,6 +1,7 @@
 import AVFoundation
 import Combine
-import Speech
+import os.log
+@preconcurrency import Speech
 
 /// Owns the short-lived microphone stream used for speech input.
 ///
@@ -8,17 +9,17 @@ import Speech
 /// disk, and it never asks for permissions as a side effect of `start()`.
 @MainActor
 final class SpeechService: ObservableObject {
-    @Published private(set) var status: String = "Speech input is idle. Using the system microphone."
+    @Published private(set) var status: String = "Speech input is idle."
     @Published private(set) var isListening = false
+    @Published private(set) var isStarting = false
 
     var onTranscript: ((String) -> Void)?
 
-    private let audioEngine = AVAudioEngine()
     private let recognizer = SFSpeechRecognizer(locale: Locale.current)
-    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
-    private var recognitionTask: SFSpeechRecognitionTask?
+    private let captureWorker = CaptureWorker()
+    private let logger = Logger(subsystem: "com.jevlauncher", category: "SpeechService")
     private var sessionToken: UInt64 = 0
-    private var tapInstalled = false
+    private var startRequestedAt: UInt64?
 
     /// True only when both permissions were already granted by the user.
     var permissionsGranted: Bool {
@@ -42,7 +43,7 @@ final class SpeechService: ObservableObject {
         }
 
         guard microphoneGranted else {
-            status = "Microphone access is unavailable. Allow microphone access in System Settings, then try again."
+            status = "Microphone access is unavailable. Allow it in System Settings, then try again."
             return
         }
 
@@ -51,12 +52,12 @@ final class SpeechService: ObservableObject {
             return
         }
 
-        status = "Permissions granted. Speech input is ready. Using the system microphone."
+        status = "Speech input is ready."
     }
 
     /// Starts a new on-device recognition session when permissions are ready.
     func start() {
-        guard !isListening else { return }
+        guard !isListening, !isStarting else { return }
 
         guard permissionsGranted else {
             status = "Speech input is unavailable. Grant microphone and Speech Recognition access first."
@@ -69,86 +70,261 @@ final class SpeechService: ObservableObject {
         }
 
         guard recognizer.supportsOnDeviceRecognition else {
-            status = "On-device speech recognition is unavailable on this Mac. No cloud audio will be used."
+            status = "On-device speech recognition is unavailable on this Mac."
             return
         }
 
-        cancelCapture()
         sessionToken &+= 1
         let token = sessionToken
+        isStarting = true
+        startRequestedAt = DispatchTime.now().uptimeNanoseconds
+        status = "Starting speech input…"
 
-        let request = SFSpeechAudioBufferRecognitionRequest()
-        request.shouldReportPartialResults = true
-        request.requiresOnDeviceRecognition = true
-        recognitionRequest = request
-
-        recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            let transcript = result?.bestTranscription.formattedString ?? ""
-            let isFinal = result?.isFinal ?? false
-            let errorMessage = error?.localizedDescription
-
-            // Extract value types before crossing back to the main actor.
+        captureWorker.start(token: token, recognizer: recognizer) { [weak self] event in
             Task { @MainActor [weak self] in
-                guard let self, self.sessionToken == token, self.isListening else { return }
-
-                if !transcript.isEmpty {
-                    self.onTranscript?(transcript)
-                }
-
-                if let errorMessage {
-                    self.finishCapture(status: "Speech recognition unavailable: \(errorMessage)")
-                } else if isFinal {
-                    self.finishCapture(status: "Speech recognition finished.")
-                }
+                self?.receive(event, token: token)
             }
-        }
-
-        let inputNode = audioEngine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
-        guard format.channelCount > 0 else {
-            finishCapture(status: "No system microphone input is available.")
-            return
-        }
-
-        inputNode.installTap(onBus: 0, bufferSize: 1_024, format: format) { [weak request] buffer, _ in
-            request?.append(buffer)
-        }
-        tapInstalled = true
-
-        audioEngine.prepare()
-        do {
-            try audioEngine.start()
-            isListening = true
-            status = "Listening with on-device speech recognition. Using the system microphone."
-        } catch {
-            finishCapture(status: "Could not start the system microphone: \(error.localizedDescription)")
         }
     }
 
     /// Stops recognition and invalidates callbacks from the previous session.
     func stop() {
-        finishCapture(status: "Speech input stopped.")
-    }
-
-    private func finishCapture(status: String) {
         sessionToken &+= 1
-        cancelCapture()
+        isStarting = false
         isListening = false
-        self.status = status
+        startRequestedAt = nil
+        status = "Speech input stopped."
+        captureWorker.stop()
     }
 
-    private func cancelCapture() {
+    private func receive(_ event: CaptureWorker.Event, token: UInt64) {
+        guard sessionToken == token else { return }
+
+        switch event {
+        case .listening:
+            guard isStarting else { return }
+            isStarting = false
+            isListening = true
+            status = "Listening."
+            if let startRequestedAt {
+                let elapsed = DispatchTime.now().uptimeNanoseconds &- startRequestedAt
+                logger.debug("Speech input ready after \(elapsed / 1_000_000, privacy: .public) ms")
+            }
+            self.startRequestedAt = nil
+
+        case let .recognition(transcript, isFinal, errorMessage):
+            guard isStarting || isListening else { return }
+
+            if !transcript.isEmpty {
+                onTranscript?(transcript)
+            }
+
+            // A transcript callback can synchronously stop the service.
+            guard sessionToken == token else { return }
+
+            if let errorMessage {
+                finish(status: "Speech recognition unavailable: \(errorMessage)")
+            } else if isFinal {
+                finish(status: "Speech input finished.")
+            }
+
+        case let .failed(message):
+            guard isStarting || isListening else { return }
+            logger.error("Speech input failed: \(message, privacy: .public)")
+            finish(status: message)
+        }
+    }
+
+    private func finish(status: String) {
+        sessionToken &+= 1
+        isStarting = false
+        isListening = false
+        startRequestedAt = nil
+        self.status = status
+        captureWorker.stop()
+    }
+}
+
+private final class CaptureWorker: @unchecked Sendable {
+    enum Event: Sendable {
+        case listening
+        case recognition(transcript: String, isFinal: Bool, errorMessage: String?)
+        case failed(String)
+    }
+
+    typealias EventHandler = @Sendable (Event) -> Void
+
+    private let queue = DispatchQueue(label: "com.jevlauncher.speech.capture")
+    private let requestLock = NSLock()
+    private var requestedToken: UInt64?
+
+    // These properties are accessed only by `queue` after initialization.
+    private var audioEngine: AVAudioEngine?
+    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var recognitionTask: SFSpeechRecognitionTask?
+    private var activeToken: UInt64?
+    private var tapInstalled = false
+    private var lastTranscript: String?
+
+    func start(token: UInt64, recognizer: SFSpeechRecognizer, handler: @escaping EventHandler) {
+        requestLock.lock()
+        requestedToken = token
+        requestLock.unlock()
+
+        queue.async { [weak self] in
+            guard let self, self.isRequested(token) else { return }
+            self.startOnQueue(token: token, recognizer: recognizer, handler: handler)
+        }
+    }
+
+    func stop() {
+        requestLock.lock()
+        requestedToken = nil
+        requestLock.unlock()
+
+        queue.async { [weak self] in
+            self?.cancelCaptureOnQueue()
+        }
+    }
+
+    private func startOnQueue(token: UInt64, recognizer: SFSpeechRecognizer, handler: @escaping EventHandler) {
+        cancelCaptureOnQueue()
+        guard isRequested(token) else { return }
+
+        let engine = audioEngine ?? {
+            let created = AVAudioEngine()
+            audioEngine = created
+            return created
+        }()
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.shouldReportPartialResults = true
+        request.requiresOnDeviceRecognition = true
+
+        activeToken = token
+        lastTranscript = nil
+        recognitionRequest = request
+        recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            guard let self else { return }
+            let transcript = result?.bestTranscription.formattedString ?? ""
+            let isFinal = result?.isFinal ?? false
+            let errorMessage = error?.localizedDescription
+            self.queue.async { [weak self] in
+                guard let self else { return }
+                self.handleRecognitionOnQueue(
+                    token: token,
+                    transcript: transcript,
+                    isFinal: isFinal,
+                    errorMessage: errorMessage,
+                    handler: handler
+                )
+            }
+        }
+
+        guard isRequested(token) else {
+            cancelCaptureOnQueue()
+            return
+        }
+
+        let inputNode = engine.inputNode
+        let format = inputNode.outputFormat(forBus: 0)
+        guard format.channelCount > 0 else {
+            failOnQueue(token: token, message: "No system microphone input is available.", handler: handler)
+            return
+        }
+
+        inputNode.installTap(onBus: 0, bufferSize: 1_024, format: format) { [weak self, weak request] buffer, _ in
+            guard let self, self.isRequested(token) else { return }
+            request?.append(buffer)
+        }
+        tapInstalled = true
+
+        guard isRequested(token) else {
+            cancelCaptureOnQueue()
+            return
+        }
+
+        engine.prepare()
+        guard isRequested(token) else {
+            cancelCaptureOnQueue()
+            return
+        }
+
+        do {
+            try engine.start()
+        } catch {
+            failOnQueue(
+                token: token,
+                message: "Could not start the system microphone: \(error.localizedDescription)",
+                handler: handler
+            )
+            return
+        }
+
+        guard isRequested(token) else {
+            cancelCaptureOnQueue()
+            return
+        }
+
+        handler(.listening)
+    }
+
+    private func handleRecognitionOnQueue(
+        token: UInt64,
+        transcript: String,
+        isFinal: Bool,
+        errorMessage: String?,
+        handler: @escaping EventHandler
+    ) {
+        guard activeToken == token, isRequested(token) else { return }
+
+        let changedTranscript = !transcript.isEmpty && transcript != lastTranscript
+        if changedTranscript {
+            lastTranscript = transcript
+        }
+
+        if changedTranscript || isFinal || errorMessage != nil {
+            handler(.recognition(
+                transcript: changedTranscript ? transcript : "",
+                isFinal: isFinal,
+                errorMessage: errorMessage
+            ))
+        }
+
+        if isFinal || errorMessage != nil {
+            cancelCaptureOnQueue()
+        }
+    }
+
+    private func failOnQueue(token: UInt64, message: String, handler: @escaping EventHandler) {
+        guard isRequested(token) else {
+            cancelCaptureOnQueue()
+            return
+        }
+        cancelCaptureOnQueue()
+        handler(.failed(message))
+    }
+
+    private func isRequested(_ token: UInt64) -> Bool {
+        requestLock.lock()
+        defer { requestLock.unlock() }
+        return requestedToken == token
+    }
+
+    private func cancelCaptureOnQueue() {
         recognitionTask?.cancel()
         recognitionTask = nil
         recognitionRequest?.endAudio()
         recognitionRequest = nil
 
-        if audioEngine.isRunning {
+        if let audioEngine, audioEngine.isRunning {
             audioEngine.stop()
         }
-        if tapInstalled {
+        if tapInstalled, let audioEngine {
             audioEngine.inputNode.removeTap(onBus: 0)
             tapInstalled = false
         }
+
+        activeToken = nil
+        lastTranscript = nil
     }
 }

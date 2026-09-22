@@ -62,7 +62,7 @@ struct SettingsView: View {
                         HStack { Text(path).lineLimit(1).truncationMode(.middle); Spacer(); Button("Remove") { preferences.fileFolders.removeAll { $0 == path } } }
                     }
                     Button("Add Search Folder") { preferences.addFolder(apps: false) }
-                    Text("Results depend on Spotlight indexing and macOS file access. This release searches file names.").font(.caption).foregroundStyle(.secondary)
+                    Text("Search names, file types, folders, and modification dates. Try kind:pdf in:downloads or files modified today. Results depend on Spotlight indexing and macOS file access.").font(.caption).foregroundStyle(.secondary)
                 }
                 Section("App Aliases") {
                     TextField("Alias, for example coding app", text: $alias)
@@ -103,7 +103,7 @@ struct SettingsView: View {
                 }
                 Section("About This Build") {
                     Text("Jev Launcher · Local Preview")
-                    Text("Custom actions and scripts are planned for a later release.").font(.caption).foregroundStyle(.secondary)
+                    Text("Apps, files, voice input, and window controls.").font(.caption).foregroundStyle(.secondary)
                     Text(String(format: "Last local search: %.2f ms", model.localSearchMS)).font(.caption.monospaced())
                 }
             }.formStyle(.grouped).tabItem { Label("Jev", systemImage: "sparkles") }

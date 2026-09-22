@@ -16,6 +16,7 @@ struct LauncherResult: Identifiable {
     let symbol: String
     let action: Action
     let score: Double
+    var isCurrent = true
     var path: String? {
         switch action { case .app(let app): return app.path; case .file(let file): return file.path; default: return nil }
     }
@@ -30,66 +31,108 @@ final class LauncherModel: ObservableObject {
     @Published private(set) var aiStatus = ""
     @Published private(set) var localSearchMS: Double = 0
     @Published private(set) var targetName = "Active Window"
+    @Published private(set) var fileStatus = ""
+    private var parsedFileQuery = FileSearchQuery(text: "")
+    var isFileSearch: Bool { parsedFileQuery.isExplicitFileSearch }
+    var emptyMessage: String {
+        if isFileSearch { return fileStatus.isEmpty ? "No matching files" : fileStatus }
+        return catalogue.scanning ? "Finding installed apps…" : "Search apps, files, or window commands"
+    }
     let preferences: Preferences
     let catalogue: AppCatalogue
     let speech = SpeechService()
     let windows = WindowManager()
     var onClose: (() -> Void)?
-    private let files = FileSearch()
+    private let files: FileSearching
     private let jev = JevService()
     private var fileResults: [FileEntry] = []
+    private var previousFileResults: [FileEntry] = []
     private var work: Task<Void, Never>?
     private var aiWork: Task<Void, Never>?
     private var revision = UUID()
     private var visible = false
+    private var acceptsSpeech = true
+    private var startWork: Task<Void, Never>?
     private var manualSelection = false
     private var promotedID: String?
     private var semanticResult: LauncherResult?
     private var subscriptions = Set<AnyCancellable>()
 
-    init(preferences: Preferences, catalogue: AppCatalogue) {
+    init(preferences: Preferences, catalogue: AppCatalogue, files: FileSearching? = nil) {
         self.preferences = preferences; self.catalogue = catalogue
-        speech.onTranscript = { [weak self] text in self?.updateQuery(text, typed: false) }
+        self.files = files ?? FileSearch()
+        speech.onTranscript = { [weak self] text in
+            guard let self, self.acceptsSpeech else { return }
+            self.updateQuery(text, typed: false)
+        }
+        self.files.onStatus = { [weak self] status in
+            guard let self, self.visible else { return }
+            if self.fileStatus != status { self.fileStatus = status }
+        }
         catalogue.$entries.sink { [weak self] _ in
             Task { @MainActor in guard let self, self.visible else { return }; self.rebuild() }
         }.store(in: &subscriptions)
     }
     func begin() {
-        targetName = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Active Window"
-        windows.captureTarget()
+        let targetApp = NSWorkspace.shared.frontmostApplication
+        targetName = targetApp?.localizedName ?? "Active Window"
+        windows.clearTarget()
         windows.gap = preferences.gap
-        visible = true; manualSelection = false; query = ""; message = nil
-        fileResults = []; promotedID = nil; semanticResult = nil; revision = UUID()
+        visible = true; acceptsSpeech = true; manualSelection = false; query = ""; message = nil
+        parsedFileQuery = FileSearchQuery(text: ""); fileStatus = ""
+        previousFileResults = []; fileResults = []; promotedID = nil; semanticResult = nil; revision = UUID()
         rebuild()
-        if preferences.voiceEnabled { speech.start() }
+        startWork?.cancel()
+        startWork = Task { [weak self] in
+            await Task.yield()
+            guard !Task.isCancelled, let self, self.visible else { return }
+            if let targetApp { self.windows.captureTarget(appPID: targetApp.processIdentifier) }
+            if self.preferences.voiceEnabled && self.acceptsSpeech { self.speech.start() }
+        }
+    }
+    func pauseListening() {
+        acceptsSpeech = false; speech.stop()
+        aiWork?.cancel()
+        manualSelection = true
+    }
+    func toggleListening() {
+        if speech.isListening || speech.isStarting { acceptsSpeech = false; speech.stop() }
+        else { acceptsSpeech = true; speech.start() }
     }
     func enableVoice() async {
         await speech.requestPermissions()
-        if visible && preferences.voiceEnabled { speech.start() }
+        if visible && preferences.voiceEnabled { acceptsSpeech = true; speech.start() }
     }
     func end() {
         visible = false; revision = UUID()
-        speech.stop(); work?.cancel(); aiWork?.cancel(); files.stop()
+        startWork?.cancel(); speech.stop(); work?.cancel(); aiWork?.cancel(); files.stop()
         aiStatus = ""
     }
     func updateQuery(_ text: String, typed: Bool) {
         guard visible else { return }
-        if typed { speech.stop() }
+        if typed { acceptsSpeech = false; speech.stop() }
+        guard text != query else { return }
+        let wasFileSearch = isFileSearch
+        parsedFileQuery = FileSearchQuery(text: text); fileStatus = ""
+        if isFileSearch && wasFileSearch && parsedFileQuery.isValid {
+            if !fileResults.isEmpty { previousFileResults = fileResults }
+        } else { previousFileResults = [] }
         query = text; message = nil; manualSelection = false; fileResults = []; promotedID = nil; semanticResult = nil
         revision = UUID(); let current = revision
         work?.cancel(); aiWork?.cancel(); files.stop(); aiStatus = ""
+        if isFileSearch { fileStatus = parsedFileQuery.validationError ?? "Searching files…" }
         rebuild()
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         work = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 120_000_000)
             guard !Task.isCancelled, let self, self.revision == current else { return }
-            self.files.search(self.fileQuery(trimmed), folders: self.preferences.fileFolders) { [weak self] found in
+            self.files.search(trimmed, folders: self.preferences.fileFolders) { [weak self] found in
                 guard let self, self.visible, self.revision == current else { return }
-                self.fileResults = found; self.rebuild()
+                self.previousFileResults = []; self.fileResults = found; self.rebuild()
             }
         }
-        if preferences.jevEnabled && trimmed.count >= 5 && trimmed.contains(" ") && (results.first?.score ?? 0) < 99 {
+        if !isFileSearch && preferences.jevEnabled && trimmed.count >= 5 && trimmed.contains(" ") && (results.first?.score ?? 0) < 99 {
             aiWork = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 280_000_000)
                 guard !Task.isCancelled, let self, self.revision == current else { return }
@@ -97,27 +140,25 @@ final class LauncherModel: ObservableObject {
             }
         }
     }
-    private func fileQuery(_ text: String) -> String {
-        var value = text
-        for prefix in ["find file ", "find folder ", "find ", "open ", "search files "] {
-            if value.lowercased().hasPrefix(prefix) { value = String(value.dropFirst(prefix.count)); break }
-        }
-        return value
-    }
     func rebuild() {
+        let trace = PerformanceTrace.start("LocalResults")
+        defer { PerformanceTrace.end("LocalResults", trace) }
         let start = CFAbsoluteTimeGetCurrent()
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleURL).map(\.path))
+        let runningApps = catalogue.runningApplications
+        let running = Set(runningApps.compactMap(\.bundleURL).map(\.path))
+        let aliasesByApp = Dictionary(grouping: preferences.aliases.keys, by: { preferences.aliases[$0]! })
         var rows: [LauncherResult] = []
-        for app in catalogue.entries {
-            let aliases = preferences.aliases.filter { $0.value == app.id }.map(\.key)
+        for app in catalogue.entries where !isFileSearch {
+            let aliases = aliasesByApp[app.id] ?? []
             guard let score = q.isEmpty ? 0 : SearchRanking.score(query: q, title: app.name, aliases: aliases) else { continue }
             let frequent = min(Double(preferences.usage[app.id, default: 0]), 20) * 0.1
-            let favourite = preferences.favourites.contains(app.id) ? 4.0 : 0
-            rows.append(LauncherResult(id: app.id, title: app.name, detail: running.contains(app.path) ? "Running · " + app.path : app.path, symbol: "app", action: .app(app), score: score * 100 + frequent + favourite))
+            let favourite = preferences.favourites.contains(app.id) ? (q.isEmpty ? 100.0 : 4.0) : 0
+            let recent = q.isEmpty ? Double(20 - min(preferences.recentIDs.firstIndex(of: app.id) ?? 20, 20)) : 0
+            rows.append(LauncherResult(id: app.id, title: app.name, detail: running.contains(app.path) ? "Running · " + app.path : app.path, symbol: "app", action: .app(app), score: score * 100 + frequent + favourite + recent))
         }
         let phrase = " " + q.lowercased().split(separator: " ").joined(separator: " ") + " "
-        let namedTarget = NSWorkspace.shared.runningApplications
+        let namedTarget = runningApps
             .filter { $0.processIdentifier != getpid() }
             .sorted { ($0.localizedName?.count ?? 0) > ($1.localizedName?.count ?? 0) }
             .first { app in
@@ -125,25 +166,29 @@ final class LauncherModel: ObservableObject {
                 var names = [name]
                 if name == "google chrome" { names.append("chrome") }
                 if let path = app.bundleURL?.path {
-                    names += preferences.aliases.filter { $0.value == "app:" + path }.map { $0.key.lowercased() }
+                    names += (aliasesByApp["app:" + path] ?? []).map { $0.lowercased() }
                 }
                 return names.contains { phrase.contains(" " + $0 + " ") }
             }
-        for action in WindowAction.allCases {
+        for action in WindowAction.allCases where !isFileSearch {
             guard let score = q.isEmpty ? -10 : SearchRanking.score(query: q, title: action.title, aliases: action.aliases) else { continue }
             rows.append(LauncherResult(id: "window:" + action.rawValue, title: action.title, detail: "Window · " + (namedTarget?.localizedName ?? targetName), symbol: action.symbol, action: .window(action, namedTarget?.processIdentifier), score: q.isEmpty ? -10 : score * 100))
         }
-        for file in fileResults {
-            let score = SearchRanking.score(query: fileQuery(q), title: file.name) ?? 0
-            rows.append(LauncherResult(id: file.id, title: file.name, detail: file.path, symbol: "doc", action: .file(file), score: score * 100 - 3))
+        let displayedFiles = fileResults.isEmpty ? previousFileResults : fileResults
+        let filesAreCurrent = previousFileResults.isEmpty
+        for (index, file) in displayedFiles.enumerated() {
+            let nameScore = SearchRanking.score(query: parsedFileQuery.nameQuery, title: file.name) ?? 0.5
+            let score = isFileSearch ? 200 - Double(index) : nameScore * 100 - 3 - Double(index) * 0.01
+            rows.append(LauncherResult(id: file.id, title: file.name, detail: file.path,
+                                       symbol: file.isDirectory ? "folder" : "doc.text", action: .file(file), score: score, isCurrent: filesAreCurrent))
         }
-        if let answer = Calculator.evaluate(q) {
+        if !isFileSearch, let answer = Calculator.evaluate(q) {
             rows.append(LauncherResult(id: "calculator", title: answer, detail: "Calculator · Return to copy", symbol: "equal.square", action: .copy(answer), score: 2000))
         }
-        if let url = Self.directURL(q) {
+        if !isFileSearch, let url = Self.directURL(q) {
             rows.append(LauncherResult(id: "url", title: "Open " + q, detail: url.absoluteString, symbol: "globe", action: .url(url), score: 1500))
         }
-        if !q.isEmpty {
+        if !q.isEmpty && !isFileSearch {
             var components = URLComponents(string: preferences.webEngine == "DuckDuckGo" ? "https://duckduckgo.com/" : "https://www.google.com/search")!
             components.queryItems = [URLQueryItem(name: "q", value: q)]
             if let url = components.url {
@@ -158,7 +203,7 @@ final class LauncherModel: ObservableObject {
             return $0.title.localizedStandardCompare($1.title) == .orderedAscending
         }
         results = Array(rows.prefix(40))
-        if !manualSelection || !results.contains(where: { $0.id == selectedID }) { selectedID = results.first?.id }
+        if !manualSelection || !results.contains(where: { $0.id == selectedID && $0.isCurrent }) { selectedID = results.first(where: \.isCurrent)?.id }
         localSearchMS = (CFAbsoluteTimeGetCurrent() - start) * 1000
     }
     private static func directURL(_ value: String) -> URL? {
@@ -204,13 +249,17 @@ final class LauncherModel: ObservableObject {
         }
     }
     func moveSelection(_ delta: Int) {
-        guard !results.isEmpty else { return }
-        let index = results.firstIndex(where: { $0.id == selectedID }) ?? 0
-        selectedID = results[min(max(index + delta, 0), results.count - 1)].id
+        let available = results.filter(\.isCurrent)
+        guard !available.isEmpty else { return }
+        let index = available.firstIndex(where: { $0.id == selectedID }) ?? 0
+        selectedID = available[min(max(index + delta, 0), available.count - 1)].id
         manualSelection = true
     }
-    func select(_ id: String) { selectedID = id; manualSelection = true }
-    var selected: LauncherResult? { results.first { $0.id == selectedID } }
+    func select(_ id: String) {
+        guard results.contains(where: { $0.id == id && $0.isCurrent }) else { selectedID = nil; return }
+        selectedID = id; manualSelection = true
+    }
+    var selected: LauncherResult? { results.first { $0.id == selectedID && $0.isCurrent } }
     func execute() {
         guard let result = selected else { message = "Choose an action first."; return }
         // Freeze the visible action before stopping speech or accepting an async response.

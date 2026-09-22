@@ -12,6 +12,7 @@ struct AppEntry: Codable, Identifiable, Sendable {
 final class AppCatalogue: ObservableObject {
     @Published private(set) var entries: [AppEntry] = []
     @Published private(set) var scanning = false
+    private(set) var runningApplications: [NSRunningApplication] = []
     private var task: Task<Void, Never>?
     private var sources: [DispatchSourceFileSystemObject] = []
     private var runningTokens: [NSObjectProtocol] = []
@@ -22,9 +23,13 @@ final class AppCatalogue: ObservableObject {
         if loadCache, let data = try? Data(contentsOf: cacheURL), let cached = try? JSONDecoder().decode([AppEntry].self, from: data) {
             entries = cached
         }
+        runningApplications = NSWorkspace.shared.runningApplications
         for event in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
             runningTokens.append(NSWorkspace.shared.notificationCenter.addObserver(forName: event, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.objectWillChange.send() }
+                Task { @MainActor in
+                    self?.runningApplications = NSWorkspace.shared.runningApplications
+                    self?.objectWillChange.send()
+                }
             })
         }
     }

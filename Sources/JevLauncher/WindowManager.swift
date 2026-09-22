@@ -124,24 +124,17 @@ public final class WindowManager {
     /// Captures the currently focused application window before the launcher
     /// panel takes focus. The captured target is intentionally a single window,
     /// so later actions cannot accidentally operate on every Space.
-    public func captureTarget() {
-        guard Self.hasPermission else {
-            capturedTarget = nil
-            return
-        }
+    public func clearTarget() { capturedTarget = nil }
 
-        let system = AXUIElementCreateSystemWide()
-        guard let application = axElement(attribute(system, AXAttribute.focusedApplication)),
-              let pid = processID(of: application) else {
-            capturedTarget = nil
-            return
-        }
-        guard pid != ProcessInfo.processInfo.processIdentifier,
-              let window = axElement(attribute(application, AXAttribute.focusedWindow)),
-              isEligible(window, pid: pid) else {
-            capturedTarget = nil
-            return
-        }
+    public func captureTarget(appPID: pid_t? = nil) {
+        capturedTarget = nil
+        guard Self.hasPermission,
+              let pid = appPID ?? NSWorkspace.shared.frontmostApplication?.processIdentifier,
+              pid != ProcessInfo.processInfo.processIdentifier else { return }
+        let application = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(application, 0.15)
+        guard let window = axElement(attribute(application, AXAttribute.focusedWindow)) else { return }
+        // Eligibility is checked again on execution. Avoid repeated AX/CG reads on open.
         capturedTarget = CapturedTarget(pid: pid, application: application, window: window)
     }
 

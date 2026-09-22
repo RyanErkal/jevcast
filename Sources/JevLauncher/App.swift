@@ -7,6 +7,9 @@ import LauncherCore
 struct JevLauncherApp {
     @MainActor static func main() {
         if CommandLine.arguments.contains("--diagnose") { Diagnostics.run(); return }
+        if let index = CommandLine.arguments.firstIndex(of: "--diagnose-files"), CommandLine.arguments.indices.contains(index + 1) {
+            Diagnostics.searchFiles(CommandLine.arguments[index + 1]); return
+        }
         let app = NSApplication.shared
         let delegate = AppDelegate()
         app.delegate = delegate
@@ -31,9 +34,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var menuItem: NSStatusItem?
     private var keyMonitor: Any?
     private var wasVisible = false
+    private let preview = FilePreview()
+    private let resultActions = ResultActions()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let content = LauncherView(model: model, speech: model.speech, catalogue: catalogue, settings: { [weak self] in self?.showSettings() })
+        let content = LauncherView(model: model, speech: model.speech, catalogue: catalogue, settings: { [weak self] in self?.showSettings() }, actions: { [weak self] in self?.showActions() })
         panel = LauncherPanel(contentRect: NSRect(x: 0, y: 0, width: 680, height: 548), styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView], backing: .buffered, defer: false)
         panel.title = "Jev Launcher"
         panel.titleVisibility = .hidden; panel.titlebarAppearsTransparent = true
@@ -52,10 +57,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, self.panel.isVisible, event.window === self.panel else { return event }
             switch event.keyCode {
-            case 53: self.hide(); return nil
+            case 53:
+                if self.preview.isVisible { self.preview.close() } else { self.hide() }
+                return nil
             case 36, 76: self.model.execute(); return nil
-            case 125: self.model.moveSelection(1); return nil
-            case 126: self.model.moveSelection(-1); return nil
+            case 125: self.model.moveSelection(1); self.preview.update(path: self.model.selected?.path); return nil
+            case 126: self.model.moveSelection(-1); self.preview.update(path: self.model.selected?.path); return nil
+            case 40 where event.modifierFlags.contains(.command): self.showActions(); return nil
+            case 16 where event.modifierFlags.contains(.command): self.togglePreview(); return nil
             case 43 where event.modifierFlags.contains(.command): self.showSettings(); return nil
             case 15 where event.modifierFlags.contains(.command): self.model.revealSelected(); return nil
             case 8 where event.modifierFlags.contains([.command, .shift]): self.model.copyPath(); return nil
@@ -103,6 +112,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func toggle() { if panel.isVisible { hide() } else { show() } }
     private func show() {
         guard !panel.isVisible else { return }
+        let trace = PerformanceTrace.start("PanelOpen")
+        defer { PerformanceTrace.end("PanelOpen", trace) }
         model.begin()
         let pointer = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { $0.frame.contains(pointer) } ?? NSScreen.main
@@ -111,9 +122,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         wasVisible = true
         panel.makeKeyAndOrderFront(nil)
+        panel.displayIfNeeded()
         NotificationCenter.default.post(name: .launcherDidOpen, object: nil)
     }
-    private func hide() { model.end(); wasVisible = false; panel.orderOut(nil) }
+    private func showActions() {
+        guard let view = panel.contentView else { return }
+        resultActions.show(model: model, in: view, preview: { [weak self] in self?.togglePreview() })
+    }
+    private func togglePreview() {
+        model.pauseListening()
+        preview.toggle(path: model.selected?.path, beside: panel)
+    }
+    private func hide() { preview.close(); model.end(); wasVisible = false; panel.orderOut(nil) }
     func windowDidResignKey(_ notification: Notification) {
         if notification.object as? NSWindow === panel, wasVisible { hide() }
     }

@@ -15,6 +15,7 @@ final class Preferences: ObservableObject {
     @Published var fileFolders: [String] { didSet { defaults.set(fileFolders, forKey: "fileFolders") } }
     @Published var favourites: [String] { didSet { defaults.set(favourites, forKey: "favourites") } }
     @Published var aliases: [String: String] { didSet { defaults.set(aliases, forKey: "aliases") } }
+    @Published private(set) var recentIDs: [String]
     @Published private(set) var usage: [String: Int]
     private let defaults: UserDefaults
     init(defaults: UserDefaults = .standard) {
@@ -31,9 +32,12 @@ final class Preferences: ObservableObject {
         fileFolders = d.stringArray(forKey: "fileFolders") ?? [NSHomeDirectory()]
         favourites = d.stringArray(forKey: "favourites") ?? []
         aliases = d.dictionary(forKey: "aliases") as? [String: String] ?? [:]
+        recentIDs = d.stringArray(forKey: "recentIDs") ?? []
         usage = d.dictionary(forKey: "usage") as? [String: Int] ?? [:]
     }
     func record(_ id: String) {
+        recentIDs = [id] + recentIDs.filter { $0 != id }.prefix(39)
+        defaults.set(recentIDs, forKey: "recentIDs")
         usage[id, default: 0] += 1
         defaults.set(usage, forKey: "usage")
     }

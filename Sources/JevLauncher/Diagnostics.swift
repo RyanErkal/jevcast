@@ -12,6 +12,18 @@ enum Diagnostics {
         let cases: [[String: String]]
         let note: String
     }
+    static func searchFiles(_ query: String) {
+        let search = FileSearch()
+        let start = ProcessInfo.processInfo.systemUptime
+        search.onStatus = { print($0); fflush(stdout) }
+        search.search(query, folders: Preferences().fileFolders) { results in
+            print("File results: \(results.count), elapsed: \(Int((ProcessInfo.processInfo.systemUptime - start) * 1000)) ms")
+            for file in results { print(file.name) }
+            fflush(stdout)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { search.stop(); exit(0) }
+        withExtendedLifetime(search) { RunLoop.main.run() }
+    }
     static func run() {
         let start = CFAbsoluteTimeGetCurrent()
         let apps = AppCatalogue.scan(roots: ["/Applications", "/System/Applications", "/System/Library/CoreServices/Applications", "/System/Library/CoreServices/Finder.app", NSHomeDirectory() + "/Applications"])

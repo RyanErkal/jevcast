@@ -1,21 +1,14 @@
 import SwiftUI
-import ServiceManagement
 
 struct GeneralSettings: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var status: LauncherStatus
+    @ObservedObject var updates: UpdateChecker
     let changed: () -> Void
-    @State private var loginStatus: SMAppService.Status
-    @State private var loginError = ""
-    init(preferences: Preferences, status: LauncherStatus, changed: @escaping () -> Void) {
-        self.preferences = preferences; self.status = status; self.changed = changed
-        // Read now, not on appear, so the window measures the approval row when it is shown.
-        _loginStatus = State(initialValue: preferences.loginStatus)
-    }
     var body: some View {
         Form {
             Section("Shortcut") {
-                Picker("Open Jev Launcher", selection: $preferences.hotkey) {
+                Picker("Open \(AppIdentity.name)", selection: $preferences.hotkey) {
                     ForEach(Hotkey.allCases) { Text($0.title).tag($0) }
                 }
                 if let message = status.hotkeyMessage {
@@ -26,15 +19,7 @@ struct GeneralSettings: View {
                 }
             }
             Section("Startup") {
-                Toggle("Open at login", isOn: Binding(get: { loginStatus == .enabled }, set: setLogin))
-                if loginStatus == .requiresApproval {
-                    HStack {
-                        Text("Approve Jev Launcher in Login Items.").font(.caption).foregroundStyle(.orange)
-                        Spacer()
-                        Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }.controlSize(.small)
-                    }
-                }
-                if !loginError.isEmpty { Text(loginError).font(.caption).foregroundStyle(.orange) }
+                LoginItemRows(preferences: preferences)
             }
             Section("Clipboard") {
                 Toggle("Keep clipboard history", isOn: $preferences.clipboardHistory)
@@ -46,16 +31,28 @@ struct GeneralSettings: View {
                     Text("Google").tag("Google"); Text("DuckDuckGo").tag("DuckDuckGo")
                 }
             }
+            Section("Updates") {
+                Toggle("Check for updates automatically", isOn: $preferences.checksForUpdates)
+                HStack {
+                    Text(updateStatus).font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    if let release = updates.available {
+                        Button("Download \(release.version)") { NSWorkspace.shared.open(release.page) }.controlSize(.small)
+                    } else {
+                        Button("Check Now") { updates.checkAndReport() }.controlSize(.small).disabled(updates.state == .checking)
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
-        .onAppear { loginStatus = preferences.loginStatus }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            loginStatus = preferences.loginStatus
-        }
         .onChange(of: preferences.hotkey) { _, _ in changed() }
     }
-    private func setLogin(_ enabled: Bool) {
-        do { loginStatus = try preferences.setLogin(enabled); loginError = "" }
-        catch { loginError = error.localizedDescription; loginStatus = preferences.loginStatus }
+    /// Says what the check sends, so the one network call is never a surprise.
+    private var updateStatus: String {
+        switch updates.state {
+        case .available(let release): return "Version \(release.version) is available. You have \(AppIdentity.version)."
+        case .checking: return "Checking…"
+        default: return "Version \(AppIdentity.version). Once a day, the app asks GitHub for the newest version. It sends nothing else."
+        }
     }
 }

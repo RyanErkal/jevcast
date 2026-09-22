@@ -18,14 +18,26 @@ final class Preferences: ObservableObject {
     @Published var aliases: [String: String] { didSet { defaults.set(aliases, forKey: "aliases") } }
     @Published var quicklinks: [Quicklink] { didSet { defaults.set(try? JSONEncoder().encode(quicklinks), forKey: "quicklinks") } }
     @Published var clipboardHistory: Bool { didSet { defaults.set(clipboardHistory, forKey: "clipboardHistory") } }
+    @Published var checksForUpdates: Bool { didSet { defaults.set(checksForUpdates, forKey: "checksForUpdates") } }
+    /// Set once the welcome window has been shown, so it opens by itself only on a new install.
+    @Published var welcomeShown: Bool { didSet { defaults.set(welcomeShown, forKey: "welcomeShown") } }
+    var lastUpdateCheck: Date? {
+        get { defaults.object(forKey: "lastUpdateCheck") as? Date }
+        set { defaults.set(newValue, forKey: "lastUpdateCheck") }
+    }
     @Published private(set) var recentIDs: [String]
     @Published private(set) var frecency: Frecency
     private let defaults: UserDefaults
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         let d = defaults
+        // Any key an earlier version always wrote. Read before this init saves anything.
+        let existingInstall = ["frecency", "usage", "hotkey", "recentIDs"].contains { d.object(forKey: $0) != nil }
         hotkey = Hotkey(rawValue: d.integer(forKey: "hotkey")) ?? .controlShiftSpace
-        voiceEnabled = d.object(forKey: "voiceEnabled") as? Bool ?? true
+        // New installs start with the microphone off; the welcome window offers it. Earlier installs keep listening.
+        voiceEnabled = d.object(forKey: "voiceEnabled") as? Bool ?? existingInstall
+        checksForUpdates = d.object(forKey: "checksForUpdates") as? Bool ?? true
+        welcomeShown = d.object(forKey: "welcomeShown") as? Bool ?? existingInstall
         jevEnabled = d.bool(forKey: "jevEnabled")
         edgeSnapping = d.bool(forKey: "edgeSnapping")
         windowShortcuts = d.bool(forKey: "windowShortcuts")
@@ -45,6 +57,9 @@ final class Preferences: ObservableObject {
             saveFrecency()
         }
         d.removeObject(forKey: "usage")
+        // Stored now: the next launch counts as an existing install and must not flip these defaults.
+        d.set(voiceEnabled, forKey: "voiceEnabled")
+        d.set(welcomeShown, forKey: "welcomeShown")
     }
     /// Records a run for ranking. `query` is the typed text, used to learn which result it usually means.
     func record(_ id: String, query: String) {

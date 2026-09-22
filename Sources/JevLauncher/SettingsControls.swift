@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Combine
+import ServiceManagement
 
 /// Permission status row with a live tick and a single action.
 struct PermissionRow: View {
@@ -25,6 +26,36 @@ struct PermissionRow: View {
         }
         .onAppear { granted = permission.isGranted }
         .onReceive(refresh) { _ in granted = permission.isGranted }
+    }
+}
+
+/// "Open at login", the approval hint, and any error, for Settings and the welcome window.
+struct LoginItemRows: View {
+    @ObservedObject var preferences: Preferences
+    @State private var status: SMAppService.Status
+    @State private var error = ""
+    init(preferences: Preferences) {
+        self.preferences = preferences
+        // Read now, not on appear, so the window measures the approval row when it is shown.
+        _status = State(initialValue: preferences.loginStatus)
+    }
+    var body: some View {
+        Toggle("Open at login", isOn: Binding(get: { status == .enabled }, set: set))
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                status = preferences.loginStatus
+            }
+        if status == .requiresApproval {
+            HStack {
+                Text("Approve \(AppIdentity.name) in Login Items.").font(.caption).foregroundStyle(.orange)
+                Spacer()
+                Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }.controlSize(.small)
+            }
+        }
+        if !error.isEmpty { Text(error).font(.caption).foregroundStyle(.orange) }
+    }
+    private func set(_ enabled: Bool) {
+        do { status = try preferences.setLogin(enabled); error = "" }
+        catch { self.error = error.localizedDescription; status = preferences.loginStatus }
     }
 }
 

@@ -27,8 +27,10 @@ final class LauncherStatus: ObservableObject {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppCommands {
     private let preferences = Preferences()
+    private lazy var updates = UpdateChecker(preferences: preferences)
+    private var welcome: WelcomeWindow?
     private let catalogue = AppCatalogue()
     private lazy var model = LauncherModel(preferences: preferences, catalogue: catalogue)
     private let hotkeys = HotkeyCenter()
@@ -58,9 +60,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard let self else { return }
             self.show(); self.model.message = text
         }
-        AppMenus.install(target: self, showSettings: #selector(showSettings))
-        statusMenu = StatusMenu(preferences: preferences, isOpen: { [weak self] in self?.wasVisible ?? false },
-                                toggle: { [weak self] in self?.toggle() }, showSettings: { [weak self] in self?.showSettings() })
+        AppMenus.install(commands: self)
+        statusMenu = StatusMenu(preferences: preferences, updates: updates, commands: self,
+                                isOpen: { [weak self] in self?.wasVisible ?? false }, toggle: { [weak self] in self?.toggle() })
         // Snapshot runs leave global shortcuts to the running copy of the app.
         if UISnapshots.directory == nil { configureHotkeys() }
         Task { await JevKeyCache.shared.load() }
@@ -85,8 +87,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         }
         // A menu-bar app stays quiet at login; `--open` shows the panel for diagnostics.
-        if let directory = UISnapshots.directory { runSnapshots(to: directory) }
-        else if CommandLine.arguments.contains("--open") { show() }
+        // A new install shows the welcome window once instead.
+        if let directory = UISnapshots.directory { runSnapshots(to: directory); return }
+        updates.start()
+        if CommandLine.arguments.contains("--open") { show() }
+        else if !preferences.welcomeShown || CommandLine.arguments.contains("--welcome") { showWelcome() }
     }
     /// Renders each state in turn. Every capture waits for the previous step, so a
     /// slow step cannot make two captures share one state. Snapshot mode does not
@@ -114,7 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         steps.append(("", 0, { nil }, { [weak self] in
             guard let self else { return }
             rig.close()
-            self.settings = SettingsWindow(preferences: self.preferences, model: self.model, catalogue: self.catalogue, status: self.status, changed: {})
+            self.settings = SettingsWindow(preferences: self.preferences, model: self.model, catalogue: self.catalogue, status: self.status, updates: self.updates, changed: {})
             self.settings?.window?.alphaValue = 0
             self.settings?.window?.ignoresMouseEvents = true
             self.settings?.window?.orderFrontRegardless()
@@ -122,6 +127,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         for tab in SettingsWindow.Tab.allCases {
             steps.append(("settings-" + tab.rawValue, 0.9, settingsView, { [weak self] in self?.settings?.select(tab) }))
         }
+        steps.append(("welcome", 0.9, { [weak self] in self?.welcome?.window?.contentView }, { [weak self] in
+            guard let self else { return }
+            self.settings?.window?.orderOut(nil)
+            self.welcome = WelcomeWindow(preferences: self.preferences, model: self.model, status: self.status, changed: {}, openSettings: {})
+            self.welcome?.window?.alphaValue = 0
+            self.welcome?.window?.ignoresMouseEvents = true
+            self.welcome?.window?.orderFrontRegardless()
+        }))
         func run(_ index: Int) {
             guard index < steps.count else { NSApp.terminate(nil); return }
             let step = steps[index]
@@ -275,12 +288,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func showSettings() {
         hide(restoreFocus: false)
         if settings == nil {
-            settings = SettingsWindow(preferences: preferences, model: model, catalogue: catalogue, status: status,
+            settings = SettingsWindow(preferences: preferences, model: model, catalogue: catalogue, status: status, updates: updates,
                                       changed: { [weak self] in self?.configureHotkeys() })
         }
         NSApp.activate()
         settings?.showWindow(nil)
     }
+    @objc func showWelcome() {
+        hide(restoreFocus: false)
+        preferences.welcomeShown = true
+        if welcome == nil {
+            welcome = WelcomeWindow(preferences: preferences, model: model, status: status,
+                                    changed: { [weak self] in self?.configureHotkeys() },
+                                    openSettings: { [weak self] in self?.showSettings() })
+        }
+        NSApp.activate()
+        welcome?.showWindow(nil)
+    }
+    @objc func checkForUpdates() { updates.checkAndReport() }
+    @objc func showAbout() { AboutPanel.show() }
+    @objc func openWebsite() { NSWorkspace.shared.open(AppIdentity.website) }
+    @objc func openSourceCode() { NSWorkspace.shared.open(AppIdentity.repository) }
+    @objc func reportIssue() { NSWorkspace.shared.open(AppIdentity.issues) }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { show(); return true }
     func applicationWillTerminate(_ notification: Notification) {
         backdrop.close(); resultActions.dismiss(); preview.close()

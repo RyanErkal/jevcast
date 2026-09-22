@@ -1,6 +1,4 @@
 import SwiftUI
-import AVFoundation
-import Speech
 
 /// Voice input and Jev natural-language matching.
 struct InputSettings: View {
@@ -33,6 +31,12 @@ struct InputSettings: View {
                 }
             }
             Section("API key") {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Optional. Jev, a model from TypeSafe, can match loose requests such as “make this window bigger”. It uses your own key.")
+                        .foregroundStyle(.secondary)
+                    Link("Get a key at typesafe.ai", destination: AppIdentity.typeSafe)
+                }
+                .font(.caption)
                 keyRow
                 if case .failed(let message) = keys.state {
                     Text(message).font(.caption).foregroundStyle(.orange)
@@ -57,9 +61,9 @@ struct InputSettings: View {
     @ViewBuilder private var keyRow: some View {
         switch keys.state {
         case .unknown:
-            LabeledContent("TypeSafe") { Text("Checking Keychain…").foregroundStyle(.secondary) }
+            LabeledContent("TypeSafe key") { Text("Checking Keychain…").foregroundStyle(.secondary) }
         case .present:
-            LabeledContent("TypeSafe") {
+            LabeledContent("TypeSafe key") {
                 HStack(spacing: 8) {
                     Text("Stored in Keychain").foregroundStyle(.secondary)
                     Button(testing ? "Testing…" : "Test") { Task { await test() } }.disabled(testing)
@@ -69,7 +73,7 @@ struct InputSettings: View {
             }
         case .missing, .failed:
             HStack(spacing: 8) {
-                SecureField("TypeSafe", text: $key, prompt: Text("Paste key"))
+                SecureField("TypeSafe key", text: $key, prompt: Text("Paste key"))
                     .onSubmit(save)
                 Button("Save", action: save).controlSize(.small).disabled(trimmedKey.isEmpty)
             }
@@ -91,13 +95,16 @@ struct InputSettings: View {
         do { try await JevService().validate(apiKey: value); keyMessage = "Key works." }
         catch { keyMessage = JevService.statusMessage(for: error) }
     }
-    /// First request goes through the system prompt; a denied state opens System Settings.
     private func request(_ permission: Permission) -> () -> Void {
+        VoicePermissions.request(permission, speech: speech)
+    }
+}
+
+enum VoicePermissions {
+    /// First request goes through the system prompt; a denied state opens System Settings.
+    @MainActor static func request(_ permission: Permission, speech: SpeechService) -> () -> Void {
         {
-            let undetermined = permission == .microphone
-                ? AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined
-                : SFSpeechRecognizer.authorizationStatus() == .notDetermined
-            if undetermined { Task { await speech.requestPermissions() } } else { permission.openSystemSettings() }
+            if permission.isUndetermined { Task { await speech.requestPermissions() } } else { permission.openSystemSettings() }
         }
     }
 }

@@ -33,6 +33,14 @@ enum Permission: CaseIterable {
         case .accessibility: return "Privacy_Accessibility"
         }
     }
+    /// True before the first request. Accessibility has no such state: it is granted in System Settings.
+    @MainActor var isUndetermined: Bool {
+        switch self {
+        case .microphone: return AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined
+        case .speech: return SFSpeechRecognizer.authorizationStatus() == .notDetermined
+        case .accessibility: return false
+        }
+    }
     /// Opens the matching Privacy & Security pane in System Settings.
     func openSystemSettings() {
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?" + pane) else { return }

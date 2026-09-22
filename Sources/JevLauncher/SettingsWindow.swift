@@ -30,12 +30,13 @@ final class SettingsWindow: NSWindowController, NSToolbarDelegate {
     private let model: LauncherModel
     private let catalogue: AppCatalogue
     private let status: LauncherStatus
+    private let updates: UpdateChecker
     private let changed: () -> Void
     private let hosting = NSHostingView(rootView: AnyView(EmptyView()))
     private var current: Tab = .general
 
-    init(preferences: Preferences, model: LauncherModel, catalogue: AppCatalogue, status: LauncherStatus, changed: @escaping () -> Void) {
-        self.preferences = preferences; self.model = model; self.catalogue = catalogue; self.status = status; self.changed = changed
+    init(preferences: Preferences, model: LauncherModel, catalogue: AppCatalogue, status: LauncherStatus, updates: UpdateChecker, changed: @escaping () -> Void) {
+        self.preferences = preferences; self.model = model; self.catalogue = catalogue; self.status = status; self.updates = updates; self.changed = changed
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 400),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -87,7 +88,7 @@ final class SettingsWindow: NSWindowController, NSToolbarDelegate {
     }
     @ViewBuilder private func pane(for tab: Tab) -> some View {
         switch tab {
-        case .general: GeneralSettings(preferences: preferences, status: status, changed: changed)
+        case .general: GeneralSettings(preferences: preferences, status: status, updates: updates, changed: changed)
         case .search: SearchSettings(preferences: preferences, catalogue: catalogue)
         case .windows: WindowSettings(preferences: preferences, model: model, changed: changed)
         case .input: InputSettings(preferences: preferences, speech: model.speech)

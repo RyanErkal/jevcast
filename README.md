@@ -1,96 +1,128 @@
 # Jev Launcher
 
-A native macOS launcher and window manager. SwiftUI and AppKit, macOS 14 or later. No third-party runtime dependencies.
+A keyboard launcher and window manager for macOS. Open apps, find files, do quick sums and conversions, move windows, and reuse what you copied, all from one shortcut. Free and open source under the MIT License.
 
-## Build and open
+![The launcher showing Safari, two files, and a web search for the query "saf"](site/images/launcher-query.png)
+
+- Native SwiftUI and AppKit app. No third-party code.
+- macOS 14 or later. Apple silicon and Intel.
+- No account, no analytics. Search, clipboard history, and voice stay on your Mac.
+
+Website: [jev-launcher.vercel.app](https://jev-launcher.vercel.app)
+
+## Install
+
+**Download:** get `Jev-Launcher.dmg` from the [latest release](https://github.com/RyanErkal/jev-launcher/releases/latest), open it, and drag **Jev Launcher** to **Applications**. The app is signed with a Developer ID and notarized by Apple.
+
+**Homebrew:**
 
 ```sh
+brew install --cask ryanerkal/tap/jev-launcher
+```
+
+Open the app from Applications. A welcome window helps you choose a shortcut and allow what you need. After that, the app lives in the menu bar. Open **Help › Welcome Guide** to see the window again.
+
+## Use
+
+Press **Control–Shift–Space** (change it in Settings) and type:
+
+| Type                                                       | What happens                                                             |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `safari`                                                   | Opens Safari. Aliases you add in Settings › Search also work.            |
+| `left half`, `top right`, `middle third`, `next monitor`   | Moves the window you were using.                                         |
+| `12 * (8 + 2)`, `100 + 10%`                                | Shows the answer. Return copies it.                                      |
+| `10 km in mi`, `20 c in f`                                 | Converts length, mass, temperature, time, data, volume, speed, and area. |
+| `invoice`, `kind:pdf in:downloads`, `files modified today` | Finds files by name, kind, folder, and date.                             |
+| `gh swiftui`, `yt piano`, `maps cafes`, `wiki moon`        | Searches a site. Add your own keywords in Settings › Search.             |
+| `clip`                                                     | Shows the last 50 text items you copied. Return copies one again.        |
+| `wi-fi settings`                                           | Opens that System Settings pane.                                         |
+
+Keys in the launcher:
+
+| Keys            | Action                               |
+| --------------- | ------------------------------------ |
+| Return          | Run the selected result              |
+| Up, Down        | Select another result                |
+| Escape          | Close                                |
+| Command–K       | More actions for the selected result |
+| Command–Y       | Quick Look                           |
+| Command–R       | Show in Finder                       |
+| Command–Shift–C | Copy the path                        |
+
+Results learn from use. Things you pick often and recently move up. Right-click an app to add it to your favourites. With nothing typed, the launcher shows your favourites and recent picks.
+
+### File search
+
+- `find file invoice` searches file names. `find folder invoices` searches folders.
+- `kind:pdf in:downloads` and `pdfs in downloads` show PDFs in Downloads.
+- `kind:image modified:yesterday`, `files modified today`, and `modified:week` filter by date.
+- `in:"~/Documents/My Folder" report` searches one folder.
+- A full path or a `~/` path opens that file or folder.
+
+File search uses the Spotlight index and stays inside the folders in Settings › Search. It skips app bundles, Git folders, dependency folders, caches, and the Trash. It does not search inside documents.
+
+### Window shortcuts
+
+Allow Accessibility access, then turn on **Use direct window shortcuts** in Settings › Windows. Hold **Control–Option–Command** and press:
+
+| Key                   | Action                                                  |
+| --------------------- | ------------------------------------------------------- |
+| Left, Right, Up, Down | Halves                                                  |
+| U, I, J, K            | Top left, top right, bottom left, bottom right quarters |
+| 1, 2, 3               | Left, middle, right thirds                              |
+| Return                | Maximise                                                |
+| Z                     | Restore                                                 |
+| N, P                  | Next or previous display                                |
+
+Press a half again to cycle its size: 1/2, 2/3, then 1/3. The middle third cycles 1/3, 1/2, then 2/3. Edge snapping is a separate setting. If you use Rectangle or the macOS option "Drag windows to screen edges to tile", turn off one of them, so two apps do not move the same window.
+
+### Voice
+
+Turn on **Listen when the launcher opens** in Settings › Input and allow Microphone and Speech Recognition. The launcher then listens each time it opens. Typing stops listening. Recognition runs on your Mac only, and audio is not saved. If on-device recognition is not available for your language, the app tells you and typing still works.
+
+### Natural language (optional)
+
+Jev, a model from [TypeSafe](https://typesafe.ai), can match loose requests such as "make this window bigger" to a known action. Add your own TypeSafe API key in Settings › Input, then turn on natural-language matching. The key is kept in your macOS Keychain. Local results never wait for Jev.
+
+## Privacy
+
+The app has no account, no analytics, and no crash reporting. It connects to the internet for three things only:
+
+| When                                                                             | Where                                | What is sent                                                                                                                                                                                                          |
+| -------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Once a day, if **Check for updates automatically** is on (default: on)           | `api.github.com`                     | A request for the newest release, with the app version. GitHub sees your IP address, as with any web request. Nothing is downloaded.                                                                                  |
+| When you type a loose request, if natural-language matching is on (default: off) | `api.typesafe.ai`, with your own key | The text you typed and a short list of candidate names: apps, window actions, search sites, and file names. Never file paths, folders, or audio. Jev can only choose one of those candidates. It cannot run commands. |
+| When you open a web search or a URL                                              | Your default browser                 | Whatever you chose to open.                                                                                                                                                                                           |
+
+Everything else stays on your Mac. Clipboard history is kept in memory only, holds plain text only, and skips items that password managers mark as concealed. The app writes one file of its own: a cache of your app list in `~/Library/Caches/JevLauncher`.
+
+## Permissions
+
+| Permission                        | Needed for                  | Required?               |
+| --------------------------------- | --------------------------- | ----------------------- |
+| Accessibility                     | Moving and resizing windows | Only for window actions |
+| Microphone and Speech Recognition | Voice input                 | Only for voice          |
+
+Allow each one from the welcome window, Settings, or the **Permissions** menu in the menu bar. Each item opens the matching page of System Settings.
+
+## Build from source
+
+You need Xcode 26 or later (it includes the macOS 26 SDK). The built app runs on macOS 14 or later.
+
+```sh
+git clone https://github.com/RyanErkal/jev-launcher.git
+cd jev-launcher
 swift test
-./scripts/build.sh
+scripts/build.sh            # universal build; ARCHS=arm64 scripts/build.sh builds one architecture
 open "dist/Jev Launcher.app"
 ```
 
-The initial shortcut is **Control–Shift–Space**. Change it in Settings. Existing Spotlight, Raycast, and Rectangle shortcuts are not changed. The app lives in the menu bar and shows nothing at launch; open it with the shortcut or from the menu-bar icon. Open Settings from the menu-bar icon or Command–Comma.
+A local build has an ad-hoc signature. macOS can ask for permissions again after each rebuild. See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the code layout and diagnostic flags, and [docs/RELEASING.md](docs/RELEASING.md) for signed releases.
 
-## Core use
+## Contributing
 
-- Type an app name or alias, a filename, a URL, a calculation, or a window action.
-- Opening focuses search in a non-activating key panel, so typing works even when macOS declines to activate the app. Return runs the selected result. Arrow keys select another result. Escape closes the entire launcher, including its actions menu and preview.
-- With an empty query, the panel shows only favourites and recent picks. If there are none, it shows only the search bar. Results are grouped as Applications, Commands, Files, and Clipboard, with the top hit's group first. Mixed searches show at most three files. The footer names the Return action for the selected result. Errors and file-search status share one strip above the footer.
-- An outside click closes Jev and is consumed. Background clicks and scrolling are blocked while it is open. Switching apps dismisses it. Cancellation restores the previous app.
-- The menu-bar menu shows Open/Hide with the current shortcut, a Listen When Opened toggle, a Permissions submenu with live ticks that open the matching System Settings pane, Settings, About, and Quit.
-- Settings uses four toolbar tabs: General (shortcut, login, clipboard history, web engine), Search (file folders, app aliases, search keywords, and app folders under Advanced), Windows (Accessibility, shortcuts, snapping, gap), and Input (voice input, Microphone and Speech permissions, API key, natural language). About Jev Launcher in the menu shows the standard About panel with the version.
-- Command–K opens actions for the selected result. Command–Y toggles Quick Look. Command–R reveals a file/app in Finder. Command–Shift–C copies its path.
-- Right-click an app to add a favourite. Set app aliases and file folders in Settings › Search. Additional app folders are under Advanced.
-- App names and built-in commands rank locally. Files use Spotlight for filename, kind, folder, and modified-date search. Exact local commands and explicit file searches do not call Jev.
-- Examples: `Safari`, `left half`, `top right`, `middle third`, `almost maximise`, `next monitor`, `full screen`, `tile all`, `12 * (8 + 2)`, `100 + 10%`, `10 km in mi`, `wi-fi settings`.
-- A number alone does not show a calculator result. Unit conversion covers length, mass, temperature, time, data, volume, speed, and area. Currency is not supported.
-- Ranking learns from use. Frequent and recent picks rank higher, with decay over time. A short query learns the result you picked for it.
-- Search keywords: `gh query`, `yt query`, `maps query`, and `wiki query` open a search. A keyword alone opens the site. Add or edit keywords in Settings › Search. Click a keyword to edit it.
-- Clipboard history: type `clip` or `clipboard`, then Return copies the entry again. Only plain text is kept, in memory, up to 50 items. Password-manager and concealed items are skipped. Turn it off in Settings › General.
+Bug reports and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first. Report security problems privately, as [SECURITY.md](SECURITY.md) describes.
 
-## File search
+## License
 
-- `find file invoice` searches file names.
-- `kind:pdf in:downloads` shows PDFs in Downloads.
-- `pdfs in downloads` uses the same local filters.
-- `find folder invoices` searches folders.
-- `files modified today` filters by modification date.
-- `kind:image modified:yesterday` finds images modified yesterday.
-- `modified:week` means the current calendar week.
-- `in:"~/Documents/My Folder" report` narrows a filename search.
-- An absolute path or `~/` path opens an existing file or folder, even if Spotlight has not indexed it.
-
-Search stays within the folders configured in Settings. The list omits app bundles, Git internals, dependency folders, caches, and Trash. Broad searches show a bounded set of results. Add a name or folder filter to narrow them. Document contents are not searched.
-
-The first result is selected when a new query returns. Arrow-key selection remains fixed during updates when that result still exists. While a file query updates, previous results stay visible but dimmed and disabled. Return cannot open a file from the previous search.
-
-## Voice
-
-Enable Microphone and Speech access from Settings › Input once. The mic button appears in the launcher only after both are allowed. Thereafter the panel starts listening on open by default. Typing, Return, Escape, or closing the panel stops capture. The system input microphone is used. Audio is not saved.
-
-This build requires on-device Apple speech recognition. If the current language or device does not support it, the app displays a status and typed input remains available. It does not silently send audio to a cloud service.
-
-## Window control
-
-Grant Accessibility access from Settings › Windows. The app records the active application before showing the launcher, then captures its focused window. Native full screen and maximise are separate actions. Window movement is limited by the target app's resize support and minimum size.
-
-Optional direct shortcuts use Control–Option–Command:
-
-| Keys                     | Action                                            |
-| ------------------------ | ------------------------------------------------- |
-| Left / Right / Up / Down | Halves                                            |
-| U / I / J / K            | Top left / top right / bottom left / bottom right |
-| 1 / 2 / 3                | Left / middle / right thirds                      |
-| Return                   | Maximise                                          |
-| Z                        | Restore                                           |
-| N / P                    | Next / previous display                           |
-
-Press a half or the centre third again to cycle its size. The current frame sets the next size. Halves (left, right, top, bottom) go 1/2, 2/3, then 1/3. Centre third (middle third) goes 1/3, 1/2, then 2/3.
-
-Edge snapping is a separate preference. It snaps only at outer screen edges, not at an edge shared with another display. Leave Rectangle's snapping and the macOS window tiling option ("Drag windows to screen edges to tile") disabled when testing this app's snapping, to avoid two apps moving the same window.
-
-## Jev
-
-Add your own TypeSafe API key in Settings › Input, then turn on natural-language matching. The toggle stays off until a key is stored. The key is stored in macOS Keychain. No key is embedded in the binary.
-
-For ambiguous general requests, Jev receives request text and a bounded list of candidate names and short descriptions. Candidate IDs are opaque. File candidates are sent as names only, never as paths or folders. Queries shorter than three characters do not start a background file search. Explicit file requests stay local. It returns a known action ID or no match. It cannot generate or execute shell commands. Local results do not wait for the network. Closing the panel or changing the query invalidates old replies.
-
-## Development boundaries
-
-The app is built for direct distribution. The build script uses an ad-hoc signature by default. Set `SIGNING_IDENTITY` to a suitable Developer ID identity for signing. Ad-hoc signing is suitable for a local preview; it is not Apple notarization. Rebuilding an ad-hoc app can require renewed privacy permissions.
-
-Custom actions, custom scripts, and content-based document search are outside this initial build. Runtime permissions, microphone hardware, Spaces, and target-app behaviour require real Mac checks in addition to unit tests.
-
-## Read-only and isolated diagnostics
-
-```sh
-"dist/Jev Launcher.app/Contents/MacOS/JevLauncher" --diagnose
-./scripts/window-fixture.sh
-```
-
-The diagnostic prints catalogue size, representative first results, and release-search timings. It does not open apps or alter windows. The fixture opens two disposable windows for manual window-control checks. Close both fixture windows when done. Avoid Tile All/Cascade All during isolated checks because those actions intentionally affect other eligible windows on the display.
-
-For a local file-search check, use `--diagnose-files 'kind:pdf in:downloads'`. This prints filenames from the selected scope for five seconds. Use `--trace-latency` when running the app executable to print panel, local-result, and table-update timings. These timings exclude display compositor latency and spoken-input accuracy. No query text is included in latency output.
-
-`--open` shows the panel at launch. `--trace-interaction` prints open, close, focus, resize, and typed-length events without query text. `--snapshot-ui <dir>` renders the launcher states and each Settings pane to PNG from the app's own views and quits; it captures layout only, not window material or the toolbar. Snapshot windows stay transparent and never take focus, clicks, or typing. `swift scripts/make-icon.swift` regenerates `Resources/AppIcon.icns` and the Icon Composer bundle `Resources/AppIcon.icon`. The build script compiles the bundle with `xcrun actool` (Xcode required) so macOS 26 shows a Liquid Glass icon; without actool it ships the `.icns`.
+[MIT](LICENSE) © 2026 Ryan Erkal

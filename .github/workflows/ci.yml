@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    # NSGlassEffectView needs the macOS 26 SDK, so the runner needs Xcode 26 or later.
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Test
+        run: swift test
+      - name: Build the universal app
+        run: scripts/build.sh
+      - name: Check architectures and signature
+        run: |
+          BIN="dist/Jev Launcher.app/Contents/MacOS/JevLauncher"
+          for arch in arm64 x86_64; do lipo "$BIN" -verify_arch "$arch"; done
+          codesign --verify --strict "dist/Jev Launcher.app"

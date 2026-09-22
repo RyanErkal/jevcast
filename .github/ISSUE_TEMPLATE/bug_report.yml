@@ -1,0 +1,48 @@
+name: Bug report
+description: Something does not work as expected.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps
+      placeholder: |
+        1. Open the launcher with Control-Shift-Space
+        2. Type "left half"
+        3. Press Return
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: In the menu bar, choose About Jev Launcher.
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "macOS 26.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: chip
+    attributes:
+      label: Mac
+      options: [Apple silicon, Intel]
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Other details
+      description: Other launchers or window managers that run at the same time, displays, and which permissions are allowed. Remove personal file names from screenshots.

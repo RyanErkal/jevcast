@@ -10,11 +10,14 @@ BUNDLE_ID="com.ryanerkal.jevlauncher"
 EXECUTABLE="JevLauncher"
 source scripts/version.env
 IDENTITY="${SIGNING_IDENTITY:--}"
-ARCH_FLAGS=()
-for arch in ${ARCHS:-arm64 x86_64}; do ARCH_FLAGS+=(--arch "$arch"); done
+BUILD_FLAGS=(-c release)
+for arch in ${ARCHS:-arm64 x86_64}; do BUILD_FLAGS+=(--arch "$arch"); done
+# SwiftPM stamps the binary with the deployment target as its SDK version, and macOS 26
+# then draws standard windows in the older style. Stamp the real SDK; macOS 14 stays the minimum.
+BUILD_FLAGS+=(-Xlinker -platform_version -Xlinker macos -Xlinker 14.0 -Xlinker "$(xcrun --show-sdk-version)")
 
-swift build -c release "${ARCH_FLAGS[@]}"
-BIN_DIR="$(swift build -c release "${ARCH_FLAGS[@]}" --show-bin-path)"
+swift build "${BUILD_FLAGS[@]}"
+BIN_DIR="$(swift build "${BUILD_FLAGS[@]}" --show-bin-path)"
 
 # Assemble beside dist, then swap the finished bundle in. A running copy keeps
 # its old files, so a rebuild never changes a binary under a live process.

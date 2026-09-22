@@ -1,18 +1,20 @@
 # Jevcast
 
-A keyboard launcher and window manager for macOS. Open apps, find files, do quick sums and conversions, move windows, and reuse what you copied, all from one shortcut. Free and open source under the MIT License.
+A native macOS launcher and window manager. Press **Option–Space** to open apps, find files, calculate, move windows, and reuse what you copied.
+
+For loose requests such as “make this window bigger,” Jevcast can use **Jev by [TypeSafe AI](https://typesafe.ai)** to match your words to a known action. This is optional and uses your own API key. The launcher works without it.
+
+[Install with your agent](#install-with-your-agent) · [See what it does](#what-you-can-do) · [Website](https://jevcast.vercel.app)
 
 ![The launcher showing Safari, two files, and a web search for the query "saf"](site/images/launcher-query.png)
 
-- Native SwiftUI and AppKit app. No third-party code.
-- macOS 14 or later. Apple silicon and Intel.
-- No account, no analytics. Search, clipboard history, and voice stay on your Mac.
+- Free and open source under the [MIT License](LICENSE).
+- Built with SwiftUI and AppKit, with no third-party package dependencies. Runs on macOS 14 or later, on Apple silicon and Intel.
+- No Jevcast account or analytics. Core search, clipboard history, and voice run on your Mac.
 
-Website: [jevcast.vercel.app](https://jevcast.vercel.app).
+## Install with your agent
 
-## Install
-
-**Agent install prompt:**
+Copy this prompt into a coding agent on the Mac where you want Jevcast. The Mac needs Xcode 26 or later to build it.
 
 ```
 Install Jevcast from the official source repository:
@@ -32,7 +34,7 @@ and open it. Do not bypass Gatekeeper or change macOS security settings.
 
 Open the app from Applications. A welcome window helps you choose a shortcut and allow what you need. After that, the app lives in the menu bar. Open **Help › Welcome Guide** to see the window again.
 
-## Use
+## What you can do
 
 Press **Option–Space** and type. If another app already uses that shortcut, choose a different one in the welcome window or in Settings.
 
@@ -46,6 +48,22 @@ Press **Option–Space** and type. If another app already uses that shortcut, ch
 | `gh swiftui`, `yt piano`, `maps cafes`, `wiki moon`        | Searches a site. Add your own keywords in Settings › Search.             |
 | `clip`                                                     | Shows the last 50 text items you copied. Return copies one again.        |
 | `wi-fi settings`                                           | Opens that System Settings pane.                                         |
+
+**Move a window** by typing a layout:
+
+![Jevcast showing window layout choices for the query "left"](site/images/launcher-windows.png)
+
+**Convert units** and copy the answer:
+
+![Jevcast converting 10 kilometres to miles](site/images/launcher-convert.png)
+
+## Optional: Jev by TypeSafe AI
+
+Jevcast finds apps, files, and actions locally. To match a loose request to one of those actions, add your own [TypeSafe AI](https://typesafe.ai) API key in Settings › Input and turn on **Use Jev for natural-language matching**. The key is kept in your macOS Keychain. Local results never wait for Jev.
+
+Jev receives the text you typed and a short list of candidate names, including app, action, site, file, and folder names. It can only choose from that list or return no match. It cannot run commands. Jevcast does not add file or folder paths, clipboard text, or audio to the request. Any path you type yourself is part of the text sent. See [Privacy](#privacy) for the full network details.
+
+## Use
 
 Keys in the launcher:
 
@@ -90,10 +108,6 @@ Press a half again to cycle its size: 1/2, 2/3, then 1/3. The middle third cycle
 
 Turn on **Listen when the launcher opens** in Settings › Input and allow Microphone and Speech Recognition. The launcher then listens each time it opens. Typing stops listening. Recognition runs on your Mac only, and audio is not saved. If on-device recognition is not available for your language, the app tells you and typing still works.
 
-### Natural language (optional)
-
-Jev, a model from [TypeSafe](https://typesafe.ai), can match loose requests such as "make this window bigger" to a known action. Add your own TypeSafe API key in Settings › Input, then turn on natural-language matching. The key is kept in your macOS Keychain. Local results never wait for Jev.
-
 ## Privacy
 
 The app has no account, no analytics, and no crash reporting. It connects to the internet for three things only:
@@ -101,7 +115,7 @@ The app has no account, no analytics, and no crash reporting. It connects to the
 | When                                                                             | Where                                | What is sent                                                                                                                                                                                                          |
 | -------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Once a day, if **Check for updates automatically** is on (default: on)           | `api.github.com`                     | A request for the newest release, with the app version. GitHub sees your IP address, as with any web request. Nothing is downloaded.                                                                                  |
-| When you type a loose request, if natural-language matching is on (default: off) | `api.typesafe.ai`, with your own key | The text you typed and a short list of candidate names: apps, window actions, search sites, and file names. Never file paths, folders, or audio. Jev can only choose one of those candidates. It cannot run commands. |
+| When you type a loose request, if natural-language matching is on (default: off) | `api.typesafe.ai`, with your own key | The text you typed and a short list of candidate names: apps, window actions, search sites, files, and folders. Jevcast does not add file or folder paths, clipboard text, or audio. A path you type yourself is included in the query. Jev can only choose one of the supplied candidates. It cannot run commands. |
 | When you open a web search or a URL                                              | Your default browser                 | Whatever you chose to open.                                                                                                                                                                                           |
 
 Everything else stays on your Mac. Clipboard history is kept in memory only, holds plain text only, and skips items that password managers mark as concealed. The app writes one file of its own: a cache of your app list in `~/Library/Caches/JevLauncher`.

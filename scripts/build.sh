@@ -1,6 +1,9 @@
 #!/bin/bash
 # Builds "dist/Jevcast.app".
-#   SIGNING_IDENTITY  codesign identity. "-" (the default) signs ad hoc for a local build.
+#   SIGNING_IDENTITY  codesign identity. The default is the first "Apple Development" identity in the
+#                     keychain, so macOS keeps Accessibility and Microphone access across rebuilds.
+#                     With none, or with "-", the build is signed ad hoc and access must be granted again
+#                     after each rebuild.
 #   ARCHS             "arm64 x86_64" (the default, universal), or one architecture for a faster local build.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -9,7 +12,8 @@ APP_NAME="Jevcast"
 BUNDLE_ID="com.ryanerkal.jevlauncher"
 EXECUTABLE="JevLauncher"
 source scripts/version.env
-IDENTITY="${SIGNING_IDENTITY:--}"
+DEV_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -1)"
+IDENTITY="${SIGNING_IDENTITY:-${DEV_IDENTITY:--}}"
 BUILD_FLAGS=(-c release)
 for arch in ${ARCHS:-arm64 x86_64}; do BUILD_FLAGS+=(--arch "$arch"); done
 
@@ -70,8 +74,8 @@ if [ -f "$APP/Contents/Resources/Assets.car" ]; then
 fi
 plutil -lint -s "$APP/Contents/Info.plist"
 SIGN_FLAGS=(--force --sign "$IDENTITY" --options runtime --entitlements scripts/entitlements.plist)
-# Notarization needs a secure timestamp. An ad-hoc signature cannot carry one.
-if [ "$IDENTITY" != "-" ]; then SIGN_FLAGS+=(--timestamp); fi
+# Notarization needs a secure timestamp. Only a Developer ID build is notarized.
+if [[ "$IDENTITY" == "Developer ID Application:"* ]]; then SIGN_FLAGS+=(--timestamp); fi
 codesign "${SIGN_FLAGS[@]}" "$APP"
 codesign --verify --strict "$APP"
 rm -rf "dist/$APP_NAME.app"

@@ -52,7 +52,7 @@ Snapshots render the app's own views. They show layout only, not window material
 - `scripts/build.sh` builds arm64 and x86_64 by default. `ARCHS=arm64` builds one architecture.
 - The build records the real SDK version in the binary. Without it, macOS 26 draws standard windows in the older style. The minimum system stays macOS 14.
 - The bundle is assembled in `dist/.stage.*` and then moved into place, so a running copy is never changed in place.
-- A local build is signed ad hoc. macOS can ask for permissions again after a rebuild.
+- A local build is signed with your first "Apple Development" certificate when one is in the keychain. macOS then keeps Accessibility, Microphone, and Speech access across rebuilds. Without one, the build is signed ad hoc, and each rebuild needs access granted again: remove the old Jevcast entry in System Settings › Privacy & Security › Accessibility, then add it again.
 
 ## Website
 

@@ -19,20 +19,39 @@ enum KeychainStoreError: Error, LocalizedError, Equatable {
 }
 
 enum KeychainStore {
-    private static let service = "com.jev.launcher.typesafe"
-    private static let account = "api-key"
+    private static let service = AppIdentity.bundleID
+    private static let account = "typesafe-api-key"
+    /// Where builds before 1.0 kept the key. A read moves it to the current item once.
+    private static let legacyQuery: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: "com.jev.launcher.typesafe",
+        kSecAttrAccount as String: "api-key"
+    ]
 
     /// Never shows a Keychain prompt; a read that needs one fails instead.
     static func read() throws -> String? {
-        var query = baseQuery
+        if let value = try read(baseQuery) { return value }
+        guard let value = try read(legacyQuery) else { return nil }
+        // The old item goes only after the new one is stored.
+        if (try? save(value)) != nil { _ = SecItemDelete(silent(legacyQuery) as CFDictionary) }
+        return value
+    }
+
+    private static func read(_ item: [String: Any]) throws -> String? {
+        var query = silent(item)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
-        let context = LAContext(); context.interactionNotAllowed = true
-        query[kSecUseAuthenticationContext as String] = context
-
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         return try value(status: status, result: result)
+    }
+
+    /// The query with prompts disabled: an item that needs one fails instead.
+    private static func silent(_ item: [String: Any]) -> [String: Any] {
+        var query = item
+        let context = LAContext(); context.interactionNotAllowed = true
+        query[kSecUseAuthenticationContext as String] = context
+        return query
     }
 
     static func value(status: OSStatus, result: CFTypeRef?) throws -> String? {
@@ -81,6 +100,8 @@ enum KeychainStore {
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainStoreError.unexpectedStatus(status)
         }
+        // Remove means removed: an unmigrated old item must not come back on the next read.
+        _ = SecItemDelete(silent(legacyQuery) as CFDictionary)
     }
 
     private static var baseQuery: [String: Any] {

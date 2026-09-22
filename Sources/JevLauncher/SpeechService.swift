@@ -19,7 +19,7 @@ final class SpeechService: ObservableObject {
 
     private let recognizer = SFSpeechRecognizer(locale: Locale.current)
     private let captureWorker = CaptureWorker()
-    private let logger = Logger(subsystem: "com.jevlauncher", category: "SpeechService")
+    private let logger = Logger(subsystem: AppIdentity.bundleID, category: "SpeechService")
     private var sessionToken: UInt64 = 0
     private var startRequestedAt: UInt64?
 
@@ -160,7 +160,7 @@ private final class CaptureWorker: @unchecked Sendable {
 
     typealias EventHandler = @Sendable (Event) -> Void
 
-    private let queue = DispatchQueue(label: "com.jevlauncher.speech.capture")
+    private let queue = DispatchQueue(label: AppIdentity.bundleID + ".speech.capture")
     private let requestLock = NSLock()
     private var requestedToken: UInt64?
 

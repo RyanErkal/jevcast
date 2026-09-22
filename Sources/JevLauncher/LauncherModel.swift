@@ -89,7 +89,7 @@ final class LauncherModel: ObservableObject {
     /// Empty query with nothing to suggest: the panel is only the search bar.
     var isCollapsed: Bool { query.isEmpty && rows.isEmpty }
     /// The single strip message: errors first, then permission and file-search hints.
-    /// Voice setup lives in Settings › Voice; the strip shows voice only after a real failure.
+    /// Voice setup lives in Settings › Input; the strip shows voice only after a real failure.
     var notice: Notice? {
         if let message { return Notice(symbol: "exclamationmark.triangle.fill", text: message, tone: .warning) }
         if let error = speech.errorMessage ?? voiceError { return Notice(symbol: "mic.slash", text: error, tone: .warning) }
@@ -457,7 +457,7 @@ final class LauncherModel: ObservableObject {
         case .present(let value): key = value
         case .failed(let message): if revision == current && visible { aiStatus = message; aiError = message }; return
         case .missing, .unknown:
-            if revision == current && visible { aiStatus = "Add a TypeSafe key in Settings"; aiError = "Add a TypeSafe key in Settings › Jev." }
+            if revision == current && visible { aiStatus = "Add a TypeSafe key in Settings"; aiError = "Add a TypeSafe key in Settings › Input." }
             return
         }
         guard !Task.isCancelled, visible, revision == current else { return }

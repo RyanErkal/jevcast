@@ -3,7 +3,7 @@ import os
 
 /// Opt-in timings contain only stage names and elapsed time, never query text or paths.
 enum PerformanceTrace {
-    private static let log = OSLog(subsystem: "ai.typesafe.JevLauncher", category: .pointsOfInterest)
+    private static let log = OSLog(subsystem: AppIdentity.bundleID, category: .pointsOfInterest)
     static func start(_ name: StaticString) -> (OSSignpostID, TimeInterval) {
         let id = OSSignpostID(log: log)
         os_signpost(.begin, log: log, name: name, signpostID: id)

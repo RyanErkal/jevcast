@@ -42,7 +42,7 @@ struct LauncherView: View {
                 .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
                 .accessibilityHidden(true)
             LauncherSearchField(model: model)
-            // Voice setup lives in Settings › Voice; the button appears only once voice can work.
+            // Voice setup lives in Settings › Input; the button appears only once voice can work.
             if speech.permissionsGranted { MicButton(speech: speech) { model.toggleListening() } }
         }
         .padding(.horizontal, LauncherMetrics.gutter)

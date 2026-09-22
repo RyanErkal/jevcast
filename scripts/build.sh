@@ -12,9 +12,6 @@ source scripts/version.env
 IDENTITY="${SIGNING_IDENTITY:--}"
 BUILD_FLAGS=(-c release)
 for arch in ${ARCHS:-arm64 x86_64}; do BUILD_FLAGS+=(--arch "$arch"); done
-# SwiftPM stamps the binary with the deployment target as its SDK version, and macOS 26
-# then draws standard windows in the older style. Stamp the real SDK; macOS 14 stays the minimum.
-BUILD_FLAGS+=(-Xlinker -platform_version -Xlinker macos -Xlinker 14.0 -Xlinker "$(xcrun --show-sdk-version)")
 
 swift build "${BUILD_FLAGS[@]}"
 BIN_DIR="$(swift build "${BUILD_FLAGS[@]}" --show-bin-path)"
@@ -26,7 +23,12 @@ STAGE="$(mktemp -d dist/.stage.XXXXXX)"
 trap 'rm -rf "$STAGE"' EXIT
 APP="$STAGE/$APP_NAME.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN_DIR/$EXECUTABLE" "$APP/Contents/MacOS/$EXECUTABLE"
+# SwiftPM can stamp the deployment target as the SDK version. That makes macOS 26
+# draw standard windows in the old style. Update the load command before signing;
+# SwiftPM's -Xlinker handling differs between Xcode 26 and 27.
+xcrun vtool -set-build-version macos 14.0 "$(xcrun --show-sdk-version)" -replace \
+  -output "$APP/Contents/MacOS/$EXECUTABLE" "$BIN_DIR/$EXECUTABLE"
+chmod 755 "$APP/Contents/MacOS/$EXECUTABLE"
 # macOS 26 draws the Icon Composer bundle as a Liquid Glass icon. actool also writes an
 # AppIcon.icns fallback for older systems. Without actool (no Xcode), ship the static .icns.
 if [ -d Resources/AppIcon.icon ] && xcrun --find actool >/dev/null 2>&1; then

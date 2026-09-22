@@ -31,4 +31,6 @@ jobs:
         run: |
           BIN="dist/Jevcast.app/Contents/MacOS/JevLauncher"
           for arch in arm64 x86_64; do lipo "$BIN" -verify_arch "$arch"; done
+          SDK="$(xcrun --show-sdk-version)"
+          test "$(xcrun vtool -show-build "$BIN" | grep -Ec "sdk[[:space:]]+$SDK$")" -eq 2
           codesign --verify --strict "dist/Jevcast.app"

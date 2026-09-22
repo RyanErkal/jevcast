@@ -8,7 +8,7 @@ A keyboard launcher and window manager for macOS. Open apps, find files, do quic
 - macOS 14 or later. Apple silicon and Intel.
 - No account, no analytics. Search, clipboard history, and voice stay on your Mac.
 
-Website: planned at `https://jevcast.vercel.app` (deployment pending).
+Website: [jevcast.vercel.app](https://jevcast.vercel.app).
 
 ## Install
 

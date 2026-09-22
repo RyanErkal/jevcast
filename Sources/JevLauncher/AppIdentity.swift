@@ -8,7 +8,7 @@ enum AppIdentity {
     /// Also the preferences domain, the Keychain service, and the log subsystem.
     static let bundleID = "com.ryanerkal.jevlauncher"
     static let repository = URL(string: "https://github.com/RyanErkal/jevcast")!
-    static let website = repository
+    static let website = URL(string: "https://jevcast.vercel.app")!
     static let issues = URL(string: "https://github.com/RyanErkal/jevcast/issues")!
     static let releases = URL(string: "https://github.com/RyanErkal/jevcast/releases")!
     static let latestReleaseAPI = URL(string: "https://api.github.com/repos/RyanErkal/jevcast/releases/latest")!

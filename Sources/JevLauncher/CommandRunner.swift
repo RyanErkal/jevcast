@@ -46,6 +46,17 @@ enum CommandRunner {
         return ListeningPorts.parse(output)
     }
 
+    /// CPU, memory, uptime, command line, and working folder for each PID, from `ps` and `lsof`.
+    static func processDetails(_ pids: [Int32]) async -> [Int32: ProcessSnapshot] {
+        guard !pids.isEmpty else { return [:] }
+        async let stats = try? capture(["/bin/ps"] + ProcessSnapshots.statsArguments(pids), allowFailure: true)
+        async let executables = try? capture(["/bin/ps"] + ProcessSnapshots.executableArguments(pids), allowFailure: true)
+        async let commandLines = try? capture(["/bin/ps"] + ProcessSnapshots.commandLineArguments(pids), allowFailure: true)
+        async let folders = try? capture(["/usr/sbin/lsof"] + ProcessSnapshots.folderArguments(pids), allowFailure: true)
+        return ProcessSnapshots.parse(stats: await stats ?? "", executables: await executables ?? "",
+                                      commandLines: await commandLines ?? "", folders: await folders ?? "")
+    }
+
     /// Asks a process to quit with SIGTERM, or ends it at once with SIGKILL when `force` is set.
     static func stop(_ listener: ListeningPort, force: Bool = false) throws {
         guard kill(listener.pid, force ? SIGKILL : SIGTERM) == 0 else {

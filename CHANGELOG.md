@@ -2,6 +2,14 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.2.2] - 2026-09-23
+
+### Added
+
+- A richer port list. Each listening process shows its CPU, memory, uptime, the script or module it runs (such as `vite` or `http.server`), its project folder, and whether it is open to your network or to this Mac only. The numbers refresh every two seconds while the list is open.
+- Your own servers come first. macOS services are marked and warn that they may start again. Another user's processes, such as root's, cannot be stopped from here: Return explains why, and ⌘K copies the `sudo kill` command.
+- ⌘K on a port: open `http://localhost:<port>`, show the folder in Finder, force stop, copy the PID, or copy the full command line.
+
 ## [1.2.1] - 2026-09-23
 
 ### Added

@@ -37,13 +37,62 @@ extension LauncherModel {
         return nil
     }
 
-    /// One row for each process that listens on the queried port, or on any port.
+    /// One row for each process that listens on the queried port, or on any port. Your own
+    /// servers come first, then macOS services, then other users' processes.
     func portRows() -> [LauncherResult] {
         guard portQuery != nil else { return [] }
-        return listeners.enumerated().map { index, listener in
-            LauncherResult(id: listener.id, title: "Stop \(listener.command)", detail: ":\(listener.port) · PID \(listener.pid)",
-                           symbol: "xmark.octagon", action: .stopProcess(listener), score: 1900 - Double(index))
+        let order: [ProcessSnapshot.Owner: Int] = [.yours: 0, .system: 1, .otherUser: 2]
+        let sorted = listeners.sorted { lhs, rhs in
+            let l = order[portOwner(lhs)] ?? 0, r = order[portOwner(rhs)] ?? 0
+            return l != r ? l < r : lhs.port < rhs.port
         }
+        return sorted.enumerated().map { index, listener in
+            LauncherResult(id: listener.id, title: portName(listener) + "  :" + String(listener.port), detail: portDetail(listener),
+                           symbol: portSymbol(listener), action: .stopProcess(listener), score: 1900 - Double(index))
+        }
+    }
+
+    /// "Google Chrome", or the program name for a command-line server.
+    func portName(_ listener: ListeningPort) -> String {
+        if let app = NSRunningApplication(processIdentifier: listener.pid), let name = app.localizedName { return name }
+        if let executable = portDetails[listener.pid]?.executable, !executable.isEmpty { return (executable as NSString).lastPathComponent }
+        return listener.command
+    }
+
+    func portOwner(_ listener: ListeningPort) -> ProcessSnapshot.Owner {
+        portDetails[listener.pid]?.owner(currentUID: getuid()) ?? .yours
+    }
+
+    /// "vite · 4.2% CPU · 84 MB · up 2 h · ~/Dev/site · open to your network".
+    func portDetail(_ listener: ListeningPort) -> String {
+        guard let details = portDetails[listener.pid] else { return "PID \(listener.pid) · reading details…" }
+        var parts: [String] = []
+        switch portOwner(listener) {
+        case .system: parts.append("macOS service")
+        case .otherUser: parts.append("another user's process")
+        case .yours: break
+        }
+        // An app's name already says what it is; a command-line server gets its script or module.
+        let role = NSRunningApplication(processIdentifier: listener.pid) == nil ? details.role : ""
+        if !role.isEmpty, role.lowercased() != portName(listener).lowercased() { parts.append(role) }
+        parts += [details.cpuText, details.memoryText, details.uptimeText]
+        // "~/Dev/site", or "…/worktrees/site" for a deep folder.
+        if let folder = details.folder { parts.append(Self.folderDetail(folder + "/_")) }
+        parts.append(listener.exposed ? "open to your network" : "this Mac only")
+        return parts.joined(separator: " · ")
+    }
+
+    private func portSymbol(_ listener: ListeningPort) -> String {
+        switch portOwner(listener) {
+        case .yours: return listener.exposed ? "network" : "server.rack"
+        case .system: return "gearshape.2"
+        case .otherUser: return "lock"
+        }
+    }
+
+    static func homeRelative(_ path: String) -> String {
+        let home = NSHomeDirectory()
+        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
     }
 
     /// The strip text for a port lookup that is running or found nothing.
@@ -53,17 +102,26 @@ extension LauncherModel {
         return portQuery.port.map { "Nothing is listening on port \($0)." } ?? "No TCP ports are listening."
     }
 
-    /// Runs lsof off the main thread. `promoteFirst` puts the first listener at the top, for a Jev match.
+    /// Runs lsof and ps off the main thread, then refreshes CPU and memory every two seconds
+    /// while the list is open. `promoteFirst` puts the first listener at the top, for a Jev match.
     func loadPorts(_ query: PortQuery, revision current: UUID, promoteFirst: Bool) {
-        portQuery = query; isLoadingPorts = true; listeners = []
+        portQuery = query; isLoadingPorts = true; listeners = []; portDetails = [:]
         rebuild()
         Task { [weak self] in
-            let found = await CommandRunner.listeningPorts()
-            guard let self, self.visible, self.revision == current else { return }
-            self.listeners = query.port.map { port in found.filter { $0.port == port } } ?? found
-            self.isLoadingPorts = false
-            if promoteFirst, let first = self.listeners.first { self.promotedID = first.id }
-            self.rebuild()
+            var first = true
+            while let self, self.visible, self.revision == current {
+                let found = await CommandRunner.listeningPorts()
+                let matching = query.port.map { port in found.filter { $0.port == port } } ?? found
+                let details = await CommandRunner.processDetails(Array(Set(matching.map(\.pid))))
+                guard self.visible, self.revision == current else { return }
+                self.listeners = matching
+                self.portDetails = details
+                self.isLoadingPorts = false
+                if first, promoteFirst, let top = self.portRows().first { self.promotedID = top.id }
+                first = false
+                self.rebuild()
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
         }
     }
 
@@ -105,9 +163,11 @@ extension LauncherModel {
     }
 
     /// "stop node on port 3000", for the confirmation strip.
-    static func confirmPhrase(_ result: LauncherResult) -> String {
+    func confirmPhrase(_ result: LauncherResult) -> String {
         switch result.action {
-        case .stopProcess(let listener): return "stop \(listener.command) on port \(listener.port)"
+        case .stopProcess(let listener):
+            let phrase = "stop \(portName(listener)) on port \(listener.port)"
+            return portOwner(listener) == .system ? phrase + ". It is a macOS service and may start again" : phrase
         case .command(let command): return command.title.lowercased()
         default: return result.title.lowercased()
         }

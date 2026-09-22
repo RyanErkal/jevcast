@@ -67,7 +67,7 @@ final class ResultActions {
             item.target = self; item.tag = callbacks.count
             callbacks.append { model.select(result.id); action() }; menu.addItem(item)
         }
-        add("Open", key: "\r") { model.execute() }
+        add(model.primaryActionTitle ?? "Open", key: "\r") { model.execute() }
         if result.path != nil {
             add("Quick Look", key: "y", action: preview)
             add("Reveal in Finder", key: "r") { model.revealSelected() }
@@ -82,8 +82,26 @@ final class ResultActions {
             add("Paste", key: "\r") { model.execute(paste: true) }
             menu.item(at: menu.numberOfItems - 1)?.keyEquivalentModifierMask = [.shift]
         case .stopProcess(let listener):
-            add("Force Stop") { model.forceStop(listener) }
+            let details = model.portDetails[listener.pid]
+            add("Open http://localhost:\(listener.port)") {
+                if let url = URL(string: "http://localhost:\(listener.port)") { NSWorkspace.shared.open(url) }
+                model.onClose?(false)
+            }
+            if let folder = details?.folder {
+                add("Show Folder in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: folder)]); model.onClose?(false)
+                }
+            }
+            menu.addItem(.separator())
+            if model.portOwner(listener) == .otherUser {
+                add("Copy sudo kill \(listener.pid)") { model.copy("sudo kill \(listener.pid)"); model.message = "Command copied. Paste it in Terminal." }
+            } else {
+                add("Force Stop") { model.forceStop(listener) }
+            }
             add("Copy PID") { model.copy(String(listener.pid)); model.message = "PID copied" }
+            if let arguments = details?.arguments, !arguments.isEmpty {
+                add("Copy Command Line") { model.copy(arguments); model.message = "Command line copied" }
+            }
         default: break
         }
         if case .app = result.action {

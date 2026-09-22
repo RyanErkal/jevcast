@@ -46,7 +46,7 @@ struct LauncherResult: Identifiable {
     }
     /// Calculator answers and clipboard entries keep a second line; other rows are single-line.
     var isTwoLine: Bool {
-        switch action { case .copy, .clipboard: return true; default: return false }
+        switch action { case .copy, .clipboard, .stopProcess: return true; default: return false }
     }
     var path: String? {
         switch action { case .app(let app): return app.path; case .file(let file): return file.path; default: return nil }
@@ -120,7 +120,7 @@ final class LauncherModel: ObservableObject {
             return Notice(symbol: "macwindow.badge.plus", text: "Window control needs Accessibility access.", tone: .info, action: .allowAccessibility)
         }
         if let pending = selected, pending.id == pendingConfirmID {
-            return Notice(symbol: "exclamationmark.circle", text: "Press Return again to " + Self.confirmPhrase(pending) + ".", tone: .warning)
+            return Notice(symbol: "exclamationmark.circle", text: "Press Return again to " + confirmPhrase(pending) + ".", tone: .warning)
         }
         if let portNotice { return Notice(symbol: "network", text: portNotice, tone: .info) }
         if let jevNotice { return Notice(symbol: "sparkles", text: jevNotice, tone: .info) }
@@ -145,7 +145,9 @@ final class LauncherModel: ObservableObject {
             return "Open URL"
         case .copy, .clipboard: return "Copy"
         case .command, .custom: return selected.id == pendingConfirmID ? "Confirm" : "Run Command"
-        case .stopProcess: return selected.id == pendingConfirmID ? "Confirm" : "Stop Process"
+        case .stopProcess(let listener):
+            if portOwner(listener) == .otherUser { return "Needs Administrator" }
+            return selected.id == pendingConfirmID ? "Confirm" : "Stop Process"
         case .appThenWindow: return "Open and Arrange"
         case .shortcut: return "Run Shortcut"
         case .workflow: return "Run Workflow"
@@ -198,6 +200,8 @@ final class LauncherModel: ObservableObject {
     /// The port query in the search field, if any, and what lsof found for it.
     var portQuery: PortQuery?
     var listeners: [ListeningPort] = []
+    /// CPU, memory, and command line for each listening process, refreshed while the list is open.
+    var portDetails: [Int32: ProcessSnapshot] = [:]
     var isLoadingPorts = false
     /// The row that is waiting for a second Return.
     @Published var pendingConfirmID: String?
@@ -232,7 +236,7 @@ final class LauncherModel: ObservableObject {
         visible = true; acceptsSpeech = true; manualSelection = false; query = ""; message = nil; voiceError = nil
         parsedFileQuery = FileSearchQuery(text: ""); fileStatus = ""
         previousFileResults = []; fileResults = []; promotedID = nil; semanticResult = nil; revision = UUID()
-        portQuery = nil; listeners = []; isLoadingPorts = false; pendingConfirmID = nil
+        portQuery = nil; listeners = []; portDetails = [:]; isLoadingPorts = false; pendingConfirmID = nil
         jevPick = nil; menuCommands = []
         rebuild()
         ShortcutsCatalogue.shared.refreshIfStale()
@@ -274,7 +278,7 @@ final class LauncherModel: ObservableObject {
             if !fileResults.isEmpty { previousFileResults = fileResults }
         } else { previousFileResults = [] }
         query = text; message = nil; manualSelection = false; fileResults = []; promotedID = nil; semanticResult = nil
-        pendingConfirmID = nil; portQuery = PortQuery.parse(text); listeners = []; jevPick = nil
+        pendingConfirmID = nil; portQuery = PortQuery.parse(text); listeners = []; portDetails = [:]; jevPick = nil
         revision = UUID(); let current = revision
         work?.cancel(); aiWork?.cancel(); files.stop(); aiStatus = ""; aiError = nil
         if typed { voiceError = nil }
@@ -554,6 +558,10 @@ final class LauncherModel: ObservableObject {
     var selected: LauncherResult? { results.first { $0.id == selectedID && $0.isCurrent } }
     func execute(paste: Bool = false) {
         guard let result = selected else { message = "Choose an action first."; return }
+        if case .stopProcess(let listener) = result.action, portOwner(listener) == .otherUser {
+            message = "\(portName(listener)) belongs to another user. To stop it, run sudo kill \(listener.pid) in Terminal. ⌘K copies the command."
+            return
+        }
         if result.needsConfirmation && pendingConfirmID != result.id { pendingConfirmID = result.id; return }
         pendingConfirmID = nil
         // Freeze the visible action before stopping speech or accepting an async response.

@@ -32,6 +32,7 @@ extension Diagnostics {
                 Status: \(model.aiStatus.isEmpty ? "Jev not asked" : model.aiStatus)\(model.aiError.map { " (\($0))" } ?? "")
                 Query now: \(model.query)
                 Top: \(top?.title ?? "none") [\(top?.detail ?? "")]
+                Rows: \(model.results.filter(\.isCurrent).prefix(6).map { "\n  • \($0.title) [\($0.detail)]" }.joined())
                 Candidates sent: \(after.requests > before.requests ? String(model.jevCandidates().candidates.count) : "0")
                 Tokens: \(after.inputTokens - before.inputTokens) in, \(after.outputTokens - before.outputTokens) out, \(JevPricing.format(after.cost - before.cost))
                 """)

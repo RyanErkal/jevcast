@@ -374,6 +374,19 @@ final class LauncherFlowTests: XCTestCase {
             XCTAssertFalse(model.results.contains { $0.id == "url" })
         }
     }
+    /// One shared word ("2", "in") is not a reason to list a window action beside an answer.
+    @MainActor func testAnswerDropsWeakMatchesButKeepsWindowWords() {
+        withModel { model in
+            model.updateQuery("12 * (8 + 2)", typed: true)
+            XCTAssertEqual(model.results.map(\.id), ["calculator", "web"])
+            model.updateQuery("10 km in mi", typed: true)
+            XCTAssertEqual(model.results.first?.id, "calculator")
+            XCTAssertFalse(model.results.contains { $0.id.hasPrefix("window:") })
+            // Without an answer, word matches still list window actions.
+            model.updateQuery("left", typed: true)
+            XCTAssertTrue(model.results.contains { $0.id == "window:left-third" })
+        }
+    }
 }
 
 @MainActor private func waitUntil(timeout: TimeInterval = 2, _ condition: () -> Bool) async throws {

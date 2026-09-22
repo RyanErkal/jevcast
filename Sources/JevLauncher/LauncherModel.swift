@@ -279,6 +279,16 @@ final class LauncherModel: ObservableObject {
             rows.append(Self.fileRow(file, score: score, isCurrent: filesAreCurrent))
         }
         if !isFileSearch { rows += quicklinkRows(q) }
+        let answer = isFileSearch ? nil : Calculator.evaluate(q)
+        // A finished sum or conversion is the answer. Beside it, keep only whole-name and
+        // prefix matches (90 and up), so "12 * (8 + 2)" does not list "Left Two Thirds"
+        // for its "2". File rows already had to match every word.
+        if answer != nil && q.contains(where: \.isNumber) {
+            rows.removeAll { row in
+                if case .file = row.action { return false }
+                return row.score < 90
+            }
+        }
         // Learned use reorders close matches. The boost stays under 10 points, the gap
         // between an exact match (100) and the best non-exact match (90).
         let now = Date(), frecency = preferences.frecency
@@ -287,7 +297,7 @@ final class LauncherModel: ObservableObject {
             let boost = frecency.boost(for: row.id, query: q, now: now) * Self.maxBoost
             return boost > 0 ? row.adding(boost) : row
         }
-        if !isFileSearch, let answer = Calculator.evaluate(q) {
+        if let answer {
             let kind = q.rangeOfCharacter(from: .letters) == nil ? "Calculator" : "Conversion"
             rows.append(LauncherResult(id: "calculator", title: answer, detail: kind, symbol: "equal.square", action: .copy(answer), score: 2000))
         }

@@ -23,3 +23,4 @@ First public release.
 ### Fixed
 
 - The six sixth-of-screen window actions showed no icon.
+- A sum or conversion no longer lists window actions or settings that share one word with it, such as "Left Two Thirds" for `12 * (8 + 2)`.

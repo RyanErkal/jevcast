@@ -2,6 +2,39 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.2.0] - 2026-09-23
+
+### Added
+
+- **Settings › Usage.** Jev requests, input and output tokens, cost, Jev picks, and requests answered from memory, for 7 days, 30 days, and all time. Counts come from TypeSafe's usage figures and stay on this Mac.
+- **Memory.** When you choose a result for a request, Jevcast remembers it on this Mac. The same request then needs no Jev call. ⌘Z on a remembered or Jev pick undoes it and forgets it.
+- **Open and arrange.** "notes left half" or "open notes on the left" opens the app, then arranges its window.
+- **Site search in plain words.** "search github for swift ui". Jev can also pick a site, and the rest of the request becomes the search.
+- **Apple Shortcuts.** Your Shortcuts appear in the launcher, and Jev can choose them.
+- **Menu items.** The menus of the app you were using, such as Safari's "New Private Window", are searchable. The Window menu and recent-document menus are left out.
+- **Workflows** in Settings › Commands: run several steps from one name, such as open Xcode, Left Two Thirds, open Terminal, Right Third.
+- **Snippets** with `{date}`, `{time}`, and `{clipboard}`. Shift–Return pastes.
+- **Timers.** `5m tea`, `timer 10 min`, or "remind me in 20 minutes to call Sam". Type `timers` to cancel one.
+- **Emoji and symbols.** `:tada`, `emoji party`, or `symbol arrow`. Return copies, Shift–Return pastes.
+- **Calculator history.** Use `ans` in a sum, such as `ans * 2`. Type `history` for recent answers.
+- **Clipboard.** Pin items from the ⌘K menu, filter with `clip links`, `clip numbers`, `clip colours`, `clip emails`, or `clip code`, and paste with Shift–Return.
+- **Ports.** Plain phrasing such as "stop whatever is running on 3000". ⌘K adds Force Stop and Copy PID.
+- **Your commands** can take text: put `{input}` in the command, then type the name and the text. `{input}` is passed as a quoted argument, never as command text. A command can copy its output or show it in a notification.
+- `--diagnose-jev "request"` runs requests through the launcher with the stored key and prints the pick and the tokens used.
+
+### Changed
+
+- Jev is smarter about when to run. A whole-name match, a sum, a URL, a keyword search, a timer, or a port lookup skips it. The same request within 10 minutes reuses the last answer.
+- Jev's candidate list puts matches for the request's words first, from apps, System Settings panes, commands, workflows, Shortcuts, snippets, and menu items. It can also route to Find Files, Recent Files, Clipboard History, and Timers.
+- File search understands more everyday phrasing: "pdfs from last week in downloads", "documents I changed last month", "screenshots from yesterday". New dates: last week, this month, last month.
+- Your commands moved to a new Settings › Commands tab with workflows and snippets.
+- Local builds are signed with your Apple Development certificate when you have one, so macOS keeps Accessibility access across rebuilds.
+
+### Fixed
+
+- A sum with a spaced division, such as `100 / 4`, was read as a file path.
+- A custom command with a lot of output could hang.
+
 ## [1.1.0] - 2026-09-23
 
 ### Added

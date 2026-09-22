@@ -73,6 +73,19 @@ final class ResultActions {
             add("Reveal in Finder", key: "r") { model.revealSelected() }
             add("Copy Path") { model.copyPath() }
         }
+        switch result.action {
+        case .clipboard(let item):
+            add("Paste", key: "\r") { model.execute(paste: true) }
+            menu.item(at: menu.numberOfItems - 1)?.keyEquivalentModifierMask = [.shift]
+            add(item.pinned ? "Unpin" : "Pin") { model.clipboard.togglePin(item.id); model.rebuild() }
+        case .copy, .snippet:
+            add("Paste", key: "\r") { model.execute(paste: true) }
+            menu.item(at: menu.numberOfItems - 1)?.keyEquivalentModifierMask = [.shift]
+        case .stopProcess(let listener):
+            add("Force Stop") { model.forceStop(listener) }
+            add("Copy PID") { model.copy(String(listener.pid)); model.message = "PID copied" }
+        default: break
+        }
         if case .app = result.action {
             menu.addItem(.separator())
             add(model.preferences.favourites.contains(result.id) ? "Remove Favourite" : "Add Favourite") {

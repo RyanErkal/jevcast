@@ -50,7 +50,13 @@ Press **Option–Space** and type. If another app already uses that shortcut, ch
 | `wi-fi settings`                                           | Opens that System Settings pane.                                         |
 | `port 3000`, `kill 5173`, `ports`                          | Lists what listens on a local port. Return twice stops it.               |
 | `dark mode`, `caffeinate`, `empty trash`, `my ip`          | Runs a built-in command. Disruptive ones ask for a second Return.        |
-| The name of your own command                               | Runs a command you added in Settings › Search.                           |
+| The name of your own command                               | Runs a command you added in Settings › Commands.                         |
+| `notes left half`                                          | Opens Notes, then arranges its window.                                   |
+| `search github for swift ui`                               | Searches that site with the rest of your words.                          |
+| `5m tea`, `timer 10 min`                                   | Starts a timer with a notification. `timers` lists them.                 |
+| `:tada`, `emoji party`                                     | Finds an emoji or symbol. Return copies, Shift–Return pastes.            |
+| `ans * 2`                                                  | Uses the last answer. `history` lists recent answers.                    |
+| A menu item, Shortcut, workflow, or snippet name           | Runs it. Menu items come from the app you were using.                    |
 
 **Move a window** by typing a layout:
 
@@ -64,7 +70,7 @@ Press **Option–Space** and type. If another app already uses that shortcut, ch
 
 Jevcast finds apps, files, and actions locally. To match a loose request to one of those actions, add your own [TypeSafe AI](https://typesafe.ai) API key in Settings › Input and turn on **Use Jev for natural-language matching**. The key is kept in your macOS Keychain. Local results never wait for Jev.
 
-Jev reads each request after a short pause, typed or spoken. It receives that text and a short list of candidate names: apps, window actions, built-in commands, your own commands by name, sites, files, and folders. It can only choose from that list or return no match. It never writes a command. A whole-name match you typed stays first. Jevcast does not add file or folder paths, clipboard text, or audio to the request. Any path you type yourself is part of the text sent. See [Privacy](#privacy) for the full network details.
+Jev reads each request after a short pause, typed or spoken. It receives that text and a short list of candidate names: apps, System Settings panes, window actions, built-in commands, your own commands, workflows, Shortcuts, and snippets by name, menu item names from the app you were using, sites, files, and folders. It can only choose from that list or return no match. It never writes a command. A whole-name match you typed stays first. Jevcast does not add file or folder paths, clipboard text, or audio to the request. Any path you type yourself is part of the text sent. See [Privacy](#privacy) for the full network details.
 
 ## Use
 
@@ -113,7 +119,11 @@ Turn on **Listen when the launcher opens** in Settings › Input and allow Micro
 
 ### Commands
 
-Type `port 3000` to see what listens on that port, then press Return twice to stop it. `ports` lists every listener. Built-in commands, such as **Toggle Dark Mode**, **Keep Mac Awake for 1 Hour**, and **Copy Local IP Address**, run fixed programs with fixed arguments and no shell. Add your own in Settings › Search › Your commands. Those run with `zsh -lc` from your home folder. Jev can choose any command by its name, but it never sees or writes command text.
+Type `port 3000` to see what listens on that port, then press Return twice to stop it. `ports` lists every listener. Built-in commands, such as **Toggle Dark Mode**, **Keep Mac Awake for 1 Hour**, and **Copy Local IP Address**, run fixed programs with fixed arguments and no shell. Add your own in Settings › Commands. Those run with `zsh -lc` from your home folder. Put `{input}` in a command to pass text typed after its name, as a quoted argument. Settings › Commands also holds **workflows**, which run several steps from one name, and **snippets**. Jev can choose any of these by name, but it never sees or writes command text.
+
+### Jev memory and usage
+
+When you choose a result for a request, Jevcast remembers it on this Mac, and the same request then needs no Jev call. Press ⌘Z on a Jev or remembered pick to undo it and forget it. A whole-name match, a sum, a URL, a timer, or a port lookup never asks Jev. Settings › Usage shows requests, tokens, and cost for 7 days, 30 days, and all time.
 
 ## Privacy
 
@@ -122,7 +132,7 @@ The app has no account, no analytics, and no crash reporting. It connects to the
 | When                                                                             | Where                                | What is sent                                                                                                                                                                                                          |
 | -------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Once a day, if **Check for updates automatically** is on (default: on)           | `api.github.com`                     | A request for the newest release, with the app version. GitHub sees your IP address, as with any web request. Nothing is downloaded.                                                                                  |
-| After each pause in typing or speech, if natural-language matching is on (default: off) | `api.typesafe.ai`, with your own key | The text you typed or said and a short list of candidate names: apps, window actions, commands, search sites, files, and folders. Jevcast does not add file or folder paths, command text, clipboard text, or audio. A path you type yourself is included in the query. Jev can only choose one of the supplied candidates. |
+| After each pause in typing or speech, if natural-language matching is on (default: off) | `api.typesafe.ai`, with your own key | The text you typed or said and a short list of candidate names: apps, settings panes, window actions, commands, workflows, Shortcuts, snippet names, menu item names, search sites, files, and folders. Jevcast does not add file or folder paths, command text, snippet text, clipboard text, or audio. A path you type yourself is included in the query. Jev can only choose one of the supplied candidates. |
 | When you open a web search or a URL                                              | Your default browser                 | Whatever you chose to open.                                                                                                                                                                                           |
 
 Everything else stays on your Mac. Clipboard history is kept in memory only, holds plain text only, and skips items that password managers mark as concealed. The app writes one file of its own: a cache of your app list in `~/Library/Caches/JevLauncher`.

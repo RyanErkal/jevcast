@@ -30,6 +30,20 @@ public struct FileSearchQuery: Equatable, Sendable {
         case today
         case yesterday
         case week
+        case lastWeek = "last-week"
+        case month
+        case lastMonth = "last-month"
+
+        public var title: String {
+            switch self {
+            case .today: return "today"
+            case .yesterday: return "yesterday"
+            case .week: return "this week"
+            case .lastWeek: return "last week"
+            case .month: return "this month"
+            case .lastMonth: return "last month"
+            }
+        }
     }
 
     public enum Scope: String, CaseIterable, Sendable {
@@ -93,6 +107,14 @@ public struct FileSearchQuery: Equatable, Sendable {
             return DateInterval(start: start, end: today)
         case .week:
             return calendar.dateInterval(of: .weekOfYear, for: now)
+        case .lastWeek:
+            guard let previous = calendar.date(byAdding: .weekOfYear, value: -1, to: now) else { return nil }
+            return calendar.dateInterval(of: .weekOfYear, for: previous)
+        case .month:
+            return calendar.dateInterval(of: .month, for: now)
+        case .lastMonth:
+            guard let previous = calendar.date(byAdding: .month, value: -1, to: now) else { return nil }
+            return calendar.dateInterval(of: .month, for: previous)
         }
     }
 
@@ -108,7 +130,12 @@ public struct FileSearchQuery: Equatable, Sendable {
     ) -> Bool {
         if !nameQuery.isEmpty {
             let foldedName = Self.fold(name)
-            let allWordsMatch = nameQuery.split(separator: " ").allSatisfy { foldedName.contains(Self.fold(String($0))) }
+            let allWordsMatch = nameQuery.split(separator: " ").allSatisfy { word in
+                let folded = Self.fold(String(word))
+                // "screenshots" still finds "Screenshot 2026-09-23.png".
+                let singular = folded.count > 3 && folded.hasSuffix("s") ? String(folded.dropLast()) : folded
+                return foldedName.contains(folded) || foldedName.contains(singular)
+            }
             guard allWordsMatch else { return false }
         }
 
@@ -156,7 +183,7 @@ public struct FileSearchQuery: Equatable, Sendable {
     private static let commandWords: Set<String> = [
         "find", "search", "locate", "look", "show", "list", "open", "get", "retrieve",
         "please", "me", "the", "a", "an", "for", "with", "named", "name", "file", "files",
-        "recent", "latest", "newest"
+        "recent", "latest", "newest", "my", "i", "all", "any", "some", "that", "which", "were", "was", "from", "since", "made", "saved"
     ]
 
     private static func parseParts(_ text: String) -> Parts {
@@ -250,7 +277,7 @@ public struct FileSearchQuery: Equatable, Sendable {
                 if let modified = modified(for: value) {
                     setModified(modified)
                 } else {
-                    parts.error = "Use today, yesterday, or week after modified:."
+                    parts.error = "Use today, yesterday, week, last-week, month, or last-month after modified:."
                 }
                 parts.explicitIntent = true
                 index += 1
@@ -269,9 +296,29 @@ public struct FileSearchQuery: Equatable, Sendable {
                 continue
             }
 
+            // "this week", "last week", "past month", "previous month".
+            if ["this", "last", "past", "previous"].contains(lower), let nextValue,
+               let modified = relativeDate(lower, fold(nextValue).lowercased()) {
+                guard explicitFileContext || parts.kind != nil else {
+                    parts.nameWords.append(raw)
+                    index += 1
+                    continue
+                }
+                setModified(modified)
+                parts.explicitIntent = true
+                explicitFileContext = true
+                index += 2
+                continue
+            }
+
             if lower == "in" || lower == "from" || lower == "within" {
                 let recognized = nextValue.map(isScopeValue) ?? false
                 guard recognized || explicitFileContext else {
+                    index += 1
+                    continue
+                }
+                // A connector before a date or filler word, such as "from last week", is not a folder.
+                if !recognized, let nextValue, !nextValue.hasPrefix("\"") {
                     index += 1
                     continue
                 }
@@ -289,9 +336,12 @@ public struct FileSearchQuery: Equatable, Sendable {
 
             if lower == "modified" || lower == "changed" || lower == "updated" {
                 parts.explicitIntent = true
+                explicitFileContext = true
                 if let nextValue, let modified = modified(for: nextValue) {
                     setModified(modified)
                     index += 2
+                } else if let nextValue, ["this", "last", "past", "previous", "in", "from", "since", "on"].contains(fold(nextValue).lowercased()) {
+                    index += 1
                 } else {
                     parts.error = "Use today, yesterday, or week after modified."
                     index += 1
@@ -421,7 +471,8 @@ public struct FileSearchQuery: Equatable, Sendable {
     }
 
     private static func isPath(_ value: String) -> Bool {
-        value.hasPrefix("/") || value.hasPrefix("~/") || value.lowercased().hasPrefix("file://")
+        // A lone "/" is division in "100 / 4", not the root folder.
+        (value.hasPrefix("/") && value.count > 1) || value.hasPrefix("~/") || value.lowercased().hasPrefix("file://")
     }
 
     private static func isScopeValue(_ value: String) -> Bool {
@@ -447,6 +498,18 @@ public struct FileSearchQuery: Equatable, Sendable {
         case "today": return .today
         case "yesterday", "yesterdays": return .yesterday
         case "week", "thisweek", "this-week": return .week
+        case "last-week", "lastweek": return .lastWeek
+        case "month", "thismonth", "this-month": return .month
+        case "last-month", "lastmonth": return .lastMonth
+        default: return nil
+        }
+    }
+
+    private static func relativeDate(_ qualifier: String, _ unit: String) -> Modified? {
+        let last = qualifier != "this"
+        switch unit {
+        case "week": return last ? .lastWeek : .week
+        case "month": return last ? .lastMonth : .month
         default: return nil
         }
     }
@@ -477,7 +540,7 @@ public struct FileSearchQuery: Equatable, Sendable {
         var values: [String] = []
         if let kind { values.append(kind == .folder ? "Folders" : kind.rawValue.uppercased() + " files") }
         if let modified {
-            values.append("modified " + modified.rawValue)
+            values.append("modified " + modified.title)
         }
         if let scope { values.append("in " + scope.rawValue.capitalized) }
         if let scopePath { values.append("in " + scopePath) }

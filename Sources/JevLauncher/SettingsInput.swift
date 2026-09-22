@@ -92,7 +92,7 @@ struct InputSettings: View {
         guard case .present(let value) = keys.state else { return }
         testing = true; keyMessage = ""
         defer { testing = false }
-        do { try await JevService().validate(apiKey: value); keyMessage = "Key works." }
+        do { try await JevService(usage: .shared).validate(apiKey: value); keyMessage = "Key works." }
         catch { keyMessage = JevService.statusMessage(for: error) }
     }
     private func request(_ permission: Permission) -> () -> Void {

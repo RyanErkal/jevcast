@@ -36,6 +36,16 @@ public struct PortQuery: Equatable, Sendable {
                 return PortQuery(port: port)
             }
         }
+        // "stop whatever is running on 3000", "what's on port 5173", "kill the server on localhost:8080".
+        let portWords: Set<String> = ["port", "running", "listening", "server", "localhost", "dev"]
+        if words.contains(where: { portWords.contains($0) || $0.hasPrefix("localhost:") }) {
+            // The number must read as a port: "on 3000", "port 3000", "at 3000", ":3000", or "localhost:3000".
+            for (index, word) in words.enumerated() {
+                let tail = word.split(separator: ":").last.map(String.init) ?? word
+                guard let port = number(tail) else { continue }
+                if word.contains(":") || (index > 0 && ["on", "port", "at"].contains(words[index - 1])) { return PortQuery(port: port) }
+            }
+        }
         return nil
     }
 

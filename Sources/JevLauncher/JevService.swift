@@ -69,10 +69,13 @@ struct JevService {
 
     private let session: URLSession
     private let endpointURL: URL
+    /// Receives token counts from every answered request, for Settings › Usage.
+    private let usage: JevUsageLog?
 
-    init(session: URLSession = .shared, endpoint: URL = JevService.endpoint) {
+    init(session: URLSession = .shared, endpoint: URL = JevService.endpoint, usage: JevUsageLog? = nil) {
         self.session = session
         self.endpointURL = endpoint
+        self.usage = usage
     }
 
     func choose(query: String, candidates: [JevCandidate], apiKey: String) async throws -> String? {
@@ -138,6 +141,11 @@ struct JevService {
             decoded = try JSONDecoder().decode(ResponseBody.self, from: data)
         } catch {
             throw JevServiceError.invalidResponse("TypeSafe returned an unreadable response.")
+        }
+
+        // Billed whether or not the answer passes the checks below.
+        if let usage, let tokens = decoded.usage {
+            Task { @MainActor in usage.record(inputTokens: tokens.input_tokens, outputTokens: tokens.output_tokens) }
         }
 
         guard decoded.model == Self.model else {
@@ -211,6 +219,12 @@ private struct ChoiceQuestion: Encodable {
 private struct ResponseBody: Decodable {
     let model: String
     let answers: [String: ChoiceAnswer]
+    let usage: Usage?
+}
+
+private struct Usage: Decodable {
+    let input_tokens: Int
+    let output_tokens: Int
 }
 
 private struct ChoiceAnswer: Decodable {

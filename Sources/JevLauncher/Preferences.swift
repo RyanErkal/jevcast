@@ -18,7 +18,11 @@ final class Preferences: ObservableObject {
     @Published var aliases: [String: String] { didSet { defaults.set(aliases, forKey: "aliases") } }
     @Published var quicklinks: [Quicklink] { didSet { defaults.set(try? JSONEncoder().encode(quicklinks), forKey: "quicklinks") } }
     /// Commands the user writes. Only their names go to Jev.
-    @Published var customCommands: [CustomCommand] { didSet { defaults.set(try? JSONEncoder().encode(customCommands), forKey: "customCommands") } }
+    @Published var customCommands: [CustomCommand] { didSet { save(customCommands, "customCommands") } }
+    @Published var workflows: [Workflow] { didSet { save(workflows, "workflows") } }
+    @Published var snippets: [Snippet] { didSet { save(snippets, "snippets") } }
+    /// Requests already resolved on this Mac, so they skip Jev next time.
+    @Published private(set) var learned: LearnedIntents
     @Published var clipboardHistory: Bool { didSet { defaults.set(clipboardHistory, forKey: "clipboardHistory") } }
     @Published var checksForUpdates: Bool { didSet { defaults.set(checksForUpdates, forKey: "checksForUpdates") } }
     /// Set once the welcome window has been shown, so it opens by itself only on a new install.
@@ -53,7 +57,10 @@ final class Preferences: ObservableObject {
         favourites = d.stringArray(forKey: "favourites") ?? []
         aliases = d.dictionary(forKey: "aliases") as? [String: String] ?? [:]
         quicklinks = d.data(forKey: "quicklinks").flatMap { try? JSONDecoder().decode([Quicklink].self, from: $0) } ?? Quicklink.defaults
-        customCommands = d.data(forKey: "customCommands").flatMap { try? JSONDecoder().decode([CustomCommand].self, from: $0) } ?? []
+        customCommands = Self.load(d, "customCommands") ?? []
+        workflows = Self.load(d, "workflows") ?? []
+        snippets = Self.load(d, "snippets") ?? []
+        learned = Self.load(d, "learnedIntents") ?? LearnedIntents()
         clipboardHistory = d.object(forKey: "clipboardHistory") as? Bool ?? true
         recentIDs = d.stringArray(forKey: "recentIDs") ?? []
         if let data = d.data(forKey: "frecency"), let stored = try? JSONDecoder().decode(Frecency.self, from: data) {
@@ -74,6 +81,22 @@ final class Preferences: ObservableObject {
         defaults.set(recentIDs, forKey: "recentIDs")
         frecency.record(id, query: query)
         saveFrecency()
+    }
+    func learn(_ query: String, id: String) {
+        learned.record(query, id: id)
+        save(learned, "learnedIntents")
+    }
+    func unlearn(_ query: String) {
+        learned.forget(query)
+        save(learned, "learnedIntents")
+    }
+    func clearLearned() {
+        learned = LearnedIntents()
+        save(learned, "learnedIntents")
+    }
+    private func save<T: Encodable>(_ value: T, _ key: String) { defaults.set(try? JSONEncoder().encode(value), forKey: key) }
+    private static func load<T: Decodable>(_ defaults: UserDefaults, _ key: String) -> T? {
+        defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(T.self, from: $0) }
     }
     private func saveFrecency() { defaults.set(try? JSONEncoder().encode(frecency), forKey: "frecency") }
     func toggleFavourite(_ id: String) {

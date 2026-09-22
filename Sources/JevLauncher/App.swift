@@ -7,6 +7,9 @@ import LauncherCore
 struct JevLauncherApp {
     @MainActor static func main() {
         if CommandLine.arguments.contains("--diagnose") { Diagnostics.run(); return }
+        if let index = CommandLine.arguments.firstIndex(of: "--diagnose-jev"), CommandLine.arguments.indices.contains(index + 1) {
+            Diagnostics.jev(Array(CommandLine.arguments[(index + 1)...])); return
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--diagnose-files"), CommandLine.arguments.indices.contains(index + 1) {
             Diagnostics.searchFiles(CommandLine.arguments[index + 1]); return
         }
@@ -32,7 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     private lazy var updates = UpdateChecker(preferences: preferences)
     private var welcome: WelcomeWindow?
     private let catalogue = AppCatalogue()
-    private lazy var model = LauncherModel(preferences: preferences, catalogue: catalogue)
+    private lazy var model = LauncherModel(preferences: preferences, catalogue: catalogue, jev: JevService(usage: .shared), usage: .shared)
     private let hotkeys = HotkeyCenter()
     private var launcherHotkey: (hotkey: Hotkey, token: UInt32)?
     private var windowHotkeyIDs: [UInt32] = []
@@ -76,7 +79,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             case 53:
                 self.hide()
                 return nil
-            case 36, 76: self.model.execute(); return nil
+            case 36, 76: self.model.execute(paste: event.modifierFlags.contains(.shift)); return nil
+            case 6 where event.modifierFlags.contains(.command) && !event.modifierFlags.contains(.shift):
+                // ⌘Z undoes a Jev pick. Otherwise the search field keeps its own undo.
+                return self.model.undoJevPick() ? nil : event
             case 125: self.model.moveSelection(1); self.preview.update(path: self.model.selected?.path); return nil
             case 126: self.model.moveSelection(-1); self.preview.update(path: self.model.selected?.path); return nil
             case 40 where event.modifierFlags.contains(.command): self.showActions(); return nil

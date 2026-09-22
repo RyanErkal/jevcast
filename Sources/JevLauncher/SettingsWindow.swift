@@ -7,17 +7,19 @@ import SwiftUI
 @MainActor
 final class SettingsWindow: NSWindowController, NSToolbarDelegate {
     enum Tab: String, CaseIterable {
-        case general, search, windows, input
+        case general, search, commands, windows, input, usage
         var title: String {
             switch self {
             case .general: return "General"; case .search: return "Search"
-            case .windows: return "Windows"; case .input: return "Input"
+            case .commands: return "Commands"; case .windows: return "Windows"
+            case .input: return "Input"; case .usage: return "Usage"
             }
         }
         var symbol: String {
             switch self {
             case .general: return "gearshape"; case .search: return "magnifyingglass"
-            case .windows: return "macwindow"; case .input: return "waveform"
+            case .commands: return "terminal"; case .windows: return "macwindow"
+            case .input: return "waveform"; case .usage: return "chart.bar"
             }
         }
         var identifier: NSToolbarItem.Identifier { NSToolbarItem.Identifier(rawValue) }
@@ -91,7 +93,9 @@ final class SettingsWindow: NSWindowController, NSToolbarDelegate {
         case .general: GeneralSettings(preferences: preferences, status: status, updates: updates, changed: changed)
         case .search: SearchSettings(preferences: preferences, catalogue: catalogue)
         case .windows: WindowSettings(preferences: preferences, model: model, changed: changed)
+        case .commands: CommandSettings(preferences: preferences, catalogue: catalogue)
         case .input: InputSettings(preferences: preferences, speech: model.speech)
+        case .usage: UsageSettings(preferences: preferences, usage: JevUsageLog.shared)
         }
     }
 

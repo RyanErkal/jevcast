@@ -330,6 +330,32 @@
                 </div>
               </dl>
             </div>
+            <div class="ex">
+              <h3><span class="ex-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z" /></svg></span>Say it your way</h3>
+              <dl>
+                <div class="ex-row">
+                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>notes left half</code></span></dt>
+                  <dd>Opens Notes, then puts it on the left.</dd>
+                </div>
+                <div class="ex-row">
+                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>search github for swift ui</code></span></dt>
+                  <dd>Searches the site with the rest of your words.</dd>
+                </div>
+              </dl>
+            </div>
+            <div class="ex">
+              <h3><span class="ex-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg></span>Timers and emoji</h3>
+              <dl>
+                <div class="ex-row">
+                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>5m tea</code></span></dt>
+                  <dd>A timer with a notification. <code>timers</code> lists them.</dd>
+                </div>
+                <div class="ex-row">
+                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>:tada</code></span></dt>
+                  <dd>🎉 to copy. Shift–Return pastes it.</dd>
+                </div>
+              </dl>
+            </div>
           </div>
         </div>
       </section>
@@ -649,6 +675,18 @@ scripts/build.sh</code></pre>
           <ol class="releases">
             <li class="release">
               <div class="release-head">
+                <span class="release-tag">1.2.0</span>
+                <time datetime="2026-09-23">23 September 2026</time>
+              </div>
+              <ul>
+                <li><strong>Jev remembers.</strong> Pick a result once and the same request skips Jev next time. ⌘Z undoes a pick.</li>
+                <li><strong>Usage.</strong> Settings shows Jev requests, tokens, and cost for 7 days, 30 days, and all time.</li>
+                <li><strong>Say it your way.</strong> “notes left half”, “search github for swift ui”, “pdfs from last week”.</li>
+                <li><strong>More to run.</strong> Workflows, snippets, Apple Shortcuts, the front app’s menus, timers, and emoji.</li>
+              </ul>
+            </li>
+            <li class="release">
+              <div class="release-head">
                 <span class="release-tag">1.1.0</span>
                 <time datetime="2026-09-23">23 September 2026</time>
               </div>
@@ -705,9 +743,11 @@ scripts/build.sh</code></pre>
                 Jev is an optional model from
                 <a href="https://typesafe.ai">TypeSafe</a>. With your own
                 TypeSafe API key, it reads each request after a short pause, typed
-                or spoken, such as “make this window bigger” or “stop whatever is
-                on 3000”, and picks one of the app’s known actions. It never
-                writes a command. It is off by default, and the app works fully
+                or spoken, such as “make this window bigger” or “open my coding
+                setup”, and picks one of the app’s known actions. It never
+                writes a command. Jevcast remembers what you chose, so a
+                repeated request needs no Jev call, and Settings › Usage shows
+                what it costs. It is off by default, and the app works fully
                 without it.
               </p>
             </details>

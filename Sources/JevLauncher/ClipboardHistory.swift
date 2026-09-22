@@ -28,6 +28,36 @@ struct ClipboardItem: Identifiable, Equatable {
     let id = UUID()
     let text: String
     let copiedAt: Date
+    /// Pinned items stay at the top and are never pushed out. Pins live in memory, like the history.
+    var pinned = false
+
+    enum Kind: String, CaseIterable {
+        case links, emails, numbers, colors, code
+        /// Words that ask for this kind after "clip".
+        var words: [String] {
+            switch self {
+            case .links: return ["link", "links", "url", "urls"]
+            case .emails: return ["email", "emails"]
+            case .numbers: return ["number", "numbers"]
+            case .colors: return ["color", "colors", "colour", "colours"]
+            case .code: return ["code", "snippet", "snippets"]
+            }
+        }
+    }
+
+    func isKind(_ kind: Kind) -> Bool {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch kind {
+        case .links: return value.range(of: #"^(https?://|www\.)\S+$"#, options: .regularExpression) != nil
+        case .emails: return value.range(of: #"^[^@\s]+@[^@\s]+\.[a-zA-Z]{2,}$"#, options: .regularExpression) != nil
+        case .numbers:
+            return value.range(of: #"^[£$€¥]?\s?-?[0-9][0-9.,\s]*%?$"#, options: .regularExpression) != nil
+        case .colors:
+            return value.range(of: #"^(#[0-9a-fA-F]{3,8}|rgba?\(.*\)|hsla?\(.*\))$"#, options: .regularExpression) != nil
+        case .code:
+            return value.contains("\n") && value.range(of: #"[{};=()<>]"#, options: .regularExpression) != nil
+        }
+    }
 }
 
 /// In-memory plain-text clipboard history. Nothing is written to disk. Items from
@@ -76,9 +106,10 @@ final class ClipboardHistory: ObservableObject {
         lastChangeCount = count
         guard !Self.shouldSkip(types: pasteboard.types), let text = pasteboard.string(),
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.count <= Self.maxLength else { return }
+        let wasPinned = items.contains { $0.text == text && $0.pinned }
         items.removeAll { $0.text == text }
-        items.insert(ClipboardItem(text: text, copiedAt: now), at: 0)
-        if items.count > Self.limit { items.removeLast(items.count - Self.limit) }
+        items.insert(ClipboardItem(text: text, copiedAt: now, pinned: wasPinned), at: 0)
+        trim()
     }
 
     /// Puts an entry back on the pasteboard without recording it as a new copy.
@@ -86,10 +117,32 @@ final class ClipboardHistory: ObservableObject {
         lastChangeCount = pasteboard.write(item.text)
     }
 
+    func togglePin(_ id: UUID) {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        items[index].pinned.toggle()
+        trim()
+    }
+
+    /// Unpinned items beyond the limit drop off the end.
+    private func trim() {
+        var unpinned = 0
+        items = items.filter { item in
+            if item.pinned { return true }
+            unpinned += 1
+            return unpinned <= Self.limit
+        }
+    }
+
+    /// Pinned first, then newest. "links", "numbers", "colours", "emails", and "code" filter by kind.
     func matches(_ filter: String) -> [ClipboardItem] {
         let text = filter.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return items }
-        return items.filter { $0.text.localizedCaseInsensitiveContains(text) }
+        let ordered = items.filter(\.pinned) + items.filter { !$0.pinned }
+        guard !text.isEmpty else { return ordered }
+        if let kind = ClipboardItem.Kind.allCases.first(where: { $0.words.contains(text.lowercased()) }) {
+            return ordered.filter { $0.isKind(kind) }
+        }
+        if ["pinned", "pins", "pin"].contains(text.lowercased()) { return ordered.filter(\.pinned) }
+        return ordered.filter { $0.text.localizedCaseInsensitiveContains(text) }
     }
 
     /// Returns the filter text when `query` asks for clipboard history ("clip", "clipboard", "clip <text>").

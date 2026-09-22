@@ -11,6 +11,15 @@ extension LauncherModel {
             rows.append(Self.systemRow(command, score: score * 100))
         }
         for command in preferences.customCommands {
+            // "Open repo swift" passes "swift" to a command that takes {input}.
+            if command.takesInput, q.lowercased().hasPrefix(command.name.lowercased() + " ") {
+                let input = String(q.dropFirst(command.name.count + 1)).trimmingCharacters(in: .whitespaces)
+                if !input.isEmpty {
+                    rows.append(LauncherResult(id: "custom:\(command.id):input", title: "\(command.name): \(input)", detail: "Your command",
+                                               symbol: "terminal", action: .custom(command, input: input), score: 1750))
+                    continue
+                }
+            }
             guard let score = SearchRanking.score(query: q, title: command.name) else { continue }
             rows.append(Self.customRow(command, score: score * 100))
         }
@@ -72,11 +81,27 @@ extension LauncherModel {
         }
     }
 
-    func run(_ command: CustomCommand) {
+    func run(_ command: CustomCommand, input: String?) {
         Task { [weak self] in
-            do { try await CommandRunner.run(command) }
-            catch { self?.showFailure("\(command.name): \(error.localizedDescription)") }
+            do {
+                let output = try await CommandRunner.run(command, input: input)
+                switch command.output {
+                case .none: break
+                case .copy:
+                    if output.isEmpty { self?.showFailure("\(command.name) printed nothing to copy.") } else { self?.copy(output) }
+                case .notify:
+                    _ = await Notifier.post(title: command.name, body: output.isEmpty ? "Finished." : String(output.prefix(400)))
+                }
+            } catch {
+                self?.showFailure("\(command.name): \(error.localizedDescription)")
+            }
         }
+    }
+
+    /// Ends a process that ignored Stop, from the actions menu.
+    func forceStop(_ listener: ListeningPort) {
+        do { try CommandRunner.stop(listener, force: true); onClose?(true) }
+        catch { message = error.localizedDescription }
     }
 
     /// "stop node on port 3000", for the confirmation strip.
@@ -94,7 +119,7 @@ extension LauncherModel {
     }
 
     static func customRow(_ command: CustomCommand, score: Double) -> LauncherResult {
-        LauncherResult(id: "custom:" + command.id, title: command.name, detail: "Your command",
-                       symbol: "terminal", action: .custom(command), score: score)
+        LauncherResult(id: "custom:" + command.id, title: command.name, detail: command.takesInput ? "Your command · type text after the name" : "Your command",
+                       symbol: "terminal", action: .custom(command, input: nil), score: score)
     }
 }

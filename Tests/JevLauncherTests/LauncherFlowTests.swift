@@ -412,19 +412,73 @@ final class LauncherFlowTests: XCTestCase {
         XCTAssertTrue(jev.candidates.isEmpty, "Sums and port lookups do not call Jev.")
         XCTAssertEqual(files.searches, searchesBefore, "Port lookups skip Spotlight.")
     }
-    @MainActor func testJevCannotDisplaceAnExactMatch() async throws {
+    @MainActor func testExactMatchSkipsJev() async throws {
+        let jev = HeldJev()
+        let (model, _, defaults, suite) = makeModel(jev: jev)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        model.begin(); defer { model.end() }
+        model.updateQuery("left half", typed: true)
+        try await Task.sleep(nanoseconds: 450_000_000)
+        XCTAssertTrue(jev.candidates.isEmpty, "A whole-name match needs no Jev request.")
+        XCTAssertEqual(model.selected?.id, "window:left-half")
+    }
+    @MainActor func testChosenAnswerIsRememberedAndSkipsJevNextTime() async throws {
+        let jev = HeldJev()
+        let (model, preferences, defaults, suite) = makeModel(jev: jev)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        model.begin()
+        let asked = expectation(description: "Jev asked")
+        jev.onChoose = { asked.fulfill() }
+        model.updateQuery("make it huge please", typed: true)
+        await fulfillment(of: [asked], timeout: 2)
+        let id = try XCTUnwrap(jev.candidates.first { $0.title == WindowAction.maximize.title }?.id)
+        jev.onChoose = nil
+        jev.reply(id)
+        try await waitUntil { model.selected?.id == "window:maximize" }
+        XCTAssertTrue(model.selected?.detail.hasPrefix("Jev") == true, "The pick is marked.")
+        XCTAssertTrue(model.notice?.text.contains("⌘Z") == true)
+        // Choosing it teaches the Mac. Window moves need Accessibility, so tests teach it directly.
+        model.learnFromExecution(try XCTUnwrap(model.selected))
+        model.end()
+        XCTAssertEqual(preferences.learned.lookup("make it huge"), "window:maximize")
+        let calls = jev.candidates.count
+        model.begin(); defer { model.end() }
+        model.updateQuery("make it huge", typed: true)
+        try await waitUntil { model.selected?.id == "window:maximize" }
+        XCTAssertEqual(model.aiStatus, "Remembered")
+        XCTAssertEqual(jev.candidates.count, calls, "No second request.")
+        XCTAssertTrue(model.undoJevPick())
+        XCTAssertNil(preferences.learned.lookup("make it huge"), "Undo forgets the answer.")
+        XCTAssertNotEqual(model.results.first?.id, "window:maximize")
+    }
+    @MainActor func testJevRouteToFilesRewritesTheQuery() async throws {
+        let jev = HeldJev()
+        let files = InstantFileSearch()
+        let (model, _, defaults, suite) = makeModel(jev: jev, files: files)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        model.begin(); defer { model.end() }
+        let asked = expectation(description: "Jev asked")
+        jev.onChoose = { asked.fulfill() }
+        model.updateQuery("photos from this week", typed: true)
+        await fulfillment(of: [asked], timeout: 2)
+        let id = try XCTUnwrap(jev.candidates.first { $0.title == "Find files" }?.id)
+        jev.reply(id)
+        try await waitUntil { model.query == "find photos from this week" }
+        XCTAssertTrue(model.isFileSearch)
+    }
+    @MainActor func testJevQuicklinkPickKeepsTheSearchText() async throws {
         let jev = HeldJev()
         let (model, _, defaults, suite) = makeModel(jev: jev)
         defer { defaults.removePersistentDomain(forName: suite) }
         model.begin(); defer { model.end() }
         let asked = expectation(description: "Jev asked")
         jev.onChoose = { asked.fulfill() }
-        model.updateQuery("left half", typed: true)
+        model.updateQuery("github issues about swift ui", typed: true)
         await fulfillment(of: [asked], timeout: 2)
-        let id = try XCTUnwrap(jev.candidates.first { $0.title == WindowAction.maximize.title }?.id)
+        let id = try XCTUnwrap(jev.candidates.first { $0.title == "Search GitHub" }?.id)
         jev.reply(id)
-        try await waitUntil { model.aiStatus == "Kept exact match" }
-        XCTAssertEqual(model.selected?.id, "window:left-half")
+        try await waitUntil { model.selected?.title == "Search GitHub for issues about swift ui" }
+        XCTAssertEqual(model.selected?.id, "quicklink:gh")
     }
     @MainActor func testCustomCommandsReachJevByNameOnly() async throws {
         let jev = HeldJev()
@@ -459,6 +513,65 @@ final class LauncherFlowTests: XCTestCase {
             model.updateQuery("empty trash", typed: true)
             XCTAssertNil(model.pendingConfirmID)
         }
+    }
+    @MainActor func testLocalSmartRows() {
+        withModel { model in
+            model.updateQuery("5m tea", typed: true)
+            XCTAssertEqual(model.selected?.title, "Start 5 min timer: tea")
+            model.updateQuery("search github for swift ui", typed: true)
+            XCTAssertEqual(model.selected?.title, "Search GitHub for swift ui")
+            model.updateQuery(":tada", typed: true)
+            XCTAssertEqual(model.selected?.title.hasPrefix("🎉"), true)
+            XCTAssertTrue(model.results.allSatisfy { $0.id.hasPrefix("symbol:") }, "Emoji mode lists emoji only.")
+            model.updateQuery("12 * 10", typed: true)
+            model.execute()
+        }
+    }
+    @MainActor func testCalculatorAnswerFeedsAns() {
+        withModel { model in
+            model.updateQuery("12 * 10", typed: true)
+            model.execute()
+            model.begin()
+            model.updateQuery("ans / 4", typed: true)
+            XCTAssertEqual(model.selected?.title, "30")
+            model.updateQuery("history", typed: true)
+            XCTAssertEqual(model.selected?.title, "120")
+        }
+    }
+    @MainActor func testCustomCommandInputAndSnippetsAndWorkflows() {
+        let (model, preferences, defaults, suite) = makeModel(jev: HeldJev())
+        defer { defaults.removePersistentDomain(forName: suite) }
+        preferences.jevEnabled = false
+        preferences.customCommands = [CustomCommand(name: "Open repo", command: "open ~/Dev/{input}")]
+        preferences.snippets = [Snippet(name: "Sign off", text: "Thanks, {clipboard}")]
+        preferences.workflows = [Workflow(name: "Coding", steps: [Workflow.Step(kind: .window, value: "left-half")])]
+        model.begin(); defer { model.end() }
+        model.updateQuery("open repo swift", typed: true)
+        XCTAssertEqual(model.selected?.title, "Open repo: swift")
+        guard case .custom(_, let input) = model.selected?.action else { return XCTFail("Expected a custom command") }
+        XCTAssertEqual(input, "swift")
+        model.updateQuery("sign off", typed: true)
+        XCTAssertEqual(model.selected?.id.hasPrefix("snippet:"), true)
+        model.updateQuery("coding", typed: true)
+        XCTAssertEqual(model.selected?.id.hasPrefix("workflow:"), true)
+        XCTAssertEqual(Snippet(name: "s", text: "a {clipboard}").expanded(clipboard: "b"), "a b")
+    }
+    @MainActor func testClipboardPinsAndKinds() {
+        let board = FakePasteboard()
+        let (model, _, defaults, suite) = makeModel(jev: HeldJev(), board: board)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        board.copy("https://example.com/page"); model.clipboard.poll()
+        board.copy("#ff8800"); model.clipboard.poll()
+        board.copy("plain words"); model.clipboard.poll()
+        let link = model.clipboard.items.first { $0.text.hasPrefix("https") }!
+        model.clipboard.togglePin(link.id)
+        model.begin(); defer { model.end() }
+        model.updateQuery("clip", typed: true)
+        XCTAssertEqual(model.results.first?.title, "https://example.com/page", "Pinned items come first.")
+        model.updateQuery("clip colours", typed: true)
+        XCTAssertEqual(model.results.map(\.title), ["#ff8800"])
+        model.updateQuery("clip links", typed: true)
+        XCTAssertEqual(model.results.map(\.title), ["https://example.com/page"])
     }
     @MainActor func testBuiltInCommandsMatchByAlias() {
         withModel { model in

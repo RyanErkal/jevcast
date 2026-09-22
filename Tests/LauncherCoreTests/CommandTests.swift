@@ -12,6 +12,14 @@ final class CommandTests: XCTestCase {
         XCTAssertEqual(PortQuery.parse("kill ports"), PortQuery(port: nil))
     }
 
+    func testPlainLanguagePortQueries() {
+        XCTAssertEqual(PortQuery.parse("stop whatever is running on 3000"), PortQuery(port: 3000))
+        XCTAssertEqual(PortQuery.parse("what's listening on 5173"), PortQuery(port: 5173))
+        XCTAssertEqual(PortQuery.parse("kill the server on localhost:8080"), PortQuery(port: 8080))
+        XCTAssertNil(PortQuery.parse("running shoes size 10"))
+        XCTAssertNil(PortQuery.parse("running on empty 10 miles"), "A number that does not follow on, port, or at is not a port.")
+    }
+
     func testNonPortQueriesAreIgnored() {
         XCTAssertNil(PortQuery.parse("kill"))
         XCTAssertNil(PortQuery.parse("kill finder"))

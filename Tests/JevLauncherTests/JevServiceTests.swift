@@ -216,6 +216,27 @@ final class JevServiceTests: XCTestCase {
     }
 
     /// Each service gets its own endpoint URL so parallel tests never share a handler.
+    @MainActor func testUsageIsRecordedFromTheReply() async throws {
+        let suite = "JevLauncherTests." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let log = JevUsageLog(defaults: defaults)
+        let endpoint = URL(string: "https://mock.local/\(UUID().uuidString)/v1/systemone")!
+        MockURLProtocol.setHandler({ _ in jsonResponse(choice: "a", probabilities: ["a": 0.9, "no_match": 0.1], confidence: 0.9) }, for: endpoint)
+        endpoints.append(endpoint)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let service = JevService(session: session, endpoint: endpoint, usage: log)
+        _ = try await service.choose(query: "q", candidates: [JevCandidate(id: "a", title: "A", detail: "")], apiKey: "k")
+        for _ in 0..<50 where log.summary(days: nil).requests == 0 { try await Task.sleep(nanoseconds: 10_000_000) }
+        let total = log.summary(days: nil)
+        XCTAssertEqual(total.requests, 1)
+        XCTAssertEqual(total.inputTokens, 1)
+        XCTAssertEqual(JevUsageLog(defaults: defaults).summary(days: 7).requests, 1, "Counts persist.")
+    }
+
     private func makeService(
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> (JevService, URLSession) {

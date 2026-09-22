@@ -53,4 +53,8 @@ Unit tests cannot prove these. Do them on a Mac with a real keyboard, and record
 - [ ] `port <n>` lists a real local server, and two Returns stop it.
 - [ ] A built-in command, such as Toggle Dark Mode, runs. Empty Trash asks for a second Return.
 - [ ] A command added in Settings › Search runs from the launcher.
+- [ ] `notes left half` with Notes closed opens Notes, then arranges it.
+- [ ] A Jev pick shows "Jev" beside it, ⌘Z undoes it, and the same request next time says "Remembered".
+- [ ] Settings › Usage counts a Jev request.
+- [ ] A menu item of the front app, a Shortcut, a workflow, a snippet (Shift–Return pastes), a timer notification, and `:tada` all work.
 - [ ] With voice on and sound playing through the built-in speakers, the speakers mute while listening and come back after. Headphones are not muted.

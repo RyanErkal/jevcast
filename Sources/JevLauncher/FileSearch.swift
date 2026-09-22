@@ -38,6 +38,9 @@ public final class FileSearch: FileSearching {
 
     private let maxScan = 640
     private let maxResults = 40
+    /// How far past ``maxScan`` the final pass looks for exact or prefix
+    /// name matches, reading only file names.
+    private let maxNameScan = 8_000
     private var lastPublished: [FileEntry]?
 
     public init() {}
@@ -109,15 +112,24 @@ public final class FileSearch: FileSearching {
         query = metadataQuery
         let currentGeneration = generation
 
-        let publish = { [weak self, weak metadataQuery] in
+        let publish = { [weak self, weak metadataQuery] (finished: Bool) in
             guard let self, let metadataQuery, self.generation == currentGeneration, self.query === metadataQuery else { return }
-            metadataQuery.disableUpdates()
-            let results = self.entries(from: metadataQuery, query: parsed, scopes: scopes)
-            metadataQuery.enableUpdates()
-            if results.isEmpty {
-                self.status(metadataQuery.isGathering ? "Searching · " + parsed.filterSummary : "No indexed matches. Check search folders and Spotlight indexing.")
+            if finished {
+                // The launcher shows a snapshot. Stop live updates once the
+                // initial gathering ends so Spotlight stops re-sending changes;
+                // stopped queries keep their results.
+                metadataQuery.stop()
+                self.tokens.forEach(NotificationCenter.default.removeObserver)
+                self.tokens = []
             } else {
-                let limit = metadataQuery.resultCount > self.maxScan ? " · Recent matches; narrow your search" : ""
+                metadataQuery.disableUpdates()
+            }
+            let results = self.entries(from: metadataQuery, query: parsed, scopes: scopes, scanOlderNames: finished)
+            if !finished { metadataQuery.enableUpdates() }
+            if results.isEmpty {
+                self.status(finished ? "No indexed matches. Check search folders and Spotlight indexing." : "Searching · " + parsed.filterSummary)
+            } else {
+                let limit = metadataQuery.resultCount > self.maxScan ? " · " + Self.narrowHint : ""
                 self.status("\(results.count) result\(results.count == 1 ? "" : "s") · \(parsed.filterSummary)" + limit)
             }
             if self.lastPublished != results {
@@ -126,9 +138,13 @@ public final class FileSearch: FileSearching {
             }
         }
 
-        for name in [NSNotification.Name.NSMetadataQueryGatheringProgress, NSNotification.Name.NSMetadataQueryDidFinishGathering, NSNotification.Name.NSMetadataQueryDidUpdate] {
+        let events: [(NSNotification.Name, Bool)] = [
+            (.NSMetadataQueryGatheringProgress, false),
+            (.NSMetadataQueryDidFinishGathering, true)
+        ]
+        for (name, finished) in events {
             tokens.append(NotificationCenter.default.addObserver(forName: name, object: metadataQuery, queue: .main) { _ in
-                Task { @MainActor in publish() }
+                Task { @MainActor in publish(finished) }
             })
         }
 
@@ -153,7 +169,12 @@ public final class FileSearch: FileSearching {
             if kind == .folder {
                 predicates.append(NSPredicate(format: "%K == %@", "kMDItemContentType", "public.folder"))
             } else {
-                let types = extensions.map { NSPredicate(format: "%K LIKE[cd] %@", NSMetadataItemFSNameKey, "*." + $0) }
+                // Spotlight's content type tree also finds files whose
+                // extension is not listed, such as camera raw formats. The
+                // extension list stays as a fallback for untyped files.
+                let types = Self.contentTypes(for: kind).map {
+                    NSPredicate(format: "%K == %@", Self.contentTypeTreeKey, $0)
+                } + extensions.map { NSPredicate(format: "%K LIKE[cd] %@", NSMetadataItemFSNameKey, "*." + $0) }
                 predicates.append(types.count == 1 ? types[0] : NSCompoundPredicate(orPredicateWithSubpredicates: types))
             }
         }
@@ -169,27 +190,40 @@ public final class FileSearch: FileSearching {
     private func entries(
         from metadataQuery: NSMetadataQuery,
         query: FileSearchQuery,
-        scopes: [URL]
+        scopes: [URL],
+        scanOlderNames: Bool
     ) -> [FileEntry] {
-        let count = min(metadataQuery.resultCount, maxScan)
+        let indices = Self.candidateIndices(
+            total: metadataQuery.resultCount,
+            recentLimit: maxScan,
+            nameScanLimit: scanOlderNames ? maxNameScan : 0,
+            extraLimit: maxResults,
+            nameQuery: query.nameQuery
+        ) { index in
+            metadataQuery.value(ofAttribute: NSMetadataItemFSNameKey, forResultAt: index) as? String
+        }
         var candidates: [(entry: FileEntry, relevance: Double)] = []
-        candidates.reserveCapacity(min(count, maxResults * 4))
+        candidates.reserveCapacity(min(indices.count, maxResults * 4))
+        let now = Date()
 
-        for index in 0..<count {
+        for index in indices {
             guard let item = metadataQuery.result(at: index) as? NSMetadataItem,
                   let rawPath = item.value(forAttribute: NSMetadataItemPathKey) as? String else { continue }
             let path = URL(fileURLWithPath: rawPath).standardizedFileURL.path
-            guard !isNoise(path), isInsideAnyScope(path, scopes: scopes) else { continue }
+            guard !Self.isNoise(path, query: query), isInsideAnyScope(path, scopes: scopes) else { continue }
 
             let url = URL(fileURLWithPath: path)
             let isDirectory = (item.value(forAttribute: "kMDItemContentType") as? String) == "public.folder"
             let modifiedDate = item.value(forAttribute: NSMetadataItemFSContentChangeDateKey) as? Date
             let name = (item.value(forAttribute: NSMetadataItemFSNameKey) as? String) ?? url.lastPathComponent
-            guard query.matches(
+            guard Self.accepts(
+                query: query,
                 name: name,
                 path: path,
                 isDirectory: isDirectory,
-                modifiedDate: modifiedDate
+                modifiedDate: modifiedDate,
+                now: now,
+                contentTypes: { item.value(forAttribute: Self.contentTypeTreeKey) as? [String] ?? [] }
             ) else { continue }
 
             let entry = FileEntry(path: path, name: name, modifiedDate: modifiedDate, isDirectory: isDirectory)
@@ -209,7 +243,7 @@ public final class FileSearch: FileSearching {
     private func directEntry(path: String, query: FileSearchQuery) -> [FileEntry] {
         let url = URL(fileURLWithPath: path).standardizedFileURL
         let fm = FileManager.default
-        guard fm.fileExists(atPath: url.path), !Self.isNoise(url.path) else { return [] }
+        guard fm.fileExists(atPath: url.path), !Self.isNoise(url.path, query: query) else { return [] }
         let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey, .contentModificationDateKey])
         let isDirectory = (values?.isDirectory ?? false) && !(values?.isPackage ?? false)
         let modifiedDate = values?.contentModificationDate
@@ -219,9 +253,91 @@ public final class FileSearch: FileSearching {
     }
 
     private func relevance(of entry: FileEntry, query: FileSearchQuery) -> Double {
-        guard !query.nameQuery.isEmpty else { return 0 }
-        let foldedName = FileSearchQuery.fold(entry.name)
-        let foldedQuery = FileSearchQuery.fold(query.nameQuery)
+        Self.nameRelevance(name: entry.name, nameQuery: query.nameQuery)
+    }
+
+    static let contentTypeTreeKey = "kMDItemContentTypeTree"
+    /// Status suffix when Spotlight returned more matches than the launcher reads.
+    static let narrowHint = "Recent matches; narrow your search"
+
+    /// Uniform Type Identifiers that Spotlight can match in a file's content
+    /// type tree. Kinds without a single fitting type (documents) and folders
+    /// return an empty list and use extensions only.
+    static func contentTypes(for kind: FileSearchQuery.Kind) -> [String] {
+        switch kind {
+        case .pdf: return ["com.adobe.pdf"]
+        // public.image includes public.camera-raw-image (CR2, NEF, ARW, DNG).
+        case .image: return ["public.image"]
+        case .audio: return ["public.audio"]
+        case .video: return ["public.movie"]
+        case .document, .folder: return []
+        }
+    }
+
+    /// Accepts a Spotlight result when it passes every parsed filter. A file
+    /// whose content type conforms to the kind's type is accepted even when
+    /// its extension is not in the kind's extension list.
+    static func accepts(
+        query: FileSearchQuery,
+        name: String,
+        path: String,
+        isDirectory: Bool,
+        modifiedDate: Date?,
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        contentTypes: () -> [String]
+    ) -> Bool {
+        if query.matches(name: name, path: path, isDirectory: isDirectory, modifiedDate: modifiedDate, now: now, calendar: calendar) {
+            return true
+        }
+        guard query.isValid, let kind = query.kind, !isDirectory else { return false }
+        let wanted = Self.contentTypes(for: kind)
+        guard !wanted.isEmpty, contentTypes().contains(where: wanted.contains) else { return false }
+        if !query.nameQuery.isEmpty {
+            let foldedName = FileSearchQuery.fold(name)
+            let allWords = query.nameQuery.split(separator: " ").allSatisfy { foldedName.contains(FileSearchQuery.fold(String($0))) }
+            guard allWords else { return false }
+        }
+        if let interval = query.modifiedInterval(now: now, calendar: calendar) {
+            guard let modifiedDate, modifiedDate >= interval.start, modifiedDate < interval.end else { return false }
+        }
+        return true
+    }
+
+    /// Chooses which Spotlight results to evaluate. Results arrive newest
+    /// first, and only the first ``recentLimit`` are read in full. Past that
+    /// cap, up to ``nameScanLimit`` results are checked by file name alone,
+    /// and exact or prefix name matches are added, so an older file with the
+    /// requested name is not lost behind many recent partial matches.
+    static func candidateIndices(
+        total: Int,
+        recentLimit: Int,
+        nameScanLimit: Int,
+        extraLimit: Int,
+        nameQuery: String,
+        name: (Int) -> String?
+    ) -> [Int] {
+        let recent = min(max(0, total), max(0, recentLimit))
+        var indices = Array(0..<recent)
+        guard total > recent, !nameQuery.isEmpty, extraLimit > 0 else { return indices }
+        let end = min(total, recent + max(0, nameScanLimit))
+        guard end > recent else { return indices }
+        var extra = 0
+        for index in recent..<end {
+            guard let candidate = name(index), nameRelevance(name: candidate, nameQuery: nameQuery) >= 0.95 else { continue }
+            indices.append(index)
+            extra += 1
+            if extra >= extraLimit { break }
+        }
+        return indices
+    }
+
+    /// Scores a file name: 1 for an exact match, 0.95 for a prefix, and up
+    /// to 0.65 for matching words.
+    static func nameRelevance(name: String, nameQuery: String) -> Double {
+        guard !nameQuery.isEmpty else { return 0 }
+        let foldedName = FileSearchQuery.fold(name)
+        let foldedQuery = FileSearchQuery.fold(nameQuery)
         if foldedName == foldedQuery { return 1.0 }
         if foldedName.hasPrefix(foldedQuery) { return 0.95 }
         let words = foldedQuery.split(separator: " ").map(String.init)
@@ -289,15 +405,35 @@ public final class FileSearch: FileSearching {
         path == root || path.hasPrefix(root.hasSuffix("/") ? root : root + "/")
     }
 
-    private func isNoise(_ path: String) -> Bool {
-        Self.isNoise(path)
-    }
+    /// Folder names that hold build output or third-party code. Mixed searches
+    /// skip them; explicit file searches keep them.
+    nonisolated static let buildFolders: Set<String> = ["node_modules", "dist", "build", ".build", "DerivedData", "Pods", "vendor", "__pycache__", "site-packages", "venv"]
 
-    private static func isNoise(_ path: String) -> Bool {
+    /// True when a result is noise for this query. Every search skips Git
+    /// internals, dependency folders, app bundles, caches, and Trash. Mixed
+    /// (non-explicit) searches also skip `~/Library`, hidden items, and build
+    /// folders. Explicit searches keep `~/Library` and build folders, and skip
+    /// hidden items unless the query itself names one.
+    nonisolated static func isNoise(_ path: String, query: FileSearchQuery, home: String = NSHomeDirectory()) -> Bool {
         let components = URL(fileURLWithPath: path).standardizedFileURL.pathComponents
         if components.contains(where: { component in
             component == ".git" || component == "node_modules" || component == ".Trash" || component.hasSuffix(".app")
         }) { return true }
-        return path.contains("/Library/Caches/")
+        if path.contains("/Library/Caches/") { return true }
+        let hidden = components.contains { $0.hasPrefix(".") && $0 != "." && $0 != ".." }
+        guard query.isExplicitFileSearch else {
+            let library = (home.hasSuffix("/") ? home : home + "/") + "Library"
+            if path == library || path.hasPrefix(library + "/") { return true }
+            return hidden || components.contains(where: buildFolders.contains) || path.contains("/pkg/mod/")
+        }
+        return hidden && !targetsHidden(query)
+    }
+
+    /// True when the query names a hidden file or folder, such as `.env` or `in:~/.config`.
+    nonisolated static func targetsHidden(_ query: FileSearchQuery) -> Bool {
+        let paths = [query.scopePath, query.explicitPath].compactMap { $0 }
+        let pathComponents = paths.flatMap { $0.split(separator: "/").map(String.init) }
+        let words = query.nameQuery.split(separator: " ").map(String.init)
+        return (pathComponents + words).contains { $0.hasPrefix(".") && $0 != "." && $0 != ".." }
     }
 }

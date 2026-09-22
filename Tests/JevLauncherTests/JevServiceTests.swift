@@ -1,10 +1,12 @@
 import Foundation
+import Security
 import XCTest
 @testable import JevLauncher
 
 final class JevServiceTests: XCTestCase {
+    private var endpoints: [URL] = []
     override func tearDown() {
-        MockURLProtocol.requestHandler = nil
+        endpoints.forEach(MockURLProtocol.removeHandler)
         super.tearDown()
     }
 
@@ -151,14 +153,78 @@ final class JevServiceTests: XCTestCase {
         }
     }
 
+    func testStatusMessagesMapFailures() {
+        XCTAssertEqual(JevService.statusMessage(for: JevServiceError.requestFailed(statusCode: 401)), "Jev key rejected")
+        XCTAssertEqual(JevService.statusMessage(for: JevServiceError.requestFailed(statusCode: 403)), "Jev key rejected")
+        XCTAssertEqual(JevService.statusMessage(for: JevServiceError.requestFailed(statusCode: 429)), "Jev rate limited")
+        XCTAssertEqual(JevService.statusMessage(for: JevServiceError.requestFailed(statusCode: 500)), "Jev unavailable · local results ready")
+        XCTAssertEqual(JevService.statusMessage(for: URLError(.timedOut)), "Jev offline · local results ready")
+        XCTAssertEqual(JevService.statusMessage(for: URLError(.notConnectedToInternet)), "Jev offline · local results ready")
+        XCTAssertEqual(JevService.statusMessage(for: JevServiceError.invalidResponse("x")), "Jev unavailable · local results ready")
+        XCTAssertEqual(JevService.statusMessage(for: KeychainStoreError.unreadable(errSecInteractionNotAllowed)), "Re-enter your Jev key in Settings")
+    }
+
+    func testValidateSurfacesRejectedKey() async throws {
+        let (service, session) = makeService { _ in httpResponse(statusCode: 401, body: Data()) }
+        defer { session.invalidateAndCancel() }
+        do {
+            try await service.validate(apiKey: "bad-key")
+            XCTFail("A rejected key must throw.")
+        } catch {
+            XCTAssertEqual(JevService.statusMessage(for: error), "Jev key rejected")
+        }
+    }
+
+    func testValidateAcceptsWorkingKey() async throws {
+        let (service, session) = makeService { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer good-key")
+            return jsonResponse(choice: "no_match", probabilities: ["test": 0.1, "no_match": 0.9], confidence: 0.9)
+        }
+        defer { session.invalidateAndCancel() }
+        try await service.validate(apiKey: "good-key")
+    }
+
+    func testKeychainStatusMapping() throws {
+        XCTAssertNil(try KeychainStore.value(status: errSecItemNotFound, result: nil))
+        XCTAssertEqual(try KeychainStore.value(status: errSecSuccess, result: Data("abc".utf8) as CFData), "abc")
+        XCTAssertThrowsError(try KeychainStore.value(status: errSecSuccess, result: Data([0xFF, 0xFE]) as CFData)) {
+            XCTAssertEqual($0 as? KeychainStoreError, .invalidStoredValue)
+        }
+        for status in [errSecInteractionNotAllowed, errSecAuthFailed, errSecUserCanceled] {
+            XCTAssertThrowsError(try KeychainStore.value(status: status, result: nil)) {
+                XCTAssertEqual($0 as? KeychainStoreError, .unreadable(status))
+                XCTAssertEqual($0.localizedDescription, "Re-enter your Jev key in Settings")
+            }
+        }
+        XCTAssertThrowsError(try KeychainStore.value(status: errSecParam, result: nil)) {
+            XCTAssertEqual($0 as? KeychainStoreError, .unexpectedStatus(errSecParam))
+        }
+    }
+
+    @MainActor func testKeyCacheReadsOnceAndFollowsSaveState() async {
+        let reads = Counter()
+        let cache = JevKeyCache(reader: { reads.increment(); return "stored" })
+        async let first = cache.load()
+        async let second = cache.load()
+        let states = await [first, second]
+        XCTAssertEqual(states, [.present("stored"), .present("stored")])
+        _ = await cache.load()
+        XCTAssertEqual(reads.value, 1)
+        let failing = JevKeyCache(reader: { throw KeychainStoreError.unreadable(errSecInteractionNotAllowed) })
+        let failed = await failing.load()
+        XCTAssertEqual(failed, .failed("Re-enter your Jev key in Settings"))
+    }
+
+    /// Each service gets its own endpoint URL so parallel tests never share a handler.
     private func makeService(
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> (JevService, URLSession) {
-        MockURLProtocol.requestHandler = handler
+        let endpoint = URL(string: "https://mock.local/\(UUID().uuidString)/v1/systemone")!
+        MockURLProtocol.setHandler(handler, for: endpoint)
+        endpoints.append(endpoint)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockURLProtocol.self]
         let session = URLSession(configuration: configuration)
-        let endpoint = URL(string: "https://mock.local/v1/systemone")!
         return (JevService(session: session, endpoint: endpoint), session)
     }
 }
@@ -225,15 +291,28 @@ private func httpResponse(statusCode: Int, body: Data) -> (HTTPURLResponse, Data
     return (response, body)
 }
 
+private final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var value: Int { lock.withLock { count } }
+    func increment() { lock.withLock { count += 1 } }
+}
+
 private final class MockURLProtocol: URLProtocol {
-    static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+    typealias Handler = (URLRequest) throws -> (HTTPURLResponse, Data)
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var handlers: [URL: Handler] = [:]
+
+    static func setHandler(_ handler: @escaping Handler, for url: URL) { lock.withLock { handlers[url] = handler } }
+    static func removeHandler(for url: URL) { _ = lock.withLock { handlers.removeValue(forKey: url) } }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
 
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        guard let requestHandler = Self.requestHandler else {
+        let handler = request.url.flatMap { url in Self.lock.withLock { Self.handlers[url] } }
+        guard let requestHandler = handler else {
             client?.urlProtocol(self, didFailWithError: URLError(.resourceUnavailable))
             return
         }

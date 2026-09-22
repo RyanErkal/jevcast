@@ -17,7 +17,7 @@ public struct FileSearchQuery: Equatable, Sendable {
         public var fileExtensions: [String] {
             switch self {
             case .pdf: return ["pdf"]
-            case .image: return ["jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "tif", "tiff", "bmp", "svg", "avif", "raw"]
+            case .image: return ["jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "tif", "tiff", "bmp", "svg", "avif", "dng", "cr2", "cr3", "nef", "arw", "raf", "orf", "rw2"]
             case .document: return ["pdf", "txt", "rtf", "md", "markdown", "doc", "docx", "odt", "pages", "xls", "xlsx", "csv", "ppt", "pptx", "key", "numbers", "json", "xml", "html", "htm", "epub", "tex"]
             case .audio: return ["mp3", "m4a", "wav", "aiff", "aif", "flac", "ogg", "oga", "opus", "aac", "caf"]
             case .video: return ["mp4", "mov", "m4v", "mkv", "avi", "wmv", "webm", "mpeg", "mpg", "3gp"]
@@ -172,15 +172,10 @@ public struct FileSearchQuery: Equatable, Sendable {
         }
         let tokens = tokenize(text)
         guard !tokens.isEmpty else { return parts }
-        // Keep ambiguous words such as "Music" and "Photos" available for
-        // normal launcher matching. A file command, a filter, or an
-        // unambiguous plural kind gives those words file meaning.
-        var explicitFileContext = tokens.contains { token in
-            guard !token.quoted else { return false }
-            let value = fold(token.value).lowercased()
-            return ["find", "locate", "file", "files", "folder", "folders", "pdf", "pdfs", "images", "documents", "audios", "videos"].contains(value)
-                || value.hasPrefix("kind:") || value.hasPrefix("type:") || value.hasPrefix("modified:") || value.hasPrefix("date:") || value.hasPrefix("in:")
-        }
+        // Keep ambiguous words such as "Music", "Desktop", "Docs", and
+        // "Today" available for normal launcher matching ("GitHub Desktop",
+        // "Google Docs"). Other file context gives those words file meaning.
+        var explicitFileContext = hasFileContext(tokens)
         var index = 0
 
         func setKind(_ value: Kind) {
@@ -317,14 +312,14 @@ public struct FileSearchQuery: Equatable, Sendable {
                 continue
             }
 
-            if let modified = modified(for: lower), isDatePhrase(lower) {
+            if explicitFileContext, let modified = modified(for: lower), isDatePhrase(lower) {
                 setModified(modified)
                 parts.explicitIntent = true
                 index += 1
                 continue
             }
 
-            if (lower == "downloads" || lower == "desktop"), parts.scope == nil, parts.scopePath == nil {
+            if explicitFileContext, lower == "downloads" || lower == "desktop", parts.scope == nil, parts.scopePath == nil {
                 setScope(lower)
                 explicitFileContext = true
                 index += 1
@@ -367,6 +362,25 @@ public struct FileSearchQuery: Equatable, Sendable {
         return parts
     }
 
+    private static let contextWords: Set<String> = [
+        "find", "locate", "list", "file", "files", "folder", "folders", "recent", "latest", "newest", "modified", "changed", "updated"
+    ]
+
+    /// Finds words that make a request about files, without counting the
+    /// folder, date, and ambiguous kind words that the context unlocks.
+    private static func hasFileContext(_ tokens: [Token]) -> Bool {
+        for (index, token) in tokens.enumerated() where !token.quoted {
+            let value = fold(token.value).lowercased()
+            if contextWords.contains(value) || isPath(token.value) { return true }
+            if isKindPhrase(value) && !ambiguousKindPhrases.contains(value) { return true }
+            if ["kind:", "type:", "modified:", "date:", "in:"].contains(where: value.hasPrefix) { return true }
+            if ["in", "from", "within"].contains(value), index + 1 < tokens.count, isScopeValue(tokens[index + 1].value) {
+                return true
+            }
+        }
+        return false
+    }
+
     private static func tokenize(_ text: String) -> [Token] {
         var result: [Token] = []
         var current = ""
@@ -381,12 +395,18 @@ public struct FileSearchQuery: Equatable, Sendable {
             quoted = false
         }
 
-        for character in text {
-            if let closingQuote = quoteCharacter, character == closingQuote {
+        let characters = Array(text)
+        for (index, character) in characters.enumerated() {
+            let next = index + 1 < characters.count ? characters[index + 1] : nil
+            // An apostrophe opens a quote only at a token start ("'my cv'",
+            // in:'~/x') and closes one only at a token end, so "ryan's" stays a word.
+            let opensSingle = current.isEmpty || current.hasSuffix(":")
+            let closesSingle = next == nil || next!.isWhitespace
+            if let closingQuote = quoteCharacter, character == closingQuote, closingQuote == "\"" || closesSingle {
                 inQuotes.toggle()
                 quoteCharacter = nil
                 quoted = true
-            } else if (character == "\"" || character == "'") && !inQuotes {
+            } else if (character == "\"" || (character == "'" && opensSingle)) && !inQuotes {
                 inQuotes = true
                 quoteCharacter = character
                 quoted = true
@@ -436,7 +456,8 @@ public struct FileSearchQuery: Equatable, Sendable {
     }
 
     private static let ambiguousKindPhrases: Set<String> = [
-        "music", "audio", "photo", "photos", "picture", "pictures", "video", "movie", "movies"
+        "music", "audio", "photo", "photos", "picture", "pictures", "video", "movie", "movies",
+        "document", "documents", "doc", "docs"
     ]
 
     private static func isDatePhrase(_ value: String) -> Bool {

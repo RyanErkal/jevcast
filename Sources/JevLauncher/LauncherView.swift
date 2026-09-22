@@ -5,75 +5,153 @@ struct LauncherView: View {
     @ObservedObject var model: LauncherModel
     @ObservedObject var speech: SpeechService
     @ObservedObject var catalogue: AppCatalogue
-    let settings: () -> Void
     let actions: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// An empty query with no favourites or recent items shows the search bar alone.
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 14) {
-                Image(systemName: "command").font(.system(size: 24, weight: .medium)).foregroundStyle(.secondary)
-                LauncherSearchField(model: model).frame(height: 34)
-                Button {
-                    model.toggleListening()
-                } label: {
-                    Image(systemName: speech.isListening ? "waveform" : speech.isStarting ? "ellipsis" : "mic.slash")
-                        .font(.system(size: 19)).foregroundStyle(speech.isListening ? Color.accentColor : .secondary)
-                        .frame(width: 34, height: 34)
-                }.buttonStyle(.plain).help(speech.isListening || speech.isStarting ? "Stop Listening" : "Start Listening")
-            }.padding(.horizontal, 24).padding(.vertical, 22)
-            Divider()
-            HStack {
-                Text(model.query.isEmpty ? "FAVOURITES & RECENT" : model.isFileSearch ? "FILES" : "RESULTS")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(1.5)
-                Spacer()
-                if model.isFileSearch { Text("Name · Kind · Folder · Date") }
-                else if catalogue.scanning { ProgressView().controlSize(.mini); Text("Finding apps") }
-                else { Text("\(catalogue.entries.count) apps") }
-            }.foregroundStyle(.secondary).font(.system(size: 11)).padding(.horizontal, 24).padding(.top, 15).padding(.bottom, 8)
-            ResultList(model: model, actions: actions)
-                .padding(.horizontal, 10)
-                .overlay {
-                    if model.results.isEmpty {
-                        VStack(spacing: 10) {
-                            Image(systemName: "doc.text.magnifyingglass").font(.title)
-                            Text(model.emptyMessage).font(.system(size: 13))
-                                .multilineTextAlignment(.center)
-                        }.foregroundStyle(.secondary).padding(32).allowsHitTesting(false)
-                    }
-                }
-            if !model.fileStatus.isEmpty && !model.results.isEmpty {
-                Text(model.fileStatus).font(.system(size: 11)).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 24).padding(.vertical, 7)
+            searchBar
+            if !model.rows.isEmpty {
+                Divider()
+                results
+            } else if showsEmptyMessage {
+                Divider()
+                emptyMessage
             }
-            if model.preferences.voiceEnabled && !speech.permissionsGranted {
-                HStack {
-                    Text("Enable voice once to listen on every open.").font(.system(size: 12)).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Enable Voice") { Task { await model.enableVoice() } }.controlSize(.small)
-                }.padding(.horizontal, 24).padding(.vertical, 8)
+            if let notice = model.notice {
+                Divider()
+                StatusStrip(notice: notice) { model.perform($0) }
             }
-            if model.selected?.id.hasPrefix("window:") == true && !WindowManager.hasPermission {
-                HStack {
-                    Text("Window control needs Accessibility access.").font(.system(size: 12)).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Enable Window Control") { model.windows.requestPermission() }.controlSize(.small)
-                }.padding(.horizontal, 24).padding(.vertical, 8)
+            if showsFooter {
+                Divider()
+                footer
             }
-            if let message = model.message {
-                Text(message).font(.system(size: 12)).foregroundStyle(.orange)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 24).padding(.vertical, 8)
-            }
-            Divider()
-            HStack(spacing: 9) {
-                Circle().fill(speech.isListening ? Color.green : Color.secondary.opacity(0.4)).frame(width: 5, height: 5)
-                Text(model.aiStatus.isEmpty ? speech.status : model.aiStatus).lineLimit(1)
-                Spacer(minLength: 10)
-                Text("↑↓ Select").foregroundStyle(.tertiary)
-                Text("↵ Open").foregroundStyle(.secondary)
-                Button("⌘K Actions", action: actions).buttonStyle(.plain).disabled(model.selected == nil)
-                Button(action: settings) { Image(systemName: "gearshape") }.buttonStyle(.plain).help("Settings")
-            }.font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 22).padding(.vertical, 13)
         }
-        .background(.regularMaterial)
+        .frame(maxWidth: .infinity)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var searchBar: some View {
+        // Glyph width and spacing match the row icon column, so query text lines up with row titles.
+        HStack(spacing: LauncherMetrics.iconSpacing) {
+            Image(systemName: speech.isListening ? "waveform" : "magnifyingglass")
+                .font(.system(size: LauncherMetrics.searchGlyphSize, weight: .regular))
+                .foregroundStyle(speech.isListening ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiary))
+                .frame(width: LauncherMetrics.iconSize)
+                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+                .accessibilityHidden(true)
+            LauncherSearchField(model: model)
+            // Voice setup lives in Settings › Voice; the button appears only once voice can work.
+            if speech.permissionsGranted { MicButton(speech: speech) { model.toggleListening() } }
+        }
+        .padding(.horizontal, LauncherMetrics.gutter)
+        .frame(height: LauncherMetrics.searchBarHeight)
+    }
+
+    /// The list is exactly as tall as its rows, so the panel follows the result count.
+    private var results: some View {
+        ResultList(model: model, actions: actions)
+            .frame(height: LauncherSections.listHeight(model.rows))
+            .padding(.horizontal, LauncherMetrics.listInset)
+            .padding(.vertical, LauncherMetrics.listPadding)
+    }
+
+    /// The footer appears only when it has something to say: an action for the
+    /// selection, listening, or loading. A collapsed panel never shows it.
+    private var showsFooter: Bool {
+        guard !model.isCollapsed else { return false }
+        return model.primaryActionTitle != nil || speech.isListening || speech.isStarting || model.loadingStatus != nil
+    }
+
+    /// A typed query with nothing to show, once any search has finished.
+    private var showsEmptyMessage: Bool { !model.query.isEmpty && model.loadingStatus == nil }
+
+    private var emptyMessage: some View {
+        Text(model.emptyMessage)
+            .font(.system(size: 13)).foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity).padding(.horizontal, LauncherMetrics.gutter).padding(.vertical, 22)
+    }
+
+    /// Left: listening or loading only. Right: what Return does, then the actions menu.
+    private var footer: some View {
+        HStack(spacing: 10) {
+            if speech.isListening || speech.isStarting {
+                ListeningIndicator(starting: !speech.isListening)
+            } else if let loading = model.loadingStatus {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.mini)
+                    Text(loading).foregroundStyle(.tertiary)
+                }
+            }
+            Spacer(minLength: 10)
+            if let primary = model.primaryActionTitle {
+                KeyHint(primary, "↩")
+                Rectangle().fill(.quaternary).frame(width: 1, height: 12).accessibilityHidden(true)
+                Button(action: actions) { KeyHint("Actions", "⌘K") }
+                    .buttonStyle(.plain)
+            }
+        }
+        .font(.system(size: 12))
+        .padding(.horizontal, LauncherMetrics.gutter)
+        .frame(height: LauncherMetrics.footerHeight)
+    }
+}
+
+/// A filled dot and a word, so the state does not depend on colour alone.
+private struct ListeningIndicator: View {
+    let starting: Bool
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle().fill(starting ? Color.secondary : Color.green).frame(width: 6, height: 6)
+            Text(starting ? "Starting…" : "Listening").foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct MicButton: View {
+    @ObservedObject var speech: SpeechService
+    let toggle: () -> Void
+    @State private var hovering = false
+    var body: some View {
+        Button(action: toggle) {
+            Image(systemName: speech.isListening ? "mic.fill" : "mic")
+                .font(.system(size: 14, weight: .regular))
+                .foregroundStyle(speech.isListening ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiary))
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(hovering ? Color.primary.opacity(0.08) : .clear))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(active ? "Stop Listening" : "Start Listening")
+        .accessibilityLabel(active ? "Stop listening" : "Start listening")
+    }
+    private var active: Bool { speech.isListening || speech.isStarting }
+}
+
+private struct StatusStrip: View {
+    let notice: Notice
+    let perform: (Notice.Action) -> Void
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: notice.symbol).foregroundStyle(notice.tone.symbolStyle).accessibilityHidden(true)
+            Text(notice.text).foregroundStyle(notice.tone.textStyle).lineLimit(2)
+            Spacer()
+            if let action = notice.action { Button(action.title) { perform(action) }.controlSize(.small) }
+        }
+        .font(.system(size: 12)).padding(.horizontal, LauncherMetrics.gutter).padding(.vertical, 9)
+    }
+}
+
+/// Tone to style. The model chooses the tone; the symbol carries the meaning as well as the colour.
+private extension Notice.Tone {
+    var symbolStyle: Color {
+        switch self { case .warning: return .orange; case .info: return .secondary }
+    }
+    var textStyle: HierarchicalShapeStyle {
+        switch self { case .warning: return .primary; case .info: return .secondary }
     }
 }
 

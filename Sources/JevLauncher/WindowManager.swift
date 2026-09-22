@@ -7,6 +7,7 @@ import LauncherCore
 public enum WindowManagerError: Error, LocalizedError, Sendable {
     case accessibilityPermissionRequired
     case noTargetWindow
+    case nothingToRestore
     case noAdjacentDisplay
     case noDisplay
     case unsupportedAction(WindowAction)
@@ -21,6 +22,8 @@ public enum WindowManagerError: Error, LocalizedError, Sendable {
             return "Accessibility access is required to control windows."
         case .noTargetWindow:
             return "No eligible visible window is selected."
+        case .nothingToRestore:
+            return "Nothing to restore for this window."
         case .noAdjacentDisplay:
             return "There is no adjacent display in that direction."
         case .noDisplay:
@@ -102,16 +105,25 @@ public final class WindowManager {
         static let parent = "AXParent"
     }
 
+    /// Upper bound for one Accessibility message. The system default is
+    /// about six seconds, which freezes the main thread on a hung app.
+    private nonisolated static let messagingTimeout: Float = 0.35
+    /// Pointer travel after mouse-down that counts as the start of a drag.
+    private nonisolated static let dragStartDistance: CGFloat = 4
+
     private var capturedTarget: CapturedTarget?
-    private var undoFrames: [WindowKey: [CGRect]] = [:]
+    private var history = WindowUndoHistory<WindowKey, AXUIElement>()
     private var edgeMonitor: Any?
+    private var edgeDragMonitor: Any?
+    private var edgePress: NSPoint?
     private var edgeDrag: (pid: pid_t, window: AXUIElement, original: CGRect, startedAt: NSPoint)?
     private var visibleSnapshot: [[String: Any]]?
-    private var lastBulk: [WindowRecord]?
     private var shortcutCycle: (key: WindowKey, action: WindowAction, index: Int, time: TimeInterval)?
 
-
-    public init() {}
+    public init() {
+        // The system-wide element sets the process-wide default timeout.
+        _ = systemWideElement()
+    }
 
     /// Opens the system Accessibility preference prompt. It does not grant
     /// access by itself, so callers should query ``hasPermission`` again.
@@ -131,29 +143,21 @@ public final class WindowManager {
         guard Self.hasPermission,
               let pid = appPID ?? NSWorkspace.shared.frontmostApplication?.processIdentifier,
               pid != ProcessInfo.processInfo.processIdentifier else { return }
-        let application = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(application, 0.15)
+        let application = applicationElement(pid, timeout: 0.15)
         guard let window = axElement(attribute(application, AXAttribute.focusedWindow)) else { return }
         // Eligibility is checked again on execution. Avoid repeated AX/CG reads on open.
         capturedTarget = CapturedTarget(pid: pid, application: application, window: window)
     }
 
-    public func execute(_ requestedAction: WindowAction, appPID: pid_t? = nil, cycle: Bool = false) throws {
+    public func execute(_ action: WindowAction, appPID: pid_t? = nil, cycle: Bool = false) throws {
         guard Self.hasPermission else { throw WindowManagerError.accessibilityPermissionRequired }
 
         visibleSnapshot = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]]
         defer { visibleSnapshot = nil }
         let target = try target(for: appPID)
-        var action = requestedAction
-        if cycle && [.leftHalf, .rightHalf].contains(requestedAction) {
-            let now = Date.timeIntervalSinceReferenceDate
-            let previous = shortcutCycle
-            let same = previous?.key == target.key && previous?.action == requestedAction && now - (previous?.time ?? 0) < 1.5
-            let index = same ? ((previous?.index ?? 0) + 1) % 3 : 0
-            let steps: [WindowAction] = requestedAction == .leftHalf ? [.leftHalf, .leftTwoThirds, .leftThird] : [.rightHalf, .rightTwoThirds, .rightThird]
-            action = steps[index]
-            shortcutCycle = (target.key, requestedAction, index, now)
-        } else { shortcutCycle = nil }
+        // Only an uninterrupted run of the same cycling shortcut keeps its step.
+        let previousCycle = shortcutCycle
+        shortcutCycle = nil
         switch action {
         case .tileAll:
             try arrangeAll(target: target, cascade: false, action: action)
@@ -168,16 +172,24 @@ public final class WindowManager {
         case .previousDisplay:
             try move(target, direction: -1, action: action)
         default:
-            try arrange(target, action: action)
+            if cycle {
+                try arrangeCycling(target, action: action, previous: previousCycle)
+            } else {
+                try arrange(target, action: action)
+            }
         }
     }
 
     /// Snaps only on release after a hit-tested title/toolbar drag moved
     /// the actual window without changing its size.
+    ///
+    /// Mouse-down only records the pointer. The Accessibility hit-test runs
+    /// once, on the first drag event past a small distance, and drag events
+    /// are observed only between mouse-down and that point.
     public func startEdgeSnapping() {
         guard edgeMonitor == nil else { return }
         edgeMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
+            matching: [.leftMouseDown, .leftMouseUp]
         ) { [weak self] event in
             Task { @MainActor [weak self] in
                 self?.handleEdgeEvent(event)
@@ -190,6 +202,8 @@ public final class WindowManager {
             NSEvent.removeMonitor(edgeMonitor)
         }
         edgeMonitor = nil
+        stopDragMonitoring()
+        edgePress = nil
         edgeDrag = nil
     }
 
@@ -197,12 +211,35 @@ public final class WindowManager {
         if let edgeMonitor {
             NSEvent.removeMonitor(edgeMonitor)
         }
+        if let edgeDragMonitor {
+            NSEvent.removeMonitor(edgeDragMonitor)
+        }
+    }
+
+    private func arrangeCycling(
+        _ target: WindowRecord,
+        action: WindowAction,
+        previous: (key: WindowKey, action: WindowAction, index: Int, time: TimeInterval)?
+    ) throws {
+        guard let display = display(containing: target.frame) else {
+            throw WindowManagerError.noDisplay
+        }
+        let frames = WindowLayout.cycleFrames(for: action, in: display.axVisibleFrame, gap: CGFloat(gap))
+        guard !frames.isEmpty else {
+            try arrange(target, action: action)
+            return
+        }
+        let now = Date.timeIntervalSinceReferenceDate
+        let remembered = previous.flatMap { previous in
+            previous.key == target.key && previous.action == action && now - previous.time < 1.5 ? previous.index : nil
+        }
+        let index = WindowLayout.nextCycleIndex(current: target.frame, frames: frames, previousIndex: remembered)
+        shortcutCycle = (target.key, action, index, now)
+        try saveAndSet(frames[index], target: target, action: action, bounds: display.axVisibleFrame)
     }
 
     private func arrange(_ target: WindowRecord, action: WindowAction) throws {
-        guard let current = frame(of: target.element) else {
-            throw WindowManagerError.frameUnavailable
-        }
+        let current = target.frame
         guard let display = display(containing: current) else {
             throw WindowManagerError.noDisplay
         }
@@ -222,58 +259,59 @@ public final class WindowManager {
         guard let targetFrame else {
             throw WindowManagerError.unsupportedAction(action)
         }
-        try saveAndSet(targetFrame, target: target, action: action)
+        try saveAndSet(targetFrame, target: target, action: action, bounds: display.axVisibleFrame)
     }
 
     private func restore(_ target: WindowRecord) throws {
-        if let records = lastBulk, records.contains(where: { $0.key == target.key }) {
-            for record in records {
-                try setFrame(record.frame, on: record.element, action: .restore)
-                _ = undoFrames[record.key]?.popLast()
+        if let moves = history.bulkMoves(including: target.key) {
+            // Reverse only the windows the arrangement moved. Each of them has
+            // exactly one undo entry for it; windows that fail keep theirs.
+            var restored: [WindowKey] = []
+            var firstError: Error?
+            for move in moves {
+                do {
+                    try setFrame(move.original, on: move.element, action: .restore)
+                    restored.append(move.key)
+                } catch {
+                    firstError = firstError ?? error
+                }
             }
-            lastBulk = nil
+            history.completeBulkRestore(restored: restored)
+            if let firstError { throw firstError }
             return
         }
-        guard var stack = undoFrames[target.key], let previous = stack.popLast() else {
-            throw WindowManagerError.noTargetWindow
+        guard let previous = history.popLast(for: target.key) else {
+            throw WindowManagerError.nothingToRestore
         }
-        undoFrames[target.key] = stack.isEmpty ? nil : stack
         do {
             try setFrame(previous, on: target.element, action: .restore)
         } catch {
-            undoFrames[target.key, default: []].append(previous)
+            history.reinstate(previous, for: target.key)
             throw error
         }
     }
 
     private func move(_ target: WindowRecord, direction: Int, action: WindowAction) throws {
-        guard let current = frame(of: target.element) else {
+        let current = target.frame
+        let displays = screenDisplays()
+        let frames = displays.map(\.axFrame)
+        guard let sourceIndex = WindowLayout.displayIndex(for: current, displays: frames) else {
+            throw WindowManagerError.noDisplay
+        }
+        guard displays.count > 1,
+              let destinationIndex = WindowLayout.adjacentDisplayIndex(for: current, displays: frames, offset: direction),
+              destinationIndex != sourceIndex else {
+            throw WindowManagerError.noAdjacentDisplay
+        }
+        let destination = displays[destinationIndex]
+        guard let destinationFrame = WindowLayout.frame(
+            current,
+            movedFrom: displays[sourceIndex].axVisibleFrame,
+            to: destination.axVisibleFrame
+        ) else {
             throw WindowManagerError.frameUnavailable
         }
-        let displays = screenDisplays()
-        guard !displays.isEmpty, let currentDisplay = display(containing: current, in: displays) else {
-            throw WindowManagerError.noDisplay
-        }
-        guard let currentIndex = displays.firstIndex(where: { $0.screen == currentDisplay.screen }) else {
-            throw WindowManagerError.noDisplay
-        }
-        guard displays.count > 1 else { throw WindowManagerError.noAdjacentDisplay }
-        let destinationIndex = (currentIndex + direction + displays.count) % displays.count
-        let destination = displays[destinationIndex]
-        let sourceArea = currentDisplay.axVisibleFrame
-        let destinationArea = destination.axVisibleFrame
-        let relative = CGRect(
-            x: destinationArea.minX + (current.minX - sourceArea.minX) / sourceArea.width * destinationArea.width,
-            y: destinationArea.minY + (current.minY - sourceArea.minY) / sourceArea.height * destinationArea.height,
-            width: min(destinationArea.width, current.width / sourceArea.width * destinationArea.width),
-            height: min(destinationArea.height, current.height / sourceArea.height * destinationArea.height)
-        )
-        let destinationFrame = CGRect(
-            x: min(max(relative.minX, destinationArea.minX), destinationArea.maxX - relative.width),
-            y: min(max(relative.minY, destinationArea.minY), destinationArea.maxY - relative.height),
-            width: relative.width, height: relative.height
-        )
-        try saveAndSet(destinationFrame, target: target, action: action)
+        try saveAndSet(destinationFrame, target: target, action: action, bounds: destination.axVisibleFrame)
     }
 
     private func toggleFullscreen(_ window: AXUIElement, action: WindowAction) throws {
@@ -287,20 +325,16 @@ public final class WindowManager {
         }
     }
 
-    private func saveAndSet(_ targetFrame: CGRect, target: WindowRecord, action: WindowAction) throws {
+    private func saveAndSet(_ targetFrame: CGRect, target: WindowRecord, action: WindowAction, bounds: CGRect) throws {
         guard !approximatelyEqual(target.frame, targetFrame) else { return }
-        lastBulk = nil
-        undoFrames[target.key, default: []].append(target.frame)
-        if undoFrames[target.key]!.count > 24 {
-            undoFrames[target.key]!.removeFirst()
-        }
+        history.recordSingle(target.frame, for: target.key)
         do {
-            try setFrame(targetFrame, on: target.element, action: action)
+            try setFrame(targetFrame, on: target.element, action: action, bounds: bounds)
         } catch {
             // A size write can succeed before a position write fails. Keep
             // the original frame available whenever the window changed.
             if let actual = frame(of: target.element), approximatelyEqual(actual, target.frame) {
-                _ = undoFrames[target.key]?.popLast()
+                _ = history.popLast(for: target.key)
             }
             throw error
         }
@@ -309,8 +343,14 @@ public final class WindowManager {
     private func arrangeAll(target: WindowRecord, cascade: Bool, action: WindowAction) throws {
         let displays = screenDisplays()
         guard let destination = display(containing: target.frame, in: displays) else { throw WindowManagerError.noDisplay }
-        let records = NSWorkspace.shared.runningApplications.filter { $0.processIdentifier != getpid() && !$0.isHidden }.flatMap { app in
-            visibleWindows(in: AXUIElementCreateApplication(app.processIdentifier), pid: app.processIdentifier)
+        let ownPID = getpid()
+        // Only regular, visible apps own arrangeable windows. Skipping agents
+        // and background processes avoids an AX round trip to each of them.
+        let applications = NSWorkspace.shared.runningApplications.filter {
+            $0.activationPolicy == .regular && !$0.isHidden && $0.processIdentifier != ownPID
+        }
+        let records = applications.flatMap { app in
+            visibleWindows(in: applicationElement(app.processIdentifier), pid: app.processIdentifier)
         }.filter { record in
             display(containing: record.frame, in: displays)?.screen == destination.screen
                 && canSetAttribute(record.element, AXAttribute.size)
@@ -320,22 +360,21 @@ public final class WindowManager {
         guard !records.isEmpty else { throw WindowManagerError.noTargetWindow }
         let frames = cascade ? cascadeFrames(count: records.count, in: destination.axVisibleFrame)
             : WindowLayout.gridFrames(count: records.count, in: destination.axVisibleFrame, gap: CGFloat(gap))
-        let jobs = Array(zip(records, frames))
-        let history = undoFrames
+        var moved: [WindowUndoHistory<WindowKey, AXUIElement>.Move] = []
         do {
-            for (record, targetFrame) in jobs {
+            for (record, targetFrame) in zip(records, frames) {
+                // Windows already in place are not written and get no undo entry.
                 guard !approximatelyEqual(record.frame, targetFrame) else { continue }
-                undoFrames[record.key, default: []].append(record.frame)
-                try setFrame(targetFrame, on: record.element, action: action)
+                // Record before writing: a failed write can still move the window.
+                moved.append(.init(key: record.key, original: record.frame, element: record.element))
+                try setFrame(targetFrame, on: record.element, action: action, bounds: destination.axVisibleFrame)
             }
-            lastBulk = records
+            history.recordBulk(members: Set(records.map(\.key)), moved: moved)
         } catch {
-            undoFrames = history
-            // Roll back every write that succeeded in this transaction. The
-            // original frame is in the transaction's immutable records list.
-            for record in records {
-                guard let expected = jobs.first(where: { $0.0.key == record.key })?.0.frame else { continue }
-                _ = try? setFrame(expected, on: record.element, action: action)
+            // Roll back every window this transaction wrote. History is only
+            // recorded after all writes succeed, so it needs no rollback.
+            for move in moved {
+                _ = try? setFrame(move.original, on: move.element, action: action)
             }
             throw error
         }
@@ -366,7 +405,7 @@ public final class WindowManager {
 
     private func target(for pid: pid_t?) throws -> WindowRecord {
         if let pid {
-            let application = AXUIElementCreateApplication(pid)
+            let application = applicationElement(pid)
             let candidates = visibleWindows(in: application, pid: pid)
             if let focused = axElement(attribute(application, AXAttribute.focusedWindow)),
                let record = candidates.first(where: { $0.element == focused }) {
@@ -405,9 +444,8 @@ public final class WindowManager {
               (attribute(window, AXAttribute.subrole) as? String) == AXAttribute.standardWindow,
               !((attribute(window, AXAttribute.hidden) as? NSNumber)?.boolValue ?? false),
               !((attribute(window, AXAttribute.minimized) as? NSNumber)?.boolValue ?? false),
-              frame(of: window) != nil else { return false }
+              let windowFrame = frame(of: window) else { return false }
 
-        guard let windowFrame = frame(of: window) else { return false }
         let visible = onScreenWindows(for: pid)
         if let number = windowNumber(of: window) { return visible.contains { $0.number == number } }
         // AXWindowNumber is not exposed by every app. Match visible geometry;
@@ -447,28 +485,63 @@ public final class WindowManager {
         return CGRect(origin: position, size: size)
     }
 
-    private func setFrame(_ expectedFrame: CGRect, on window: AXUIElement, action: WindowAction) throws {
-        var size = expectedFrame.size
-        var position = expectedFrame.origin
-        guard let sizeValue = AXValueCreate(.cgSize, &size),
-              let positionValue = AXValueCreate(.cgPoint, &position) else {
-            throw WindowManagerError.frameUnavailable
-        }
-        let sizeError = AXUIElementSetAttributeValue(window, AXAttribute.size as CFString, sizeValue)
-        guard sizeError == .success else {
-            throw WindowManagerError.accessibilityFailure(action: action, code: sizeError.rawValue)
-        }
-        let positionError = AXUIElementSetAttributeValue(window, AXAttribute.position as CFString, positionValue)
-        guard positionError == .success else {
-            throw WindowManagerError.accessibilityFailure(action: action, code: positionError.rawValue)
-        }
+    /// Writes size, then position, then size again. The first size write
+    /// can be limited by the display the window starts on; the second one
+    /// applies the size once the window is on the destination display.
+    ///
+    /// When ``bounds`` is given and the app keeps its own size (a fixed or
+    /// minimum size), the window is re-aligned to the target's anchored edge
+    /// inside ``bounds``. Reaching that aligned frame counts as success.
+    private func setFrame(_ expectedFrame: CGRect, on window: AXUIElement, action: WindowAction, bounds: CGRect? = nil) throws {
+        try write(size: expectedFrame.size, to: window, action: action)
+        try write(position: expectedFrame.origin, to: window, action: action)
+        try write(size: expectedFrame.size, to: window, action: action)
 
-        // Apps can enforce a minimum size or adjust the origin while resizing.
-        // Read back once and report the actual result with a small pixel
-        // tolerance for display scaling and AX rounding.
-        guard let actual = self.frame(of: window), approximatelyEqual(actual, expectedFrame, tolerance: 3) else {
+        // Read back with a small tolerance for display scaling and AX rounding.
+        guard let actual = self.frame(of: window) else {
+            throw WindowManagerError.resizeFailed(action: action, expected: expectedFrame, actual: nil)
+        }
+        if approximatelyEqual(actual, expectedFrame, tolerance: 3) { return }
+        guard let bounds,
+              let aligned = WindowLayout.anchoredFrame(size: actual.size, target: expectedFrame, in: bounds) else {
+            throw WindowManagerError.resizeFailed(action: action, expected: expectedFrame, actual: actual)
+        }
+        if !approximatelyEqual(actual, aligned, tolerance: 3) {
+            try write(position: aligned.origin, to: window, action: action)
+        }
+        guard let settled = self.frame(of: window), approximatelyEqual(settled, aligned, tolerance: 3) else {
             throw WindowManagerError.resizeFailed(action: action, expected: expectedFrame, actual: self.frame(of: window))
         }
+    }
+
+    private func write(size: CGSize, to window: AXUIElement, action: WindowAction) throws {
+        var value = size
+        guard let axValue = AXValueCreate(.cgSize, &value) else { throw WindowManagerError.frameUnavailable }
+        let error = AXUIElementSetAttributeValue(window, AXAttribute.size as CFString, axValue)
+        guard error == .success else {
+            throw WindowManagerError.accessibilityFailure(action: action, code: error.rawValue)
+        }
+    }
+
+    private func write(position: CGPoint, to window: AXUIElement, action: WindowAction) throws {
+        var value = position
+        guard let axValue = AXValueCreate(.cgPoint, &value) else { throw WindowManagerError.frameUnavailable }
+        let error = AXUIElementSetAttributeValue(window, AXAttribute.position as CFString, axValue)
+        guard error == .success else {
+            throw WindowManagerError.accessibilityFailure(action: action, code: error.rawValue)
+        }
+    }
+
+    private func applicationElement(_ pid: pid_t, timeout: Float = WindowManager.messagingTimeout) -> AXUIElement {
+        let element = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(element, timeout)
+        return element
+    }
+
+    private func systemWideElement() -> AXUIElement {
+        let element = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(element, Self.messagingTimeout)
+        return element
     }
 
     private func canSetAttribute(_ element: AXUIElement, _ name: String) -> Bool {
@@ -550,12 +623,25 @@ public final class WindowManager {
     }
 
     private func handleEdgeEvent(_ event: NSEvent) {
-        guard Self.hasPermission else { return }
         switch event.type {
         case .leftMouseDown:
-            guard let hit = titleBarWindow(at: NSEvent.mouseLocation), let original = frame(of: hit.window) else { edgeDrag = nil; return }
-            edgeDrag = (hit.pid, hit.window, original, NSEvent.mouseLocation)
+            // No Accessibility work here: most clicks never become drags.
+            edgeDrag = nil
+            edgePress = NSEvent.mouseLocation
+            startDragMonitoring()
+        case .leftMouseDragged:
+            guard let press = edgePress else { stopDragMonitoring(); return }
+            let point = NSEvent.mouseLocation
+            guard hypot(point.x - press.x, point.y - press.y) >= Self.dragStartDistance else { return }
+            edgePress = nil
+            stopDragMonitoring()
+            // The window follows the pointer, so the pointer is still over
+            // the grabbed title bar or toolbar.
+            guard Self.hasPermission, let hit = titleBarWindow(at: point), let original = frame(of: hit.window) else { return }
+            edgeDrag = (hit.pid, hit.window, original, press)
         case .leftMouseUp:
+            edgePress = nil
+            stopDragMonitoring()
             guard let drag = edgeDrag else { return }
             edgeDrag = nil
             let point = NSEvent.mouseLocation
@@ -564,14 +650,30 @@ public final class WindowManager {
                   hypot(current.minX - drag.original.minX, current.minY - drag.original.minY) >= 8,
                   abs(current.width - drag.original.width) < 4, abs(current.height - drag.original.height) < 4,
                   let action = edgeAction(at: point), isEligible(drag.window, pid: drag.pid) else { return }
-            let record = WindowRecord(pid: drag.pid, application: AXUIElementCreateApplication(drag.pid), element: drag.window, frame: current, key: key(for: drag.window, pid: drag.pid, frame: current))
+            let record = WindowRecord(pid: drag.pid, application: applicationElement(drag.pid), element: drag.window, frame: current, key: key(for: drag.window, pid: drag.pid, frame: current))
             do { try arrange(record, action: action) } catch { NSSound.beep() }
         default: break
         }
     }
 
+    private func startDragMonitoring() {
+        guard edgeDragMonitor == nil else { return }
+        edgeDragMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDragged) { [weak self] event in
+            Task { @MainActor [weak self] in
+                self?.handleEdgeEvent(event)
+            }
+        }
+    }
+
+    private func stopDragMonitoring() {
+        if let edgeDragMonitor {
+            NSEvent.removeMonitor(edgeDragMonitor)
+        }
+        edgeDragMonitor = nil
+    }
+
     private func titleBarWindow(at appKitPoint: NSPoint) -> (pid: pid_t, window: AXUIElement)? {
-        let system = AXUIElementCreateSystemWide()
+        let system = systemWideElement()
         let point = axPoint(fromAppKit: appKitPoint)
         var hit: AXUIElement?
         guard AXUIElementCopyElementAtPosition(system, Float(point.x), Float(point.y), &hit) == .success else { return nil }
@@ -606,21 +708,8 @@ public final class WindowManager {
         return pid
     }
 
+    /// Edges shared with another display are not snap edges.
     private func edgeAction(at point: NSPoint) -> WindowAction? {
-        guard let display = screenDisplays().first(where: { $0.appKitFrame.contains(point) }) else { return nil }
-        let threshold: CGFloat = 6
-        let nearLeft = abs(point.x - display.appKitFrame.minX) <= threshold
-        let nearRight = abs(point.x - display.appKitFrame.maxX) <= threshold
-        let nearTop = abs(point.y - display.appKitFrame.maxY) <= threshold
-        let nearBottom = abs(point.y - display.appKitFrame.minY) <= threshold
-        if nearLeft && nearTop { return .topLeftQuarter }
-        if nearRight && nearTop { return .topRightQuarter }
-        if nearLeft && nearBottom { return .bottomLeftQuarter }
-        if nearRight && nearBottom { return .bottomRightQuarter }
-        if nearLeft { return .leftHalf }
-        if nearRight { return .rightHalf }
-        if nearTop { return .topHalf }
-        if nearBottom { return .bottomHalf }
-        return nil
+        WindowLayout.edgeSnapAction(at: axPoint(fromAppKit: point), displays: screenDisplays().map(\.axFrame))
     }
 }

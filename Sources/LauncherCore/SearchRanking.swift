@@ -19,7 +19,9 @@ public enum SearchRanking {
         var best: Double?
 
         for candidate in candidates {
-            let candidateForms = forms(for: candidate)
+            // Also try CamelCase words, so "time" finds FaceTime.
+            let split = splitCamelCase(candidate)
+            let candidateForms = forms(for: candidate) + (split == candidate ? [] : forms(for: split))
             guard !candidateForms.isEmpty else { continue }
 
             for queryForm in queryForms {
@@ -82,6 +84,23 @@ public enum SearchRanking {
         return result.all
     }
 
+    /// "FaceTime" -> "Face Time", "VSCode" -> "VS Code", "iMovie" -> "i Movie".
+    private static func splitCamelCase(_ text: String) -> String {
+        let characters = Array(text)
+        var result = ""
+        for (index, character) in characters.enumerated() {
+            if index > 0, character.isUppercase {
+                let previous = characters[index - 1]
+                let nextIsLower = index + 1 < characters.count && characters[index + 1].isLowercase
+                if previous.isLowercase || (previous.isUppercase && nextIsLower) {
+                    result.append(" ")
+                }
+            }
+            result.append(character)
+        }
+        return result
+    }
+
     private static func normalize(_ text: String) -> String {
         let folded = text.folding(
             options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
@@ -107,6 +126,9 @@ public enum SearchRanking {
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    // Tiers: exact 1.0, whole prefix 0.90, words 0.56-0.84 (exact words
+    // above word prefixes), acronym 0.50-0.55, substring 0.40-0.48,
+    // fuzzy 0.28-0.38.
     private static func score(form query: String, against candidate: String) -> Double? {
         guard !query.isEmpty, !candidate.isEmpty else { return nil }
 
@@ -122,11 +144,19 @@ public enum SearchRanking {
         let candidateTokens = candidate.split(separator: " ").map(String.init)
         let querySet = Set(queryTokens)
         let candidateSet = Set(candidateTokens)
-        let exactMatches = querySet.intersection(candidateSet).count
 
-        if exactMatches > 0 {
-            let coverage = Double(exactMatches) / Double(querySet.count)
-            let precision = Double(exactMatches) / Double(candidateSet.count)
+        // A word prefix counts slightly less than a whole word. One-letter
+        // prefixes count only when they are the whole query.
+        let matchWeight = querySet.reduce(0.0) { total, token in
+            if candidateSet.contains(token) { return total + 1 }
+            guard token.count >= 2 || querySet.count == 1 else { return total }
+            let best = candidateTokens.filter { $0.hasPrefix(token) }.map { Double(token.count) / Double($0.count) }.max()
+            return total + (best.map { 0.85 + 0.10 * $0 } ?? 0)
+        }
+
+        if matchWeight > 0 {
+            let coverage = matchWeight / Double(querySet.count)
+            let precision = min(1, matchWeight / Double(candidateSet.count))
             // This range is deliberately below the prefix score, even when
             // every query token occurs in a long candidate title.
             return min(0.84, 0.56 + (0.20 * coverage) + (0.08 * precision))
@@ -141,10 +171,17 @@ public enum SearchRanking {
         if acronym == compactQuery {
             return 0.55
         }
+        if acronym.hasPrefix(compactQuery) {
+            return 0.50 + 0.04 * Double(compactQuery.count) / Double(acronym.count)
+        }
+
+        let density = Double(compactQuery.count) / Double(compactCandidate.count)
+        if compactCandidate.contains(compactQuery) {
+            return 0.40 + 0.08 * density
+        }
 
         guard isSubsequence(compactQuery, of: compactCandidate) else { return nil }
-        let density = Double(compactQuery.count) / Double(compactCandidate.count)
-        return min(0.54, 0.28 + (0.24 * density))
+        return 0.28 + 0.10 * density
     }
 
     private static func isSubsequence(_ query: String, of candidate: String) -> Bool {

@@ -12,6 +12,8 @@ final class SpeechService: ObservableObject {
     @Published private(set) var status: String = "Speech input is idle."
     @Published private(set) var isListening = false
     @Published private(set) var isStarting = false
+    /// Set when a session ends with a failure; cleared on the next start or stop.
+    @Published private(set) var errorMessage: String?
 
     var onTranscript: ((String) -> Void)?
 
@@ -43,12 +45,12 @@ final class SpeechService: ObservableObject {
         }
 
         guard microphoneGranted else {
-            status = "Microphone access is unavailable. Allow it in System Settings, then try again."
+            status = "Microphone access denied. Allow it in System Settings."
             return
         }
 
         guard speechAuthorization == .authorized else {
-            status = "Speech Recognition access is unavailable. Allow it in System Settings, then try again."
+            status = "Speech Recognition denied. Allow it in System Settings."
             return
         }
 
@@ -60,7 +62,7 @@ final class SpeechService: ObservableObject {
         guard !isListening, !isStarting else { return }
 
         guard permissionsGranted else {
-            status = "Speech input is unavailable. Grant microphone and Speech Recognition access first."
+            status = "Voice needs microphone and speech access."
             return
         }
 
@@ -77,12 +79,14 @@ final class SpeechService: ObservableObject {
         sessionToken &+= 1
         let token = sessionToken
         isStarting = true
+        errorMessage = nil
         startRequestedAt = DispatchTime.now().uptimeNanoseconds
         status = "Starting speech input…"
 
+        // DispatchQueue.main keeps events in order, so an older partial transcript cannot land after a newer one.
         captureWorker.start(token: token, recognizer: recognizer) { [weak self] event in
-            Task { @MainActor [weak self] in
-                self?.receive(event, token: token)
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated { self?.receive(event, token: token) }
             }
         }
     }
@@ -94,6 +98,7 @@ final class SpeechService: ObservableObject {
         isListening = false
         startRequestedAt = nil
         status = "Speech input stopped."
+        errorMessage = nil
         captureWorker.stop()
     }
 
@@ -123,7 +128,7 @@ final class SpeechService: ObservableObject {
             guard sessionToken == token else { return }
 
             if let errorMessage {
-                finish(status: "Speech recognition unavailable: \(errorMessage)")
+                finish(status: "Speech recognition unavailable: \(errorMessage)", failed: true)
             } else if isFinal {
                 finish(status: "Speech input finished.")
             }
@@ -131,16 +136,17 @@ final class SpeechService: ObservableObject {
         case let .failed(message):
             guard isStarting || isListening else { return }
             logger.error("Speech input failed: \(message, privacy: .public)")
-            finish(status: message)
+            finish(status: message, failed: true)
         }
     }
 
-    private func finish(status: String) {
+    private func finish(status: String, failed: Bool = false) {
         sessionToken &+= 1
         isStarting = false
         isListening = false
         startRequestedAt = nil
         self.status = status
+        errorMessage = failed ? status : nil
         captureWorker.stop()
     }
 }
@@ -165,6 +171,7 @@ private final class CaptureWorker: @unchecked Sendable {
     private var activeToken: UInt64?
     private var tapInstalled = false
     private var lastTranscript: String?
+    private var configurationObserver: NSObjectProtocol?
 
     func start(token: UInt64, recognizer: SFSpeechRecognizer, handler: @escaping EventHandler) {
         requestLock.lock()
@@ -191,11 +198,17 @@ private final class CaptureWorker: @unchecked Sendable {
         cancelCaptureOnQueue()
         guard isRequested(token) else { return }
 
-        let engine = audioEngine ?? {
-            let created = AVAudioEngine()
-            audioEngine = created
-            return created
-        }()
+        // A fresh engine per session picks up the current input device and format.
+        let engine = AVAudioEngine()
+        audioEngine = engine
+        configurationObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
+        ) { [weak self] _ in
+            self?.queue.async { [weak self] in
+                guard let self, self.activeToken == token else { return }
+                self.failOnQueue(token: token, message: "Audio input changed · tap mic to retry", handler: handler)
+            }
+        }
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.requiresOnDeviceRecognition = true
@@ -316,13 +329,19 @@ private final class CaptureWorker: @unchecked Sendable {
         recognitionRequest?.endAudio()
         recognitionRequest = nil
 
-        if let audioEngine, audioEngine.isRunning {
-            audioEngine.stop()
+        if let configurationObserver {
+            NotificationCenter.default.removeObserver(configurationObserver)
+            self.configurationObserver = nil
         }
+        // Remove the tap before stopping so no buffer arrives for a stopped engine.
         if tapInstalled, let audioEngine {
             audioEngine.inputNode.removeTap(onBus: 0)
             tapInstalled = false
         }
+        if let audioEngine, audioEngine.isRunning {
+            audioEngine.stop()
+        }
+        audioEngine = nil
 
         activeToken = nil
         lastTranscript = nil

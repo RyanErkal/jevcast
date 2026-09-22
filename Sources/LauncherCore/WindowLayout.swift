@@ -29,6 +29,7 @@ public enum WindowAction: String, CaseIterable, Identifiable, Sendable {
     case bottomRightSixth = "bottom-right-sixth"
 
     case maximize = "maximize"
+    case almostMaximize = "almost-maximize"
     case center = "center"
     case larger = "larger"
     case smaller = "smaller"
@@ -52,18 +53,19 @@ public enum WindowAction: String, CaseIterable, Identifiable, Sendable {
         case .bottomLeftQuarter: return "Bottom Left Quarter"
         case .bottomRightQuarter: return "Bottom Right Quarter"
         case .leftThird: return "Left Third"
-        case .centerThird: return "Center Third"
+        case .centerThird: return "Centre Third"
         case .rightThird: return "Right Third"
         case .leftTwoThirds: return "Left Two Thirds"
         case .rightTwoThirds: return "Right Two Thirds"
         case .topLeftSixth: return "Top Left Sixth"
-        case .topCenterSixth: return "Top Center Sixth"
+        case .topCenterSixth: return "Top Centre Sixth"
         case .topRightSixth: return "Top Right Sixth"
         case .bottomLeftSixth: return "Bottom Left Sixth"
-        case .bottomCenterSixth: return "Bottom Center Sixth"
+        case .bottomCenterSixth: return "Bottom Centre Sixth"
         case .bottomRightSixth: return "Bottom Right Sixth"
-        case .maximize: return "Maximize"
-        case .center: return "Center"
+        case .maximize: return "Maximise"
+        case .almostMaximize: return "Almost Maximise"
+        case .center: return "Centre"
         case .larger: return "Larger"
         case .smaller: return "Smaller"
         case .restore: return "Restore"
@@ -88,18 +90,19 @@ public enum WindowAction: String, CaseIterable, Identifiable, Sendable {
         case .bottomLeftQuarter: return ["bottom left", "lower left"]
         case .bottomRightQuarter: return ["bottom right", "lower right"]
         case .leftThird: return ["left 1/3", "one third left"]
-        case .centerThird: return ["center 1/3", "middle third"]
+        case .centerThird: return ["center third", "center 1/3", "centre 1/3", "middle third"]
         case .rightThird: return ["right 1/3", "one third right"]
         case .leftTwoThirds: return ["left 2/3"]
         case .rightTwoThirds: return ["right 2/3"]
         case .topLeftSixth: return ["top left 1/6"]
-        case .topCenterSixth: return ["top center 1/6"]
+        case .topCenterSixth: return ["top center sixth", "top center 1/6", "top centre 1/6"]
         case .topRightSixth: return ["top right 1/6"]
         case .bottomLeftSixth: return ["bottom left 1/6"]
-        case .bottomCenterSixth: return ["bottom center 1/6"]
+        case .bottomCenterSixth: return ["bottom center sixth", "bottom center 1/6", "bottom centre 1/6"]
         case .bottomRightSixth: return ["bottom right 1/6"]
-        case .maximize: return ["max", "fill"]
-        case .center: return ["centre", "middle"]
+        case .maximize: return ["maximize", "max", "fill"]
+        case .almostMaximize: return ["almost maximize", "almost max"]
+        case .center: return ["center", "middle"]
         case .larger: return ["grow", "increase"]
         case .smaller: return ["shrink", "decrease"]
         case .restore: return ["undo", "reset"]
@@ -130,6 +133,7 @@ public enum WindowAction: String, CaseIterable, Identifiable, Sendable {
              .bottomLeftSixth, .bottomCenterSixth, .bottomRightSixth:
             return "rectangle.split.3x2.fill"
         case .maximize: return "rectangle.inset.filled"
+        case .almostMaximize: return "macwindow"
         case .center: return "rectangle.center.inset.filled"
         case .larger: return "arrow.up.left.and.arrow.down.right"
         case .smaller: return "arrow.down.right.and.arrow.up.left"
@@ -177,6 +181,7 @@ public enum WindowLayout {
         case .bottomCenterSixth: return grid.cell(column: 1, row: 1, columns: 3, rows: 2)
         case .bottomRightSixth: return grid.cell(column: 2, row: 1, columns: 3, rows: 2)
         case .maximize: return inset(display, by: safeGap)
+        case .almostMaximize: return almostMaximized(display)
         case .center, .larger, .smaller, .restore, .nextDisplay,
              .previousDisplay, .fullscreen, .tileAll, .cascadeAll:
             return nil
@@ -223,7 +228,25 @@ public enum WindowLayout {
 
     /// Returns the nearest display index in a deterministic left-to-right order.
     public static func adjacentDisplayIndex(for frame: CGRect, displays: [CGRect], offset: Int) -> Int? {
-        guard !displays.isEmpty, offset != 0 else { return nil }
+        guard offset != 0, let (ordered, current) = orderedDisplays(for: frame, displays: displays) else { return nil }
+        let destination = (current + (offset % ordered.count) + ordered.count) % ordered.count
+        // Return the caller's original array index. NSScreen order is not a
+        // stable API and can be unsorted with negative monitor origins.
+        return ordered[destination].offset
+    }
+
+    /// Returns the index of the display that holds most of ``frame``, using
+    /// the same rule as ``adjacentDisplayIndex(for:displays:offset:)``.
+    public static func displayIndex(for frame: CGRect, displays: [CGRect]) -> Int? {
+        guard let (ordered, current) = orderedDisplays(for: frame, displays: displays) else { return nil }
+        return ordered[current].offset
+    }
+
+    private static func orderedDisplays(
+        for frame: CGRect,
+        displays: [CGRect]
+    ) -> (ordered: [(offset: Int, element: CGRect)], current: Int)? {
+        guard !displays.isEmpty else { return nil }
         let ordered = displays.enumerated().sorted {
             if $0.element.minX == $1.element.minX { return $0.element.minY < $1.element.minY }
             return $0.element.minX < $1.element.minX
@@ -240,10 +263,127 @@ public enum WindowLayout {
             return lhs > rhs
         }
         guard let current else { return nil }
-        let destination = (current + (offset % ordered.count) + ordered.count) % ordered.count
-        // Return the caller's original array index. NSScreen order is not a
-        // stable API and can be unsorted with negative monitor origins.
-        return ordered[destination].offset
+        return (ordered, current)
+    }
+
+    /// Maps ``current`` from one display's usable area to the same relative
+    /// place on another, scaling its size and keeping it fully inside.
+    public static func frame(_ current: CGRect, movedFrom source: CGRect, to destination: CGRect) -> CGRect? {
+        guard isUsable(current), isUsable(source), isUsable(destination) else { return nil }
+        let relative = CGRect(
+            x: destination.minX + (current.minX - source.minX) / source.width * destination.width,
+            y: destination.minY + (current.minY - source.minY) / source.height * destination.height,
+            width: min(destination.width, current.width / source.width * destination.width),
+            height: min(destination.height, current.height / source.height * destination.height)
+        )
+        return clamped(relative, to: destination)
+    }
+
+    /// The sizes that repeated presses of ``action`` step through, in order.
+    /// Halves go 1/2, 2/3, 1/3 against their anchored edge. Center Third goes
+    /// 1/3, 1/2, 2/3 of the width, centered. Other actions do not cycle and
+    /// return an empty array.
+    public static func cycleFrames(for action: WindowAction, in display: CGRect, gap: CGFloat = 8) -> [CGRect] {
+        guard isUsable(display) else { return [] }
+        let grid = Grid(display: display, gap: normalizedGap(gap, for: display))
+        switch action {
+        case .leftHalf:
+            return [grid.span(column: 0, width: 1, columns: 2), grid.span(column: 0, width: 2, columns: 3),
+                    grid.span(column: 0, width: 1, columns: 3)]
+        case .rightHalf:
+            return [grid.span(column: 1, width: 1, columns: 2), grid.span(column: 1, width: 2, columns: 3),
+                    grid.span(column: 2, width: 1, columns: 3)]
+        case .topHalf:
+            return [grid.rows(row: 0, height: 1, rows: 2), grid.rows(row: 0, height: 2, rows: 3),
+                    grid.rows(row: 0, height: 1, rows: 3)]
+        case .bottomHalf:
+            return [grid.rows(row: 1, height: 1, rows: 2), grid.rows(row: 1, height: 2, rows: 3),
+                    grid.rows(row: 2, height: 1, rows: 3)]
+        case .centerThird:
+            return [grid.span(column: 1, width: 1, columns: 3), grid.span(column: 1, width: 2, columns: 4),
+                    grid.span(column: 1, width: 4, columns: 6)]
+        default:
+            return []
+        }
+    }
+
+    /// Picks the next cycle step. The current frame is matched first, so a
+    /// window already at a step advances even after a pause. When the app
+    /// could not reach an exact step (for example, a minimum width), the
+    /// caller's remembered ``previousIndex`` advances instead.
+    public static func nextCycleIndex(current: CGRect, frames: [CGRect], previousIndex: Int? = nil, tolerance: CGFloat = 4) -> Int {
+        guard !frames.isEmpty else { return 0 }
+        if let matched = frames.firstIndex(where: { approximatelyEqual($0, current, tolerance: tolerance) }) {
+            return (matched + 1) % frames.count
+        }
+        if let previousIndex, frames.indices.contains(previousIndex) {
+            return (previousIndex + 1) % frames.count
+        }
+        return 0
+    }
+
+    /// Places a window whose app would not take the requested size.
+    ///
+    /// The window keeps ``size`` and is pinned to the edge of ``target`` that
+    /// is nearest to the edge of ``bounds``: a right half stays flush right, a
+    /// top half stays flush top, and a centered target stays centered. The
+    /// result is clamped inside ``bounds``; an oversized window is pinned
+    /// top-left so its title bar stays reachable.
+    public static func anchoredFrame(size: CGSize, target: CGRect, in bounds: CGRect, tolerance: CGFloat = 1) -> CGRect? {
+        guard isUsable(target), isUsable(bounds), isUsable(CGRect(origin: .zero, size: size)) else { return nil }
+        let leftSpace = target.minX - bounds.minX
+        let rightSpace = bounds.maxX - target.maxX
+        let topSpace = target.minY - bounds.minY
+        let bottomSpace = bounds.maxY - target.maxY
+        let x: CGFloat
+        if abs(leftSpace - rightSpace) <= tolerance { x = target.midX - size.width / 2 }
+        else if leftSpace < rightSpace { x = target.minX }
+        else { x = target.maxX - size.width }
+        let y: CGFloat
+        if abs(topSpace - bottomSpace) <= tolerance { y = target.midY - size.height / 2 }
+        else if topSpace < bottomSpace { y = target.minY }
+        else { y = target.maxY - size.height }
+        let clampedX = size.width >= bounds.width ? bounds.minX : min(max(x, bounds.minX), bounds.maxX - size.width)
+        let clampedY = size.height >= bounds.height ? bounds.minY : min(max(y, bounds.minY), bounds.maxY - size.height)
+        return CGRect(x: clampedX, y: clampedY, width: size.width, height: size.height)
+    }
+
+    /// Returns the drag-to-edge action for a pointer at ``point``.
+    ///
+    /// Both values use Accessibility coordinates (top-left origin, y down).
+    /// An edge shared with an adjacent display at the pointer's position is
+    /// not a screen edge: the pointer passes through it to the other display,
+    /// so it never snaps there.
+    public static func edgeSnapAction(at point: CGPoint, displays: [CGRect], threshold: CGFloat = 6) -> WindowAction? {
+        guard point.x.isFinite, point.y.isFinite else { return nil }
+        let closedContains = { (rect: CGRect) in
+            point.x >= rect.minX && point.x <= rect.maxX && point.y >= rect.minY && point.y <= rect.maxY
+        }
+        guard let display = displays.first(where: { $0.contains(point) }) ?? displays.first(where: closedContains) else {
+            return nil
+        }
+        let others = displays.filter { $0 != display }
+        let edgeTolerance: CGFloat = 1
+        let spansY = { (other: CGRect) in point.y >= other.minY && point.y <= other.maxY }
+        let spansX = { (other: CGRect) in point.x >= other.minX && point.x <= other.maxX }
+        let sharedLeft = others.contains { abs($0.maxX - display.minX) <= edgeTolerance && spansY($0) }
+        let sharedRight = others.contains { abs($0.minX - display.maxX) <= edgeTolerance && spansY($0) }
+        let sharedTop = others.contains { abs($0.maxY - display.minY) <= edgeTolerance && spansX($0) }
+        let sharedBottom = others.contains { abs($0.minY - display.maxY) <= edgeTolerance && spansX($0) }
+
+        let nearLeft = !sharedLeft && abs(point.x - display.minX) <= threshold
+        let nearRight = !sharedRight && abs(point.x - display.maxX) <= threshold
+        let nearTop = !sharedTop && abs(point.y - display.minY) <= threshold
+        let nearBottom = !sharedBottom && abs(point.y - display.maxY) <= threshold
+        if nearLeft && nearTop { return .topLeftQuarter }
+        if nearRight && nearTop { return .topRightQuarter }
+        if nearLeft && nearBottom { return .bottomLeftQuarter }
+        if nearRight && nearBottom { return .bottomRightQuarter }
+        if nearLeft { return .leftHalf }
+        if nearRight { return .rightHalf }
+        if nearTop { return .topHalf }
+        if nearBottom { return .bottomHalf }
+        return nil
     }
 
     private struct Grid {
@@ -251,28 +391,43 @@ public enum WindowLayout {
         let gap: CGFloat
 
         func cell(column: Int, row: Int, columns: Int, rows: Int) -> CGRect {
-            span(column: column, width: 1, columns: columns, row: row, rows: rows)
+            span(column: column, width: 1, columns: columns, row: row, height: 1, rows: rows)
         }
 
         func span(column: Int, width: Int, columns: Int) -> CGRect {
-            span(column: column, width: width, columns: columns, row: 0, rows: 1)
+            span(column: column, width: width, columns: columns, row: 0, height: 1, rows: 1)
         }
 
-        func span(column: Int, width: Int, columns: Int, row: Int, rows: Int) -> CGRect {
+        func rows(row: Int, height: Int, rows: Int) -> CGRect {
+            span(column: 0, width: 1, columns: 1, row: row, height: height, rows: rows)
+        }
+
+        func span(column: Int, width: Int, columns: Int, row: Int, height: Int, rows: Int) -> CGRect {
             let columnWidth = display.width / CGFloat(columns)
             let rowHeight = display.height / CGFloat(rows)
             let raw = CGRect(
                 x: display.minX + CGFloat(column) * columnWidth,
                 y: display.minY + CGFloat(row) * rowHeight,
                 width: columnWidth * CGFloat(width),
-                height: rowHeight
+                height: rowHeight * CGFloat(height)
             )
             let leftGap = column == 0 ? gap : gap / 2
             let rightGap = column + width == columns ? gap : gap / 2
             let topGap = row == 0 ? gap : gap / 2
-            let bottomGap = row + 1 == rows ? gap : gap / 2
+            let bottomGap = row + height == rows ? gap : gap / 2
             return boundedInset(raw, left: leftGap, top: topGap, right: rightGap, bottom: bottomGap)
         }
+    }
+
+    private static func almostMaximized(_ display: CGRect) -> CGRect {
+        let width = display.width * 0.9
+        let height = display.height * 0.9
+        return CGRect(x: display.midX - width / 2, y: display.midY - height / 2, width: width, height: height)
+    }
+
+    private static func approximatelyEqual(_ lhs: CGRect, _ rhs: CGRect, tolerance: CGFloat) -> Bool {
+        abs(lhs.minX - rhs.minX) <= tolerance && abs(lhs.minY - rhs.minY) <= tolerance
+            && abs(lhs.width - rhs.width) <= tolerance && abs(lhs.height - rhs.height) <= tolerance
     }
 
     private static func isUsable(_ rect: CGRect) -> Bool {
@@ -315,12 +470,6 @@ public enum WindowLayout {
         let x = min(max(rect.minX, bounds.minX), bounds.maxX - width)
         let y = min(max(rect.minY, bounds.minY), bounds.maxY - height)
         return CGRect(x: x, y: y, width: width, height: height)
-    }
-
-    private static func distance(from lhs: CGRect, to rhs: CGRect) -> CGFloat {
-        let dx = max(rhs.minX - lhs.maxX, lhs.minX - rhs.maxX, 0)
-        let dy = max(rhs.minY - lhs.maxY, lhs.minY - rhs.maxY, 0)
-        return hypot(dx, dy)
     }
 
     private static func overlapArea(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {

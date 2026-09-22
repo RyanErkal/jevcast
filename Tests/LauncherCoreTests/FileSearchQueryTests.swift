@@ -102,6 +102,48 @@ final class FileSearchQueryTests: XCTestCase {
         ))
     }
 
+    func testAppNamesWithFolderAndDateWordsStayNonExplicit() {
+        for text in ["github desktop", "docker desktop", "google docs", "today", "week", "yesterday", "documents", "downloads"] {
+            let query = FileSearchQuery.parse(text)
+            XCTAssertFalse(query.isExplicitFileSearch, text)
+            XCTAssertNil(query.scope, text)
+            XCTAssertNil(query.kind, text)
+            XCTAssertNil(query.modified, text)
+            XCTAssertEqual(query.nameQuery, text, text)
+        }
+    }
+
+    func testFolderAndDateWordsFilterWithFileContext() {
+        let desktop = FileSearchQuery.parse("desktop pdfs")
+        XCTAssertTrue(desktop.isExplicitFileSearch)
+        XCTAssertEqual(desktop.scope, .desktop)
+        XCTAssertEqual(desktop.kind, .pdf)
+
+        let dated = FileSearchQuery.parse("find file report today")
+        XCTAssertEqual(dated.modified, .today)
+        XCTAssertEqual(dated.nameQuery, "report")
+
+        let docs = FileSearchQuery.parse("docs in downloads")
+        XCTAssertEqual(docs.kind, .document)
+        XCTAssertEqual(docs.scope, .downloads)
+
+        let week = FileSearchQuery.parse("files this week")
+        XCTAssertTrue(week.isExplicitFileSearch)
+        XCTAssertEqual(week.modified, .week)
+
+        let typed = FileSearchQuery.parse("kind:image modified:yesterday")
+        XCTAssertEqual(typed.kind, .image)
+        XCTAssertEqual(typed.modified, .yesterday)
+    }
+
+    func testApostropheInsideWordIsNotAQuote() {
+        XCTAssertEqual(FileSearchQuery.parse("ryan's cv").nameQuery, "ryan's cv")
+        XCTAssertEqual(FileSearchQuery.parse("find 'ryan's cv'").nameQuery, "ryan's cv")
+        let scoped = FileSearchQuery.parse("in:'~/My Files' notes")
+        XCTAssertEqual(scoped.scopePath, "~/My Files")
+        XCTAssertEqual(scoped.nameQuery, "notes")
+    }
+
     private func date(_ value: String) -> Date {
         ISO8601DateFormatter().date(from: value)!
     }

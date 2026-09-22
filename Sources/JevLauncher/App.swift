@@ -18,9 +18,12 @@ struct JevLauncherApp {
     }
 }
 
-private final class LauncherPanel: NSPanel {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
+/// Runtime state that Settings shows but does not persist.
+@MainActor
+final class LauncherStatus: ObservableObject {
+    @Published var launcherHotkeyMessage: String?
+    @Published var windowHotkeyMessage: String?
+    var hotkeyMessage: String? { launcherHotkeyMessage ?? windowHotkeyMessage }
 }
 
 @MainActor
@@ -28,10 +31,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let preferences = Preferences()
     private let catalogue = AppCatalogue()
     private lazy var model = LauncherModel(preferences: preferences, catalogue: catalogue)
-    private let hotkeys = GlobalHotkeys()
+    private let hotkeys = HotkeyCenter()
+    private var launcherHotkey: (hotkey: Hotkey, token: UInt32)?
+    private var windowHotkeyIDs: [UInt32] = []
+    private var windowShortcutsApplied = false
+    private var edgeSnappingActive = false
+    private let status = LauncherStatus()
     private var panel: LauncherPanel!
-    private var settingsWindow: NSWindow?
-    private var menuItem: NSStatusItem?
+    private var settings: SettingsWindow?
+    private var statusMenu: StatusMenu?
     private var keyMonitor: Any?
     private var wasVisible = false
     private let backdrop = LauncherBackdrop()
@@ -40,24 +48,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let resultActions = ResultActions()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let content = LauncherView(model: model, speech: model.speech, catalogue: catalogue, settings: { [weak self] in self?.showSettings() }, actions: { [weak self] in self?.showActions() })
-        panel = LauncherPanel(contentRect: NSRect(x: 0, y: 0, width: 680, height: 548), styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
-        panel.title = "Jev Launcher"
-        panel.titleVisibility = .hidden; panel.titlebarAppearsTransparent = true
-        panel.standardWindowButton(.closeButton)?.isHidden = true
-        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
-        panel.standardWindowButton(.zoomButton)?.isHidden = true
-        panel.isMovableByWindowBackground = true
-        panel.level = .popUpMenu; panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.hidesOnDeactivate = false; panel.isReleasedWhenClosed = false
-        panel.contentView = NSHostingView(rootView: content)
+        panel = LauncherPanel()
+        let content = LauncherView(model: model, speech: model.speech, catalogue: catalogue,
+                                   actions: { [weak self] in self?.showActions() })
+        panel.host(content)
         panel.delegate = self
         model.onClose = { [weak self] restore in self?.hide(restoreFocus: restore) }
-        configureMenu()
-        configureHotkeys()
+        model.onFailure = { [weak self] text in
+            guard let self else { return }
+            self.show(); self.model.message = text
+        }
+        AppMenus.install(target: self, showSettings: #selector(showSettings))
+        statusMenu = StatusMenu(preferences: preferences, isOpen: { [weak self] in self?.wasVisible ?? false },
+                                toggle: { [weak self] in self?.toggle() }, showSettings: { [weak self] in self?.showSettings() })
+        // Snapshot runs leave global shortcuts to the running copy of the app.
+        if UISnapshots.directory == nil { configureHotkeys() }
+        Task { await JevKeyCache.shared.load() }
+        observeAppSwitches()
         catalogue.refresh(extra: preferences.appFolders)
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, self.wasVisible else { return event }
+            guard let self, self.wasVisible, event.window === self.panel else { return event }
+            // An input method composing text owns Return, arrows, and Escape until it commits.
+            if let editor = self.panel.firstResponder as? NSTextView, editor.hasMarkedText() { return event }
             switch event.keyCode {
             case 53:
                 self.hide()
@@ -67,49 +79,118 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             case 126: self.model.moveSelection(-1); self.preview.update(path: self.model.selected?.path); return nil
             case 40 where event.modifierFlags.contains(.command): self.showActions(); return nil
             case 16 where event.modifierFlags.contains(.command): self.togglePreview(); return nil
-            case 43 where event.modifierFlags.contains(.command): self.showSettings(); return nil
             case 15 where event.modifierFlags.contains(.command): self.model.revealSelected(); return nil
             case 8 where event.modifierFlags.contains([.command, .shift]): self.model.copyPath(); return nil
             default: return event
             }
         }
-        show()
+        // A menu-bar app stays quiet at login; `--open` shows the panel for diagnostics.
+        if let directory = UISnapshots.directory { runSnapshots(to: directory) }
+        else if CommandLine.arguments.contains("--open") { show() }
     }
-    private func configureMenu() {
-        menuItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        menuItem?.button?.image = NSImage(systemSymbolName: "command.square", accessibilityDescription: "Jev Launcher")
-        let menu = NSMenu()
-        let open = NSMenuItem(title: "Open Jev Launcher", action: #selector(toggle), keyEquivalent: ""); open.target = self; menu.addItem(open)
-        let settings = NSMenuItem(title: "Settings…", action: #selector(showSettings), keyEquivalent: ","); settings.target = self; menu.addItem(settings)
-        menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit Jev Launcher", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"); menu.addItem(quit)
-        menuItem?.menu = menu
-    }
-    private func configureHotkeys() {
-        hotkeys.clear()
-        let modifier: UInt32 = preferences.hotkey == 1 ? UInt32(optionKey) : preferences.hotkey == 2 ? UInt32(cmdKey) : UInt32(controlKey | shiftKey)
-        if !hotkeys.register(key: UInt32(kVK_Space), modifiers: modifier, callback: { [weak self] in self?.toggle() }) {
-            model.message = "That shortcut is in use. Choose another in Settings."
+    /// Renders each state in turn. Every capture waits for the previous step, so a
+    /// slow step cannot make two captures share one state. Snapshot mode does not
+    /// take key focus, activate the app, block clicks, or show windows on screen.
+    private func runSnapshots(to directory: String) {
+        let rig = LauncherSnapshotRig(catalogue: catalogue)
+        rig.open()
+        let model = rig.model
+        let launcher: () -> NSView? = { rig.panel.hostedView }
+        let settingsView: () -> NSView? = { [weak self] in self?.settings?.window?.contentView }
+        var steps: [(name: String, wait: Double, view: () -> NSView?, action: () -> Void)] = [
+            ("launcher-empty", 1.0, launcher, {}),
+            ("launcher-suggestions", 0.6, launcher, { rig.seedSuggestions() }),
+            ("launcher-query", 0.8, launcher, { model.updateQuery("saf", typed: true) }),
+            ("launcher-calculator", 0.6, launcher, { model.updateQuery("10 km in mi", typed: true) }),
+            ("launcher-files-loading", 0.05, launcher, { model.updateQuery("kind:pdf in:downloads", typed: true) }),
+            ("launcher-files", 2.0, launcher, {}),
+            ("launcher-files-empty", 2.0, launcher, { model.updateQuery("find file zzqxv-no-match", typed: true) }),
+            ("launcher-clipboard", 0.6, launcher, { rig.seedClipboard(); model.updateQuery("clip", typed: true) }),
+            ("launcher-message", 0.6, launcher, {
+                model.updateQuery("saf", typed: true)
+                model.message = "This app moved or was removed. Refresh apps in Settings › Search › Advanced."
+            })
+        ]
+        steps.append(("", 0, { nil }, { [weak self] in
+            guard let self else { return }
+            rig.close()
+            self.settings = SettingsWindow(preferences: self.preferences, model: self.model, catalogue: self.catalogue, status: self.status, changed: {})
+            self.settings?.window?.alphaValue = 0
+            self.settings?.window?.ignoresMouseEvents = true
+            self.settings?.window?.orderFrontRegardless()
+        }))
+        for tab in SettingsWindow.Tab.allCases {
+            steps.append(("settings-" + tab.rawValue, 0.9, settingsView, { [weak self] in self?.settings?.select(tab) }))
         }
-        if preferences.windowShortcuts {
-            let mods = UInt32(controlKey | optionKey | cmdKey)
-            let keys: [(Int, WindowAction)] = [
-                (kVK_LeftArrow, .leftHalf), (kVK_RightArrow, .rightHalf), (kVK_UpArrow, .topHalf), (kVK_DownArrow, .bottomHalf),
-                (kVK_ANSI_U, .topLeftQuarter), (kVK_ANSI_I, .topRightQuarter), (kVK_ANSI_J, .bottomLeftQuarter), (kVK_ANSI_K, .bottomRightQuarter),
-                (kVK_ANSI_1, .leftThird), (kVK_ANSI_2, .centerThird), (kVK_ANSI_3, .rightThird),
-                (kVK_Return, .maximize), (kVK_ANSI_Z, .restore), (kVK_ANSI_N, .nextDisplay), (kVK_ANSI_P, .previousDisplay)
-            ]
-            for (key, action) in keys {
-                if !hotkeys.register(key: UInt32(key), modifiers: mods, callback: { [weak self] in
-                    guard let self else { return }
-                    if !self.panel.isVisible { self.model.windows.captureTarget() }
-                    do { try self.model.windows.execute(action, cycle: true) }
-                    catch { self.show(); self.model.message = error.localizedDescription }
-                }) { model.message = "One or more window shortcuts are in use." }
+        func run(_ index: Int) {
+            guard index < steps.count else { NSApp.terminate(nil); return }
+            let step = steps[index]
+            step.action()
+            DispatchQueue.main.asyncAfter(deadline: .now() + step.wait) {
+                if !step.name.isEmpty, let view = step.view() {
+                    UISnapshots.write(view, name: step.name, to: directory)
+                    let window = view.window?.frame.size ?? .zero
+                    print("[Jev snapshot] \(step.name) window=\(Int(window.width))x\(Int(window.height)) content=\(Int(view.bounds.width))x\(Int(view.bounds.height))")
+                    fflush(stdout)
+                }
+                run(index + 1)
             }
         }
+        run(0)
+    }
+    /// Applies shortcut and snapping preferences. Each part changes only when its preference changed.
+    func configureHotkeys() {
+        applyLauncherHotkey()
+        applyWindowShortcuts()
         model.windows.gap = preferences.gap
-        if preferences.edgeSnapping { model.windows.startEdgeSnapping() } else { model.windows.stopEdgeSnapping() }
+        if preferences.edgeSnapping != edgeSnappingActive {
+            edgeSnappingActive = preferences.edgeSnapping
+            if edgeSnappingActive { model.windows.startEdgeSnapping() } else { model.windows.stopEdgeSnapping() }
+        }
+    }
+    private func applyLauncherHotkey() {
+        let outcome = HotkeySwap.apply(requested: preferences.hotkey, active: launcherHotkey, register: { hotkey in
+            self.hotkeys.register(key: hotkey.keyCode, modifiers: hotkey.carbonModifiers) { [weak self] in self?.toggle() }
+        }, unregister: { self.hotkeys.unregister($0) })
+        switch outcome {
+        case .unchanged: break
+        case let .switched(hotkey, token):
+            launcherHotkey = (hotkey, token)
+            status.launcherHotkeyMessage = nil
+        case let .failed(keep):
+            let requested = preferences.hotkey
+            if let keep {
+                status.launcherHotkeyMessage = "\(requested.title) is in use by another app. \(keep.title) is still active."
+                preferences.hotkey = keep
+            } else {
+                status.launcherHotkeyMessage = "\(requested.title) is in use by another app. Choose another shortcut."
+                model.message = status.launcherHotkeyMessage
+            }
+        }
+    }
+    private func applyWindowShortcuts() {
+        guard preferences.windowShortcuts != windowShortcutsApplied else { return }
+        windowShortcutsApplied = preferences.windowShortcuts
+        windowHotkeyIDs.forEach(hotkeys.unregister)
+        windowHotkeyIDs = []
+        status.windowHotkeyMessage = nil
+        guard preferences.windowShortcuts else { return }
+        let mods = UInt32(controlKey | optionKey | cmdKey)
+        let keys: [(Int, WindowAction)] = [
+            (kVK_LeftArrow, .leftHalf), (kVK_RightArrow, .rightHalf), (kVK_UpArrow, .topHalf), (kVK_DownArrow, .bottomHalf),
+            (kVK_ANSI_U, .topLeftQuarter), (kVK_ANSI_I, .topRightQuarter), (kVK_ANSI_J, .bottomLeftQuarter), (kVK_ANSI_K, .bottomRightQuarter),
+            (kVK_ANSI_1, .leftThird), (kVK_ANSI_2, .centerThird), (kVK_ANSI_3, .rightThird),
+            (kVK_Return, .maximize), (kVK_ANSI_Z, .restore), (kVK_ANSI_N, .nextDisplay), (kVK_ANSI_P, .previousDisplay)
+        ]
+        for (key, action) in keys {
+            let id = hotkeys.register(key: UInt32(key), modifiers: mods) { [weak self] in
+                guard let self else { return }
+                if !self.panel.isVisible { self.model.windows.captureTarget() }
+                do { try self.model.windows.execute(action, cycle: true) }
+                catch { self.show(); self.model.message = error.localizedDescription }
+            }
+            if let id { windowHotkeyIDs.append(id) } else { status.windowHotkeyMessage = "One or more window shortcuts are in use by another app." }
+        }
     }
     @objc private func toggle() { if panel.isVisible { hide() } else { show() } }
     private func show() {
@@ -120,13 +201,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         previousApp = frontmost?.processIdentifier == getpid() ? nil : frontmost
         model.begin()
         let pointer = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { $0.frame.contains(pointer) } ?? NSScreen.main
-        if let frame = screen?.visibleFrame {
-            panel.setFrameOrigin(NSPoint(x: frame.midX - panel.frame.width / 2, y: frame.maxY - panel.frame.height - max(40, frame.height * 0.12)))
-        }
+        panel.place(on: NSScreen.screens.first { $0.frame.contains(pointer) } ?? NSScreen.main)
         wasVisible = true
         backdrop.show { [weak self] in self?.hide() }
-        NSApp.activate(ignoringOtherApps: true)
+        // The panel is non-activating: it takes typing without activating the app, so no Space switch.
         panel.makeKeyAndOrderFront(nil)
         model.focusSearch?()
         traceInteraction("opened")
@@ -135,7 +213,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     private func showActions() {
         guard let view = panel.contentView else { return }
-        resultActions.show(model: model, in: view, preview: { [weak self] in self?.togglePreview() }, dismissed: { [weak self] in self?.hide() })
+        let row = model.selectedRowRect?().map { view.convert($0, from: nil) }
+        let anchor = row.map { NSPoint(x: $0.minX + 60, y: $0.minY) } ?? NSPoint(x: view.bounds.width - 195, y: 45)
+        resultActions.show(model: model, in: view, at: anchor, preview: { [weak self] in self?.togglePreview() }, dismissed: { [weak self] in self?.hide() })
     }
     private func togglePreview() {
         model.pauseListening()
@@ -156,8 +236,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func traceInteraction(_ event: String) {
         guard CommandLine.arguments.contains("--trace-interaction") else { return }
         let editing = panel.firstResponder is NSTextView
-        print("[Jev interaction] \(event) visible=\(wasVisible) active=\(NSApp.isActive) key=\(panel.isKeyWindow) editing=\(editing)")
+        let front = NSWorkspace.shared.frontmostApplication?.localizedName ?? "none"
+        print("[Jev interaction] \(event) visible=\(wasVisible) active=\(NSApp.isActive) key=\(panel.isKeyWindow) editing=\(editing) size=\(Int(panel.frame.width))x\(Int(panel.frame.height)) frontmost=\(front) queryLength=\(model.query.count)")
         fflush(stdout)
+    }
+    /// Command-Tab or a click on another app's window must not leave the launcher floating.
+    private func observeAppSwitches() {
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
+            guard let self, let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  app.processIdentifier != getpid() else { return }
+            MainActor.assumeIsolated { if self.wasVisible { self.hide(restoreFocus: false) } }
+        }
     }
     func applicationDidBecomeActive(_ notification: Notification) {
         guard wasVisible else { return }
@@ -170,21 +259,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationDidResignActive(_ notification: Notification) {
         hide(restoreFocus: false)
     }
+    func applicationDidHide(_ notification: Notification) {
+        hide(restoreFocus: false)
+    }
+    /// Command-W on the launcher runs the normal dismissal instead of a bare window close.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard sender === panel else { return true }
+        hide()
+        return false
+    }
     func applicationDidChangeScreenParameters(_ notification: Notification) {
         // Never leave a stale click catcher after a display is disconnected.
         hide()
     }
-    @objc private func showSettings() {
+    @objc func showSettings() {
         hide(restoreFocus: false)
-        if settingsWindow == nil {
-            let content = SettingsView(preferences: preferences, model: model, speech: model.speech, catalogue: catalogue, changed: { [weak self] in self?.configureHotkeys() })
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 630, height: 650), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
-            window.title = "Jev Launcher Settings"; window.contentView = NSHostingView(rootView: content)
-            window.isReleasedWhenClosed = false; window.center()
-            settingsWindow = window
+        if settings == nil {
+            settings = SettingsWindow(preferences: preferences, model: model, catalogue: catalogue, status: status,
+                                      changed: { [weak self] in self?.configureHotkeys() })
         }
-        NSApp.activate(ignoringOtherApps: true)
-        settingsWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate()
+        settings?.showWindow(nil)
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { show(); return true }
     func applicationWillTerminate(_ notification: Notification) {

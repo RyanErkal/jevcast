@@ -9,43 +9,133 @@ struct LauncherResult: Identifiable {
         case window(WindowAction, pid_t?)
         case url(URL)
         case copy(String)
+        case clipboard(ClipboardItem)
     }
     let id: String
     let title: String
+    /// Secondary text: the trailing accessory on single-line rows, the subtitle on two-line rows.
     let detail: String
     let symbol: String
     let action: Action
-    let score: Double
+    var score: Double
     var isCurrent = true
+    /// Overrides the kind-based group, for favourites and recent items.
+    var section: LauncherGroup?
+    var group: LauncherGroup {
+        if let section { return section }
+        switch action {
+        case .app(let app): return app.launchURL == nil ? .applications : .commands
+        case .file: return .files
+        case .clipboard: return .clipboard
+        case .window, .url, .copy: return .commands
+        }
+    }
+    /// Calculator answers and clipboard entries keep a second line; other rows are single-line.
+    var isTwoLine: Bool {
+        switch action { case .copy, .clipboard: return true; default: return false }
+    }
     var path: String? {
         switch action { case .app(let app): return app.path; case .file(let file): return file.path; default: return nil }
+    }
+    /// Calculator answers, typed URLs, web searches, and clipboard text are not remembered for ranking.
+    var learnsFromUse: Bool {
+        switch action {
+        case .copy, .clipboard: return false
+        case .url: return id.hasPrefix("quicklink:")
+        default: return true
+        }
     }
 }
 
 @MainActor
 final class LauncherModel: ObservableObject {
     @Published var query = ""
+    /// Selectable results in display order: grouped, top hit first.
     @Published private(set) var results: [LauncherResult] = []
+    /// Table rows: `results` with section labels between groups.
+    @Published private(set) var rows: [LauncherRow] = []
     @Published var selectedID: String?
     @Published var message: String?
     @Published private(set) var aiStatus = ""
+    /// A Jev failure worth showing, such as a missing key or a rate limit.
+    @Published private(set) var aiError: String?
+    /// Set when the user starts voice by hand and it cannot start.
+    @Published private(set) var voiceError: String?
     @Published private(set) var localSearchMS: Double = 0
     @Published private(set) var targetName = "Active Window"
     @Published private(set) var fileStatus = ""
     private var parsedFileQuery = FileSearchQuery(text: "")
     var isFileSearch: Bool { parsedFileQuery.isExplicitFileSearch }
+    /// Filter text when the query asks for clipboard history.
+    private var clipboardFilter: String? { isFileSearch ? nil : ClipboardHistory.filter(for: query) }
+    var isClipboardSearch: Bool { clipboardFilter != nil }
+    /// Shown in place of rows when a typed query has none.
     var emptyMessage: String {
-        if isFileSearch { return fileStatus.isEmpty ? "No matching files" : fileStatus }
-        return catalogue.scanning ? "Finding installed apps…" : "Search apps, files, or window commands"
+        if isFileSearch { return fileStatus.isEmpty || isSearchingFiles ? "No matching files" : fileStatus }
+        if isClipboardSearch {
+            return preferences.clipboardHistory ? "No clipboard entries yet" : "Clipboard history is off. Turn it on in Settings › General."
+        }
+        return "No results"
+    }
+    /// An explicit file search that has not finished.
+    var isSearchingFiles: Bool { isFileSearch && fileStatus.hasPrefix("Searching") }
+    /// Work the footer shows a spinner for, or nil.
+    var loadingStatus: String? {
+        if isSearchingFiles { return "Searching files…" }
+        if aiStatus == Self.interpreting { return "Thinking…" }
+        if catalogue.scanning && catalogue.entries.isEmpty && !isFileSearch && !isClipboardSearch { return "Finding apps…" }
+        return nil
+    }
+    /// Empty query with nothing to suggest: the panel is only the search bar.
+    var isCollapsed: Bool { query.isEmpty && rows.isEmpty }
+    /// The single strip message: errors first, then permission and file-search hints.
+    /// Voice setup lives in Settings › Voice; the strip shows voice only after a real failure.
+    var notice: Notice? {
+        if let message { return Notice(symbol: "exclamationmark.triangle.fill", text: message, tone: .warning) }
+        if let error = speech.errorMessage ?? voiceError { return Notice(symbol: "mic.slash", text: error, tone: .warning) }
+        if case .window = selected?.action, !WindowManager.hasPermission {
+            return Notice(symbol: "macwindow.badge.plus", text: "Window control needs Accessibility access.", tone: .info, action: .allowAccessibility)
+        }
+        if let aiError { return Notice(symbol: "sparkles", text: aiError, tone: .info) }
+        if isFileSearch && fileStatus.hasSuffix(FileSearch.narrowHint) && !results.isEmpty {
+            return Notice(symbol: "info.circle", text: "Showing recent matches. Add a name or folder to narrow the search.", tone: .info)
+        }
+        return nil
+    }
+    /// What Return does with the selected result, for the footer.
+    var primaryActionTitle: String? {
+        guard let selected else { return nil }
+        switch selected.action {
+        case .app(let app): return app.launchURL != nil ? "Open Settings" : "Open Application"
+        case .file(let file): return file.isDirectory ? "Open Folder" : "Open File"
+        case .window: return "Move Window"
+        case .url:
+            if selected.id == "web" { return "Search " + preferences.webEngine }
+            if selected.id.hasPrefix("quicklink:"), let link = preferences.quicklinks.first(where: { "quicklink:" + $0.id == selected.id }) {
+                return "Search " + link.name
+            }
+            return "Open URL"
+        case .copy, .clipboard: return "Copy"
+        }
+    }
+    func perform(_ action: Notice.Action) {
+        switch action {
+        case .allowAccessibility: windows.requestPermission()
+        }
     }
     let preferences: Preferences
     let catalogue: AppCatalogue
     let speech = SpeechService()
     let windows = WindowManager()
     var onClose: ((Bool) -> Void)?
+    var onFailure: ((String) -> Void)?
     var focusSearch: (() -> Void)?
+    /// Selected row frame in window coordinates, used to anchor the actions menu.
+    var selectedRowRect: (() -> NSRect?)?
+    let clipboard: ClipboardHistory
     private let files: FileSearching
-    private let jev = JevService()
+    private let jev: JevChoosing
+    private let keys: JevKeyCache
     private var fileResults: [FileEntry] = []
     private var previousFileResults: [FileEntry] = []
     private var work: Task<Void, Never>?
@@ -59,9 +149,13 @@ final class LauncherModel: ObservableObject {
     private var semanticResult: LauncherResult?
     private var subscriptions = Set<AnyCancellable>()
 
-    init(preferences: Preferences, catalogue: AppCatalogue, files: FileSearching? = nil) {
+    init(preferences: Preferences, catalogue: AppCatalogue, files: FileSearching? = nil,
+         jev: JevChoosing = JevService(), keys: JevKeyCache? = nil, clipboard: ClipboardHistory? = nil) {
         self.preferences = preferences; self.catalogue = catalogue
         self.files = files ?? FileSearch()
+        self.jev = jev
+        self.keys = keys ?? .shared
+        self.clipboard = clipboard ?? ClipboardHistory()
         speech.onTranscript = { [weak self] text in
             guard let self, self.acceptsSpeech else { return }
             self.updateQuery(text, typed: false)
@@ -73,13 +167,14 @@ final class LauncherModel: ObservableObject {
         catalogue.$entries.sink { [weak self] _ in
             Task { @MainActor in guard let self, self.visible else { return }; self.rebuild() }
         }.store(in: &subscriptions)
+        preferences.$clipboardHistory.sink { [weak self] enabled in self?.clipboard.setEnabled(enabled) }.store(in: &subscriptions)
     }
     func begin() {
         let targetApp = NSWorkspace.shared.frontmostApplication
         targetName = targetApp?.localizedName ?? "Active Window"
         windows.clearTarget()
         windows.gap = preferences.gap
-        visible = true; acceptsSpeech = true; manualSelection = false; query = ""; message = nil
+        visible = true; acceptsSpeech = true; manualSelection = false; query = ""; message = nil; voiceError = nil
         parsedFileQuery = FileSearchQuery(text: ""); fileStatus = ""
         previousFileResults = []; fileResults = []; promotedID = nil; semanticResult = nil; revision = UUID()
         rebuild()
@@ -88,7 +183,7 @@ final class LauncherModel: ObservableObject {
             await Task.yield()
             guard !Task.isCancelled, let self, self.visible else { return }
             if let targetApp { self.windows.captureTarget(appPID: targetApp.processIdentifier) }
-            if self.preferences.voiceEnabled && self.acceptsSpeech { self.speech.start() }
+            if self.preferences.voiceEnabled && self.acceptsSpeech && self.speech.permissionsGranted { self.speech.start() }
         }
     }
     func pauseListening() {
@@ -96,18 +191,17 @@ final class LauncherModel: ObservableObject {
         aiWork?.cancel()
         manualSelection = true
     }
+    /// The mic button. A start that fails at once shows its reason in the strip.
     func toggleListening() {
-        if speech.isListening || speech.isStarting { acceptsSpeech = false; speech.stop() }
-        else { acceptsSpeech = true; speech.start() }
-    }
-    func enableVoice() async {
-        await speech.requestPermissions()
-        if visible && preferences.voiceEnabled { acceptsSpeech = true; speech.start() }
+        voiceError = nil
+        if speech.isListening || speech.isStarting { acceptsSpeech = false; speech.stop(); return }
+        acceptsSpeech = true; speech.start()
+        if !speech.isStarting && !speech.isListening { voiceError = speech.status }
     }
     func end() {
         visible = false; revision = UUID()
         startWork?.cancel(); speech.stop(); work?.cancel(); aiWork?.cancel(); files.stop()
-        aiStatus = ""
+        aiStatus = ""; aiError = nil
     }
     func updateQuery(_ text: String, typed: Bool) {
         guard visible else { return }
@@ -120,17 +214,21 @@ final class LauncherModel: ObservableObject {
         } else { previousFileResults = [] }
         query = text; message = nil; manualSelection = false; fileResults = []; promotedID = nil; semanticResult = nil
         revision = UUID(); let current = revision
-        work?.cancel(); aiWork?.cancel(); files.stop(); aiStatus = ""
+        work?.cancel(); aiWork?.cancel(); files.stop(); aiStatus = ""; aiError = nil
+        if typed { voiceError = nil }
         if isFileSearch { fileStatus = parsedFileQuery.validationError ?? "Searching files…" }
         rebuild()
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        work = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 120_000_000)
-            guard !Task.isCancelled, let self, self.revision == current else { return }
-            self.files.search(trimmed, folders: self.preferences.fileFolders) { [weak self] found in
-                guard let self, self.visible, self.revision == current else { return }
-                self.previousFileResults = []; self.fileResults = found; self.rebuild()
+        // Clipboard filters and keyword searches with text stay local and skip file search.
+        guard !trimmed.isEmpty, !isClipboardSearch, Quicklink.match(trimmed, in: preferences.quicklinks)?.query.isEmpty ?? true else { return }
+        if isFileSearch || trimmed.count >= 3 {
+            work = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                guard !Task.isCancelled, let self, self.revision == current else { return }
+                self.files.search(trimmed, folders: self.preferences.fileFolders) { [weak self] found in
+                    guard let self, self.visible, self.revision == current else { return }
+                    self.previousFileResults = []; self.fileResults = found; self.rebuild()
+                }
             }
         }
         if !isFileSearch && preferences.jevEnabled && trimmed.count >= 5 && trimmed.contains(" ") && (results.first?.score ?? 0) < 99 {
@@ -146,66 +244,205 @@ final class LauncherModel: ObservableObject {
         defer { PerformanceTrace.end("LocalResults", trace) }
         let start = CFAbsoluteTimeGetCurrent()
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let runningApps = catalogue.runningApplications
-        let running = Set(runningApps.compactMap(\.bundleURL).map(\.path))
-        let aliasesByApp = Dictionary(grouping: preferences.aliases.keys, by: { preferences.aliases[$0]! })
+        if let filter = clipboardFilter {
+            let rows = clipboard.matches(filter).enumerated().map { index, item in
+                LauncherResult(id: "clip:" + item.id.uuidString, title: Self.clipboardTitle(item.text),
+                               detail: Self.clipboardDetail(item),
+                               symbol: "doc.on.clipboard", action: .clipboard(item), score: 1000 - Double(index))
+            }
+            publish(rows, start: start)
+            return
+        }
+        let running = Set(catalogue.runningApplications.compactMap(\.bundleURL).map(\.path))
+        if q.isEmpty && !isFileSearch {
+            publish(suggestions(running: running), start: start)
+            return
+        }
+        let aliasesByApp = self.aliasesByApp
         var rows: [LauncherResult] = []
         for app in catalogue.entries where !isFileSearch {
             let aliases = aliasesByApp[app.id] ?? []
-            guard let score = q.isEmpty ? 0 : SearchRanking.score(query: q, title: app.name, aliases: aliases) else { continue }
-            let frequent = min(Double(preferences.usage[app.id, default: 0]), 20) * 0.1
-            let favourite = preferences.favourites.contains(app.id) ? (q.isEmpty ? 100.0 : 4.0) : 0
-            let recent = q.isEmpty ? Double(20 - min(preferences.recentIDs.firstIndex(of: app.id) ?? 20, 20)) : 0
-            rows.append(LauncherResult(id: app.id, title: app.name, detail: running.contains(app.path) ? "Running · " + app.path : app.path, symbol: "app", action: .app(app), score: score * 100 + frequent + favourite + recent))
+            guard let score = SearchRanking.score(query: q, title: app.name, aliases: aliases) else { continue }
+            let favourite = preferences.favourites.contains(app.id) ? 4.0 : 0
+            rows.append(Self.appRow(app, running: running.contains(app.path), score: score * 100 + favourite))
         }
-        let phrase = " " + q.lowercased().split(separator: " ").joined(separator: " ") + " "
-        let namedTarget = runningApps
-            .filter { $0.processIdentifier != getpid() }
-            .sorted { ($0.localizedName?.count ?? 0) > ($1.localizedName?.count ?? 0) }
-            .first { app in
-                guard let name = app.localizedName?.lowercased(), name.count > 1 else { return false }
-                var names = [name]
-                if name == "google chrome" { names.append("chrome") }
-                if let path = app.bundleURL?.path {
-                    names += (aliasesByApp["app:" + path] ?? []).map { $0.lowercased() }
-                }
-                return names.contains { phrase.contains(" " + $0 + " ") }
-            }
+        let namedTarget = namedTarget(in: q)
         for action in WindowAction.allCases where !isFileSearch {
-            guard let score = q.isEmpty ? -10 : SearchRanking.score(query: q, title: action.title, aliases: action.aliases) else { continue }
-            rows.append(LauncherResult(id: "window:" + action.rawValue, title: action.title, detail: "Window · " + (namedTarget?.localizedName ?? targetName), symbol: action.symbol, action: .window(action, namedTarget?.processIdentifier), score: q.isEmpty ? -10 : score * 100))
+            guard let score = SearchRanking.score(query: q, title: action.title, aliases: action.aliases) else { continue }
+            rows.append(windowRow(action, target: namedTarget, score: score * 100))
         }
         let displayedFiles = fileResults.isEmpty ? previousFileResults : fileResults
         let filesAreCurrent = previousFileResults.isEmpty
         for (index, file) in displayedFiles.enumerated() {
             let nameScore = SearchRanking.score(query: parsedFileQuery.nameQuery, title: file.name) ?? 0.5
             let score = isFileSearch ? 200 - Double(index) : nameScore * 100 - 3 - Double(index) * 0.01
-            rows.append(LauncherResult(id: file.id, title: file.name, detail: file.path,
-                                       symbol: file.isDirectory ? "folder" : "doc.text", action: .file(file), score: score, isCurrent: filesAreCurrent))
+            rows.append(Self.fileRow(file, score: score, isCurrent: filesAreCurrent))
+        }
+        if !isFileSearch { rows += quicklinkRows(q) }
+        // Learned use reorders close matches. The boost stays under 10 points, the gap
+        // between an exact match (100) and the best non-exact match (90).
+        let now = Date(), frecency = preferences.frecency
+        rows = rows.map { row in
+            guard row.learnsFromUse else { return row }
+            let boost = frecency.boost(for: row.id, query: q, now: now) * Self.maxBoost
+            return boost > 0 ? row.adding(boost) : row
         }
         if !isFileSearch, let answer = Calculator.evaluate(q) {
-            rows.append(LauncherResult(id: "calculator", title: answer, detail: "Calculator · Return to copy", symbol: "equal.square", action: .copy(answer), score: 2000))
+            let kind = q.rangeOfCharacter(from: .letters) == nil ? "Calculator" : "Conversion"
+            rows.append(LauncherResult(id: "calculator", title: answer, detail: kind, symbol: "equal.square", action: .copy(answer), score: 2000))
         }
         if !isFileSearch, let url = Self.directURL(q) {
-            rows.append(LauncherResult(id: "url", title: "Open " + q, detail: url.absoluteString, symbol: "globe", action: .url(url), score: 1500))
+            rows.append(LauncherResult(id: "url", title: "Open " + q, detail: "", symbol: "globe", action: .url(url), score: 1500))
         }
-        if !q.isEmpty && !isFileSearch {
+        if !isFileSearch {
             var components = URLComponents(string: preferences.webEngine == "DuckDuckGo" ? "https://duckduckgo.com/" : "https://www.google.com/search")!
             components.queryItems = [URLQueryItem(name: "q", value: q)]
             if let url = components.url {
-                rows.append(LauncherResult(id: "web", title: "Search " + preferences.webEngine, detail: q, symbol: "magnifyingglass", action: .url(url), score: -1000))
+                rows.append(LauncherResult(id: "web", title: "Search " + preferences.webEngine, detail: Self.hostDetail(url), symbol: "magnifyingglass", action: .url(url), score: -1000))
             }
         }
         if let semanticResult, !rows.contains(where: { $0.id == semanticResult.id }) { rows.append(semanticResult) }
-        rows.sort {
+        publish(rows, start: start)
+    }
+    static let maxBoost = 9.0
+    static let interpreting = "Understanding…"
+    /// Most recent items an empty query shows under the favourites.
+    static let recentLimit = 5
+    /// A recent item whose decayed use falls below this is no longer suggested.
+    static let recentThreshold = 0.1
+    /// Favourites, then recent items still backed by use, for an empty query. Nothing else.
+    private func suggestions(running: Set<String>) -> [LauncherResult] {
+        let favourites = preferences.favourites
+        var rows = favourites.compactMap { resolve($0, running: running) }.map { row -> LauncherResult in
+            var row = row; row.section = .favourites; return row
+        }
+        let now = Date(), frecency = preferences.frecency
+        let recent = preferences.recentIDs.lazy
+            .filter { !favourites.contains($0) && frecency.score($0, now: now) >= Self.recentThreshold }
+            .compactMap { self.resolve($0, running: running) }
+            .prefix(Self.recentLimit)
+        rows += recent.map { row -> LauncherResult in var row = row; row.section = .recent; return row }
+        // Descending scores keep this order through the ranked sort.
+        return rows.enumerated().map { index, row in var row = row; row.score = 1000 - Double(index); return row }
+    }
+    /// The row for a remembered ID, or nil when its app, file, or keyword is gone.
+    private func resolve(_ id: String, running: Set<String>) -> LauncherResult? {
+        if id.hasPrefix("window:") {
+            return WindowAction(rawValue: String(id.dropFirst("window:".count))).map { windowRow($0, target: nil, score: 0) }
+        }
+        if id.hasPrefix("quicklink:") {
+            guard let link = preferences.quicklinks.first(where: { "quicklink:" + $0.id == id }), let url = link.url(for: "") else { return nil }
+            return LauncherResult(id: id, title: "Search " + link.name, detail: Self.hostDetail(url), symbol: "link", action: .url(url), score: 0)
+        }
+        if id.hasPrefix("file:") {
+            let path = String(id.dropFirst("file:".count))
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) else { return nil }
+            let file = FileEntry(path: path, name: (path as NSString).lastPathComponent, isDirectory: isDirectory.boolValue)
+            return Self.fileRow(file, score: 0, isCurrent: true)
+        }
+        return catalogue.entries.first { $0.id == id }.map { Self.appRow($0, running: running.contains($0.path), score: 0) }
+    }
+    private func publish(_ unsorted: [LauncherResult], start: CFAbsoluteTime) {
+        let ranked = unsorted.sorted {
             if $0.id == promotedID { return $1.id != promotedID }
             if $1.id == promotedID { return false }
             if $0.score != $1.score { return $0.score > $1.score }
             return $0.title.localizedStandardCompare($1.title) == .orderedAscending
         }
-        results = Array(rows.prefix(40))
+        let mixed = !isFileSearch && !isClipboardSearch && !query.isEmpty
+        var groups = LauncherSections.group(Array(ranked.prefix(40)), fileLimit: mixed ? LauncherSections.mixedFileLimit : nil)
+        // A long clipboard or file list stays one group; the cap bounds the table.
+        groups = groups.filter { !$0.results.isEmpty }
+        rows = LauncherSections.rows(groups)
+        results = groups.flatMap(\.results)
         if !manualSelection || !results.contains(where: { $0.id == selectedID && $0.isCurrent }) { selectedID = results.first(where: \.isCurrent)?.id }
         localSearchMS = (CFAbsoluteTimeGetCurrent() - start) * 1000
+    }
+    private var aliasesByApp: [String: [String]] {
+        Dictionary(grouping: preferences.aliases.keys, by: { preferences.aliases[$0]! })
+    }
+    /// Trailing accessory for an app: "Running" only when it runs; "Settings" for a System Settings pane.
+    static func appDetail(_ app: AppEntry, running: Bool) -> String {
+        app.launchURL != nil ? "Settings" : running ? "Running" : ""
+    }
+    /// The containing folder, short: "~/Downloads" when it has two components
+    /// or fewer, otherwise "…/" and the last two. Copy Path, Reveal, and Quick
+    /// Look still use the full path.
+    nonisolated static func folderDetail(_ path: String, home: String = NSHomeDirectory()) -> String {
+        var folder = (path as NSString).deletingLastPathComponent
+        let homePrefix = home.hasSuffix("/") ? String(home.dropLast()) : home
+        if folder == homePrefix { return "~" }
+        if folder.hasPrefix(homePrefix + "/") { folder = "~" + folder.dropFirst(homePrefix.count) }
+        let parts = folder.split(separator: "/").filter { $0 != "~" }
+        guard parts.count > 2 else { return folder }
+        return "…/" + parts.suffix(2).joined(separator: "/")
+    }
+    /// A URL's host without "www.", such as "github.com".
+    nonisolated static func hostDetail(_ url: URL) -> String {
+        let host = url.host ?? ""
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+    static func appRow(_ app: AppEntry, running: Bool, score: Double) -> LauncherResult {
+        LauncherResult(id: app.id, title: app.name, detail: appDetail(app, running: running),
+                       symbol: app.launchURL != nil ? "gearshape" : "app", action: .app(app), score: score)
+    }
+    static func fileRow(_ file: FileEntry, score: Double, isCurrent: Bool) -> LauncherResult {
+        LauncherResult(id: file.id, title: file.name, detail: folderDetail(file.path),
+                       symbol: file.isDirectory ? "folder" : "doc.text", action: .file(file), score: score, isCurrent: isCurrent)
+    }
+    /// A window action row. The accessory names the app it will move.
+    private func windowRow(_ action: WindowAction, target: NSRunningApplication?, score: Double) -> LauncherResult {
+        LauncherResult(id: "window:" + action.rawValue, title: action.title, detail: target?.localizedName ?? targetName,
+                       symbol: action.symbol, action: .window(action, target?.processIdentifier), score: score)
+    }
+    private static func clipboardDetail(_ item: ClipboardItem) -> String {
+        let lines = item.text.split(whereSeparator: \.isNewline).count
+        let age = "Copied " + item.copiedAt.formatted(.relative(presentation: .named))
+        return lines > 1 ? age + " · \(lines) lines" : age
+    }
+    private static func clipboardTitle(_ text: String) -> String {
+        let line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        return trimmed.count > 120 ? String(trimmed.prefix(120)) + "…" : trimmed
+    }
+    private func quicklinkRows(_ q: String) -> [LauncherResult] {
+        var rows: [LauncherResult] = []
+        let matched = Quicklink.match(q, in: preferences.quicklinks)
+        if let (link, text) = matched, let url = link.url(for: text) {
+            rows.append(text.isEmpty
+                ? LauncherResult(id: "quicklink:" + link.id, title: "Search " + link.name, detail: Self.hostDetail(url), symbol: "link", action: .url(url), score: 950)
+                : LauncherResult(id: "quicklink:" + link.id, title: "Search \(link.name) for \(text)", detail: Self.hostDetail(url), symbol: "link", action: .url(url), score: 1800))
+        }
+        for link in preferences.quicklinks where link.id != matched?.link.id {
+            guard let score = SearchRanking.score(query: q, title: link.name, aliases: [link.keyword]), let url = link.url(for: "") else { continue }
+            rows.append(LauncherResult(id: "quicklink:" + link.id, title: "Search " + link.name, detail: Self.hostDetail(url), symbol: "link", action: .url(url), score: score * 100))
+        }
+        return rows
+    }
+    /// A running app named in the query, such as "Safari" in "safari left half".
+    private func namedTarget(in query: String) -> NSRunningApplication? {
+        let apps = catalogue.runningApplications.filter { $0.processIdentifier != getpid() }
+        let aliasesByApp = self.aliasesByApp
+        let names = apps.map { app in
+            (name: app.localizedName ?? "", aliases: app.bundleURL.map { aliasesByApp["app:" + $0.path] ?? [] } ?? [])
+        }
+        return Self.namedTargetIndex(in: query, apps: names).map { apps[$0] }
+    }
+    private nonisolated static let vendorPrefixes = ["google ", "microsoft ", "adobe ", "apple ", "jetbrains "]
+    /// Index of the longest-named app whose name, short name, or alias appears as whole words in `query`.
+    nonisolated static func namedTargetIndex(in query: String, apps: [(name: String, aliases: [String])]) -> Int? {
+        let phrase = " " + query.lowercased().split(separator: " ").joined(separator: " ") + " "
+        return apps.indices
+            .sorted { apps[$0].name.count > apps[$1].name.count }
+            .first { index in
+                let name = apps[index].name.lowercased()
+                guard name.count > 1 else { return false }
+                var names = [name] + apps[index].aliases.map { $0.lowercased() }
+                if name == "google chrome" { names.append("chrome") }
+                if let vendor = vendorPrefixes.first(where: { name.hasPrefix($0) }) { names.append(String(name.dropFirst(vendor.count))) }
+                return names.contains { $0.count > 1 && phrase.contains(" " + $0 + " ") }
+            }
     }
     private static func directURL(_ value: String) -> URL? {
         guard !value.contains(where: \.isWhitespace), !value.isEmpty else { return nil }
@@ -215,39 +452,70 @@ final class LauncherModel: ObservableObject {
         return url
     }
     private func interpret(_ text: String, revision current: UUID) async {
+        let key: String
+        switch await keys.load() {
+        case .present(let value): key = value
+        case .failed(let message): if revision == current && visible { aiStatus = message; aiError = message }; return
+        case .missing, .unknown:
+            if revision == current && visible { aiStatus = "Add a TypeSafe key in Settings"; aiError = "Add a TypeSafe key in Settings › Jev." }
+            return
+        }
+        guard !Task.isCancelled, visible, revision == current else { return }
+        let (candidates, ids) = jevCandidates()
+        aiStatus = Self.interpreting
         do {
-            guard let key = try KeychainStore.read(), !key.isEmpty else { aiStatus = "Add a TypeSafe key in Settings"; return }
-            var candidates = results.filter { $0.id != "web" && $0.id != "calculator" }.map { JevCandidate(id: $0.id, title: $0.title, detail: $0.detail) }
-            let included = Set(candidates.map(\.id))
-            // All built-in window actions remain available even when phrasing has no literal match.
-            candidates += WindowAction.allCases.filter { !included.contains("window:" + $0.rawValue) }.map {
-                JevCandidate(id: "window:" + $0.rawValue, title: $0.title, detail: "Arrange the active window")
-            }
-            let existing = Set(candidates.map(\.id))
-            candidates += catalogue.entries.filter { !existing.contains($0.id) }.prefix(max(0, 220 - candidates.count)).map {
-                JevCandidate(id: $0.id, title: $0.name, detail: "Open installed application")
-            }
-            aiStatus = "Understanding…"
-            let chosen = try await jev.choose(query: text, candidates: Array(candidates.prefix(240)), apiKey: key)
+            let reply = try await jev.choose(query: text, candidates: candidates, apiKey: key)
             guard !Task.isCancelled, visible, self.revision == current else { return }
+            let chosen = reply.flatMap { ids[$0] }
             aiStatus = chosen == nil ? "No clear AI match" : "Jev matched"
             guard let chosen else { return }
-            promotedID = chosen
-            if !results.contains(where: { $0.id == chosen }) {
-                if let app = catalogue.entries.first(where: { $0.id == chosen }) {
-                    results.insert(LauncherResult(id: app.id, title: app.name, detail: app.path, symbol: "app", action: .app(app), score: 0), at: 0)
-                } else if let action = WindowAction.allCases.first(where: { "window:" + $0.rawValue == chosen }) {
-                    results.insert(LauncherResult(id: chosen, title: action.title, detail: "Window · " + targetName, symbol: action.symbol, action: .window(action, nil), score: 0), at: 0)
-                }
-            } else if let index = results.firstIndex(where: { $0.id == chosen }) {
-                let row = results.remove(at: index); results.insert(row, at: 0)
-            }
-            semanticResult = results.first { $0.id == chosen }
-            if !manualSelection { selectedID = results.first?.id }
+            promote(chosen)
         } catch {
             guard !Task.isCancelled, visible, revision == current else { return }
-            aiStatus = "Jev unavailable · local results ready"
+            aiStatus = JevService.statusMessage(for: error); aiError = aiStatus
         }
+    }
+    /// Candidates for Jev under opaque IDs. Files are sent by name only, and no
+    /// path (app, running app, or file) appears in any ID, title, or description.
+    private func jevCandidates() -> (candidates: [JevCandidate], ids: [String: String]) {
+        var entries: [(id: String, title: String, detail: String)] = []
+        for row in results where row.isCurrent {
+            switch row.action {
+            case .app: entries.append((row.id, row.title, "Open installed application"))
+            case .file(let file): entries.append((row.id, file.name, file.isDirectory ? "Folder" : "File"))
+            case .window(let action, _): entries.append((row.id, action.title, "Arrange the active window"))
+            case .url where row.id.hasPrefix("quicklink:"): entries.append((row.id, row.title, "Search a website"))
+            case .url, .copy, .clipboard: continue
+            }
+        }
+        var included = Set(entries.map(\.id))
+        // All built-in window actions remain available even when phrasing has no literal match.
+        for action in WindowAction.allCases where !included.contains("window:" + action.rawValue) {
+            entries.append(("window:" + action.rawValue, action.title, "Arrange the active window"))
+        }
+        included = Set(entries.map(\.id))
+        for app in catalogue.entries where !included.contains(app.id) && entries.count < 220 {
+            entries.append((app.id, app.name, "Open installed application"))
+        }
+        var ids: [String: String] = [:]
+        let candidates = entries.prefix(240).enumerated().map { index, entry in
+            ids["c\(index)"] = entry.id
+            return JevCandidate(id: "c\(index)", title: entry.title, detail: entry.detail)
+        }
+        return (candidates, ids)
+    }
+    /// Puts Jev's choice first. A choice outside the current rows is added, then the list regroups around it.
+    private func promote(_ chosen: String) {
+        promotedID = chosen
+        if !results.contains(where: { $0.id == chosen }) {
+            if let app = catalogue.entries.first(where: { $0.id == chosen }) {
+                let running = catalogue.runningApplications.contains { $0.bundleURL?.path == app.path }
+                semanticResult = Self.appRow(app, running: running, score: 0)
+            } else if let action = WindowAction.allCases.first(where: { "window:" + $0.rawValue == chosen }) {
+                semanticResult = windowRow(action, target: namedTarget(in: query), score: 0)
+            }
+        }
+        rebuild()
     }
     func moveSelection(_ delta: Int) {
         let available = results.filter(\.isCurrent)
@@ -267,8 +535,10 @@ final class LauncherModel: ObservableObject {
         revision = UUID(); work?.cancel(); aiWork?.cancel(); speech.stop(); files.stop()
         do {
             switch result.action {
+            case .app(let app) where app.launchURL != nil:
+                guard let url = app.launchURL.flatMap(URL.init(string:)), NSWorkspace.shared.open(url) else { throw LauncherError("That settings pane could not be opened.") }
             case .app(let app):
-                guard FileManager.default.fileExists(atPath: app.path) else { throw LauncherError("This app moved or was removed. Refresh Apps in Settings.") }
+                guard FileManager.default.fileExists(atPath: app.path) else { throw LauncherError("This app moved or was removed. Refresh apps in Settings › Search › Advanced.") }
                 let url = URL(fileURLWithPath: app.path)
                 let config = NSWorkspace.OpenConfiguration(); config.activates = true
                 NSWorkspace.shared.openApplication(at: url, configuration: config) { [weak self] _, error in
@@ -281,10 +551,11 @@ final class LauncherModel: ObservableObject {
             case .url(let url):
                 guard NSWorkspace.shared.open(url) else { throw LauncherError("The URL could not be opened.") }
             case .copy(let text): copy(text)
+            case .clipboard(let item): clipboard.restore(item)
             }
-            preferences.record(result.id)
+            if result.learnsFromUse { preferences.record(result.id, query: query) }
             switch result.action {
-            case .copy: onClose?(true)
+            case .copy, .clipboard: onClose?(true)
             case .window(_, let pid):
                 onClose?(pid == nil)
                 if let pid { NSRunningApplication(processIdentifier: pid)?.activate(options: []) }
@@ -293,7 +564,7 @@ final class LauncherModel: ObservableObject {
         } catch { message = error.localizedDescription }
     }
     private func showFailure(_ text: String) {
-        let alert = NSAlert(); alert.messageText = "Could Not Open App"; alert.informativeText = text; alert.runModal()
+        if let onFailure { onFailure(text) } else { message = text }
     }
     func revealSelected() {
         guard let path = selected?.path else { return }
@@ -301,6 +572,11 @@ final class LauncherModel: ObservableObject {
     }
     func copyPath() { if let path = selected?.path { copy(path); message = "Path copied" } }
     private func copy(_ text: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
+}
+extension LauncherResult {
+    func adding(_ boost: Double) -> LauncherResult {
+        var row = self; row.score += boost; return row
+    }
 }
 struct LauncherError: LocalizedError {
     let text: String

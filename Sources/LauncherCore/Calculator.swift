@@ -3,9 +3,15 @@ import Foundation
 /// A deliberately small arithmetic evaluator for launcher queries.
 ///
 /// The parser accepts numbers, parentheses, the five arithmetic operators,
-/// and postfix percent. It does not evaluate names, functions, or code.
+/// postfix percent, implicit multiplication before a parenthesis, and unit
+/// conversions such as `10 km in mi`. It does not evaluate names, functions,
+/// or code. A bare number is not a calculation, so it returns nil.
 public enum Calculator {
     public static func evaluate(_ expression: String) -> String? {
+        evaluate(expression, locale: .current)
+    }
+
+    public static func evaluate(_ expression: String, locale: Locale) -> String? {
         let normalized = expression
             .replacingOccurrences(of: "×", with: "*")
             .replacingOccurrences(of: "÷", with: "/")
@@ -18,41 +24,89 @@ public enum Calculator {
             return nil
         }
 
-        var parser = Parser(normalized)
-        guard let result = parser.parse() else { return nil }
-        return format(result)
+        let separators = Separators(locale: locale)
+        if let conversion = UnitConversion.evaluate(normalized, separators: separators) {
+            return conversion
+        }
+        var parser = Parser(normalized, separators: separators)
+        guard let result = parser.parse(), parser.sawOperation else { return nil }
+        return format(result, separators: separators)
     }
 
     private static let maximumInputLength = 4_096
     private static let maximumMagnitude = 1.0e100
+    private static let exactIntegerLimit = 9_007_199_254_740_992.0 // 2^53
 
-    private static func bounded(_ value: Double) -> Double? {
+    static func bounded(_ value: Double) -> Double? {
         guard value.isFinite, abs(value) <= maximumMagnitude else { return nil }
         return value
     }
 
-    private static func format(_ value: Double) -> String {
-        if value == 0 {
-            return "0"
+    // Plain digits with no grouping keep the copied value pasteable.
+    static func format(_ value: Double, separators: Separators) -> String {
+        if value == 0 { return "0" }
+        if value == value.rounded(), abs(value) < exactIntegerLimit {
+            return String(Int64(value))
         }
-
-        // A fixed locale and significant-digit count keep output stable across
-        // machines while retaining useful precision for normal calculations.
-        return String(
-            format: "%.12g",
-            locale: Locale(identifier: "en_US_POSIX"),
-            value
-        )
+        let text = String(format: "%.15g", value)
+        return separators.localize(text)
     }
 
-    private struct Parser {
+    struct Separators {
+        let decimal: Character
+        let grouping: Character
+
+        init(locale: Locale) {
+            decimal = locale.decimalSeparator == "," ? "," : "."
+            grouping = decimal == "," ? "." : ","
+        }
+
+        func localize(_ text: String) -> String {
+            decimal == "." ? text : text.replacingOccurrences(of: ".", with: String(decimal))
+        }
+
+        /// Reads a literal of digits and separators. The locale's grouping
+        /// character is accepted only in valid groups of three digits.
+        /// Comma locales also accept a lone "." as a decimal point.
+        func number(_ literal: String) -> Double? {
+            let parts = literal.split(separator: decimal, omittingEmptySubsequences: false)
+            guard parts.count <= 2 else { return nil }
+            var integer = String(parts[0])
+            var fraction = parts.count == 2 ? String(parts[1]) : nil
+            guard fraction?.contains(grouping) != true else { return nil }
+            if integer.contains(grouping) {
+                let groups = integer.split(separator: grouping, omittingEmptySubsequences: false)
+                if (1...3).contains(groups[0].count), groups.dropFirst().allSatisfy({ $0.count == 3 }) {
+                    integer = groups.joined()
+                } else if decimal == ",", fraction == nil, groups.count == 2 {
+                    integer = String(groups[0])
+                    fraction = String(groups[1])
+                } else {
+                    return nil
+                }
+            }
+            guard !integer.isEmpty || !(fraction ?? "").isEmpty else { return nil }
+            return Double((integer.isEmpty ? "0" : integer) + (fraction.map { "." + $0 } ?? ""))
+        }
+    }
+
+    struct Parser {
+        private struct Term {
+            let value: Double
+            let percent: Bool
+        }
+
         private let characters: [Character]
+        private let separators: Separators
         private var index = 0
         private var operationCount = 0
         private var parenthesisDepth = 0
+        /// True once the input has an operator, parenthesis, or percent.
+        private(set) var sawOperation = false
 
-        init(_ expression: String) {
+        init(_ expression: String, separators: Separators) {
             characters = Array(expression)
+            self.separators = separators
         }
 
         mutating func parse() -> Double? {
@@ -63,7 +117,7 @@ public enum Calculator {
         }
 
         private mutating func parseAdditive() -> Double? {
-            guard var value = parseMultiplicative() else { return nil }
+            guard var value = parseMultiplicative()?.value else { return nil }
 
             while true {
                 skipWhitespace()
@@ -72,70 +126,80 @@ public enum Calculator {
                 }
 
                 index += 1
+                sawOperation = true
                 guard recordOperation(), let right = parseMultiplicative() else { return nil }
-                let result = operation == "+" ? value + right : value - right
+                // As in Spotlight, 100 + 10% adds ten percent of the left side.
+                let operand = right.percent ? value * right.value : right.value
+                let result = operation == "+" ? value + operand : value - operand
                 guard let boundedResult = Calculator.bounded(result) else { return nil }
                 value = boundedResult
             }
         }
 
-        private mutating func parseMultiplicative() -> Double? {
-            guard var value = parseUnary() else { return nil }
+        private mutating func parseMultiplicative() -> Term? {
+            guard var term = parseUnary() else { return nil }
 
             while true {
                 skipWhitespace()
-                guard let operation = peek(), operation == "*" || operation == "/" else {
-                    return value
+                // A parenthesis directly after a factor is implicit multiplication.
+                guard let operation = peek(), operation == "*" || operation == "/" || operation == "(" else {
+                    return term
                 }
 
-                index += 1
+                if operation != "(" { index += 1 }
+                sawOperation = true
                 guard recordOperation(), let right = parseUnary() else { return nil }
-                if operation == "/" && right == 0 {
+                if operation == "/" && right.value == 0 {
                     return nil
                 }
-                let result = operation == "*" ? value * right : value / right
+                let result = operation == "/" ? term.value / right.value : term.value * right.value
                 guard let boundedResult = Calculator.bounded(result) else { return nil }
-                value = boundedResult
+                term = Term(value: boundedResult, percent: false)
             }
         }
 
         // Unary operators deliberately sit below exponentiation. This gives
         // the conventional result -2^2 == -4 while still allowing 2^-2.
-        private mutating func parseUnary() -> Double? {
+        private mutating func parseUnary() -> Term? {
             skipWhitespace()
             guard let operation = peek(), operation == "+" || operation == "-" else {
                 return parsePower()
             }
 
             index += 1
-            guard recordOperation(), let value = parseUnary() else { return nil }
-            let result = operation == "-" ? -value : value
-            return Calculator.bounded(result)
+            guard recordOperation(), let term = parseUnary() else { return nil }
+            let result = operation == "-" ? -term.value : term.value
+            return Calculator.bounded(result).map { Term(value: $0, percent: term.percent) }
         }
 
-        private mutating func parsePower() -> Double? {
+        private mutating func parsePower() -> Term? {
             guard let base = parsePostfix() else { return nil }
             skipWhitespace()
             guard consume("^") else { return base }
+            sawOperation = true
             guard recordOperation(), let exponent = parseUnary() else { return nil }
-            return Calculator.bounded(pow(base, exponent))
+            return Calculator.bounded(pow(base.value, exponent.value)).map { Term(value: $0, percent: false) }
         }
 
-        private mutating func parsePostfix() -> Double? {
+        private mutating func parsePostfix() -> Term? {
             guard var value = parsePrimary() else { return nil }
+            var percent = false
 
             while consume("%") {
+                sawOperation = true
+                percent = true
                 guard recordOperation(), let result = Calculator.bounded(value / 100) else {
                     return nil
                 }
                 value = result
             }
-            return value
+            return Term(value: value, percent: percent)
         }
 
         private mutating func parsePrimary() -> Double? {
             skipWhitespace()
             if consume("(") {
+                sawOperation = true
                 parenthesisDepth += 1
                 guard parenthesisDepth <= 64 else { return nil }
                 defer { parenthesisDepth -= 1 }
@@ -151,23 +215,14 @@ public enum Calculator {
             skipWhitespace()
             let start = index
             var sawDigit = false
-            var sawDecimal = false
 
-            while let character = peek() {
-                if character.isNumber {
-                    sawDigit = true
-                    index += 1
-                } else if character == "." && !sawDecimal {
-                    sawDecimal = true
-                    index += 1
-                } else {
-                    break
-                }
+            while let character = peek(), character.isNumber || character == "." || character == "," {
+                sawDigit = sawDigit || character.isNumber
+                index += 1
             }
 
             guard sawDigit else { return nil }
-            let literal = String(characters[start..<index])
-            guard let value = Double(literal) else { return nil }
+            guard let value = separators.number(String(characters[start..<index])) else { return nil }
             return Calculator.bounded(value)
         }
 

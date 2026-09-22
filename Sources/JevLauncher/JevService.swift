@@ -27,11 +27,44 @@ enum JevServiceError: Error, LocalizedError {
     }
 }
 
+/// The selection call LauncherModel depends on, so tests can inject replies.
+protocol JevChoosing: Sendable {
+    func choose(query: String, candidates: [JevCandidate], apiKey: String) async throws -> String?
+}
+
+extension JevService: JevChoosing {
+    /// Short status for the launcher footer and Settings. Never includes response bodies.
+    static func statusMessage(for error: Error) -> String {
+        switch error {
+        case let error as JevServiceError:
+            switch error {
+            case .requestFailed(401), .requestFailed(403): return "Jev key rejected"
+            case .requestFailed(429): return "Jev rate limited"
+            case .invalidInput(let message): return message
+            default: return "Jev unavailable · local results ready"
+            }
+        case let error as URLError:
+            let offline: Set<URLError.Code> = [.timedOut, .notConnectedToInternet, .networkConnectionLost, .cannotFindHost,
+                                               .cannotConnectToHost, .dnsLookupFailed, .internationalRoamingOff, .dataNotAllowed]
+            return offline.contains(error.code) ? "Jev offline · local results ready" : "Jev unavailable · local results ready"
+        case let error as KeychainStoreError:
+            return error.localizedDescription
+        default:
+            return "Jev unavailable · local results ready"
+        }
+    }
+
+    /// One minimal request that proves the key is accepted. Throws the same errors as `choose`.
+    func validate(apiKey: String) async throws {
+        _ = try await choose(query: "test", candidates: [JevCandidate(id: "test", title: "Test", detail: "Key check")], apiKey: apiKey)
+    }
+}
+
 /// Bounded TypeSafe selection. Jev can return only one supplied candidate ID
 /// or `nil` when its explicit `no_match` option wins or the result is unclear.
 struct JevService {
     private static let endpoint = URL(string: "https://api.typesafe.ai/v1/systemone")!
-    private static let model = "jev-1.13.0"
+    static let model = "jev-1.13.0"
     private static let noMatchID = "no_match"
 
     private let session: URLSession
@@ -87,7 +120,10 @@ struct JevService {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONEncoder().encode(body)
 
-        let (data, response) = try await session.data(for: request)
+        try Task.checkCancellation()
+        let (data, response): (Data, URLResponse)
+        do { (data, response) = try await session.data(for: request) }
+        catch let error as URLError where error.code == .cancelled { throw CancellationError() }
         try Task.checkCancellation()
 
         guard let httpResponse = response as? HTTPURLResponse else {

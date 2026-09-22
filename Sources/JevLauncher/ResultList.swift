@@ -10,14 +10,16 @@ struct ResultList: NSViewRepresentable {
     func makeNSView(context: Context) -> NSScrollView {
         let table = ResultsTable()
         table.contextAction = { [weak coordinator = context.coordinator] row in
-            guard let coordinator, coordinator.rows.indices.contains(row) else { return }
-            coordinator.model.select(coordinator.rows[row].id)
+            guard let coordinator, let result = coordinator.result(at: row), result.isCurrent else { return }
+            coordinator.model.select(result.id)
             coordinator.actions()
         }
         table.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("result")))
         table.headerView = nil
-        table.rowHeight = 58
-        table.intercellSpacing = NSSize(width: 0, height: 2)
+        // Heights come from the delegate: section labels, single-line, and two-line rows differ.
+        // NSTableView adds intercell spacing to each row, so the pitch is cell + spacing.
+        table.rowHeight = LauncherMetrics.cellHeight
+        table.intercellSpacing = NSSize(width: 0, height: LauncherMetrics.rowSpacing)
         table.style = .plain
         table.backgroundColor = .clear
         table.selectionHighlightStyle = .regular
@@ -30,9 +32,15 @@ struct ResultList: NSViewRepresentable {
         table.setAccessibilityIdentifier("launcher-results")
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .overlay
         scroll.drawsBackground = false
         scroll.documentView = table
         context.coordinator.table = table
+        model.selectedRowRect = { [weak table, weak coordinator = context.coordinator] in
+            guard let table, let coordinator, let index = coordinator.index(of: coordinator.model.selectedID) else { return nil }
+            return table.convert(table.rect(ofRow: index), to: nil)
+        }
         return scroll
     }
     func updateNSView(_ scroll: NSScrollView, context: Context) {
@@ -40,16 +48,21 @@ struct ResultList: NSViewRepresentable {
         defer { PerformanceTrace.end("ResultTable", trace) }
         let coordinator = context.coordinator
         guard let table = coordinator.table else { return }
-        let signature = model.results.map { $0.id + "\n" + $0.title + "\n" + $0.detail + String($0.isCurrent) }
+        let signature = model.rows.map { row -> String in
+            guard let result = row.result else { return row.id }
+            return result.id + "\n" + result.title + "\n" + result.detail + String(result.isCurrent)
+        }
         coordinator.updating = true
-        coordinator.rows = model.results
+        coordinator.rows = model.rows
         if coordinator.signature != signature {
             coordinator.signature = signature
             table.reloadData()
         }
-        let index = model.results.firstIndex { $0.id == model.selectedID }
+        let index = coordinator.index(of: model.selectedID)
         table.selectRowIndexes(index.map { IndexSet(integer: $0) } ?? [], byExtendingSelection: false)
         if let index, coordinator.lastSelectedID != model.selectedID {
+            // Keep the section label in view above the first row of a group.
+            if index > 0, case .section = coordinator.rows[index - 1] { table.scrollRowToVisible(index - 1) }
             table.scrollRowToVisible(index)
         }
         coordinator.lastSelectedID = model.selectedID
@@ -60,27 +73,45 @@ struct ResultList: NSViewRepresentable {
         let model: LauncherModel
         let actions: () -> Void
         weak var table: NSTableView?
-        var rows: [LauncherResult] = []
+        var rows: [LauncherRow] = []
         var signature: [String] = []
         var lastSelectedID: String?
         var updating = false
         init(model: LauncherModel, actions: @escaping () -> Void) { self.model = model; self.actions = actions }
-        func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
-        func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-            let id = NSUserInterfaceItemIdentifier("result-cell")
-            let cell = tableView.makeView(withIdentifier: id, owner: self) as? ResultCell ?? ResultCell()
-            cell.identifier = id
-            cell.configure(rows[row])
-            return cell
+        func result(at row: Int) -> LauncherResult? { rows.indices.contains(row) ? rows[row].result : nil }
+        func index(of id: String?) -> Int? {
+            guard let id else { return nil }
+            return rows.firstIndex { $0.result?.id == id }
         }
-        func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { rows[row].isCurrent }
+        func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
+        func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+            rows.indices.contains(row) ? rows[row].height : LauncherMetrics.cellHeight
+        }
+        func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+            switch rows[row] {
+            case .section(let group):
+                let id = NSUserInterfaceItemIdentifier("section-cell")
+                let cell = tableView.makeView(withIdentifier: id, owner: self) as? SectionCell ?? SectionCell()
+                cell.identifier = id
+                cell.configure(group.title)
+                return cell
+            case .result(let result):
+                let id = NSUserInterfaceItemIdentifier(result.isTwoLine ? "result-cell-tall" : "result-cell")
+                let cell = tableView.makeView(withIdentifier: id, owner: self) as? ResultCell ?? ResultCell(twoLine: result.isTwoLine)
+                cell.identifier = id
+                cell.configure(result)
+                return cell
+            }
+        }
+        func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? { ResultRowView() }
+        func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { result(at: row)?.isCurrent ?? false }
         func tableViewSelectionDidChange(_ notification: Notification) {
-            guard !updating, let table, rows.indices.contains(table.selectedRow) else { return }
-            model.select(rows[table.selectedRow].id)
+            guard !updating, let table, let result = result(at: table.selectedRow) else { return }
+            model.select(result.id)
         }
         @objc func runRow() {
-            guard let table, rows.indices.contains(table.clickedRow) else { return }
-            model.select(rows[table.clickedRow].id); model.execute()
+            guard let table, let result = result(at: table.clickedRow), result.isCurrent else { return }
+            model.select(result.id); model.execute()
         }
     }
 }
@@ -95,61 +126,155 @@ private final class ResultsTable: NSTableView {
     }
 }
 
+/// Neutral rounded wash for the selected row, as in Spotlight and Raycast:
+/// white at 10% in a dark appearance, black at 6% in a light one. The row
+/// includes the table's row spacing, so the wash insets by half of it.
+private final class ResultRowView: NSTableRowView {
+    override var isEmphasized: Bool { get { false } set {} }
+    override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
+    override func drawSelection(in dirtyRect: NSRect) {
+        guard selectionHighlightStyle != .none else { return }
+        let inset = bounds.insetBy(dx: 0, dy: LauncherMetrics.rowSpacing / 2)
+        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        (dark ? NSColor.white.withAlphaComponent(0.10) : NSColor.black.withAlphaComponent(0.06)).setFill()
+        NSBezierPath(roundedRect: inset, xRadius: LauncherMetrics.highlightRadius, yRadius: LauncherMetrics.highlightRadius).fill()
+    }
+}
+
+/// Small tertiary group label, such as "Applications". Not selectable.
+private final class SectionCell: NSTableCellView {
+    private let label = NSTextField(labelWithString: "")
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        label.font = .systemFont(ofSize: LauncherMetrics.sectionLabelSize, weight: .medium)
+        label.textColor = .tertiaryLabelColor
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: LauncherMetrics.cellInset),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4)
+        ])
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    func configure(_ title: String) {
+        label.stringValue = title
+        setAccessibilityLabel(title)
+    }
+}
+
+/// Single-line: icon, title, and a trailing accessory. Two-line: icon, title
+/// over subtitle, for calculator answers and clipboard entries.
 private final class ResultCell: NSTableCellView {
     private let icon = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let detailLabel = NSTextField(labelWithString: "")
+    private let twoLine: Bool
     private var representedID = ""
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        titleLabel.font = .systemFont(ofSize: 14, weight: .medium)
-        detailLabel.font = .systemFont(ofSize: 11)
-        detailLabel.textColor = .secondaryLabelColor
-        for label in [titleLabel, detailLabel] { label.lineBreakMode = .byTruncatingMiddle }
-        let text = NSStackView(views: [titleLabel, detailLabel])
-        text.orientation = .vertical; text.alignment = .leading; text.spacing = 4
-        let stack = NSStackView(views: [icon, text])
-        stack.orientation = .horizontal; stack.spacing = 13; stack.alignment = .centerY
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(stack)
-        NSLayoutConstraint.activate([
-            icon.widthAnchor.constraint(equalToConstant: 30), icon.heightAnchor.constraint(equalToConstant: 30),
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            text.widthAnchor.constraint(greaterThanOrEqualToConstant: 0)
-        ])
+    private var isStale = false
+    private var showsSymbol = true
+    init(twoLine: Bool) {
+        self.twoLine = twoLine
+        super.init(frame: .zero)
+        titleLabel.font = .systemFont(ofSize: LauncherMetrics.titleSize)
+        detailLabel.font = .systemFont(ofSize: twoLine ? LauncherMetrics.subtitleSize : LauncherMetrics.accessorySize)
+        titleLabel.lineBreakMode = twoLine ? .byTruncatingTail : .byTruncatingMiddle
+        detailLabel.lineBreakMode = .byTruncatingMiddle
+        icon.imageScaling = .scaleProportionallyDown
+        for view in [icon, titleLabel, detailLabel] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
+        let inset = LauncherMetrics.cellInset
+        var constraints = [
+            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
+            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: LauncherMetrics.iconSize),
+            icon.heightAnchor.constraint(equalToConstant: LauncherMetrics.iconSize),
+            titleLabel.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: LauncherMetrics.iconSpacing)
+        ]
+        if twoLine {
+            let text = NSLayoutGuide()
+            addLayoutGuide(text)
+            constraints += [
+                text.centerYAnchor.constraint(equalTo: centerYAnchor),
+                titleLabel.topAnchor.constraint(equalTo: text.topAnchor),
+                detailLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 1),
+                detailLabel.bottomAnchor.constraint(equalTo: text.bottomAnchor),
+                detailLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+                titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -inset),
+                detailLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -inset)
+            ]
+        } else {
+            // The title keeps its width first; a long accessory truncates in the middle.
+            titleLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+            detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            titleLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+            detailLabel.alignment = .right
+            let minimumAccessory = detailLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 90)
+            minimumAccessory.priority = .init(760)
+            constraints += [
+                titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+                detailLabel.firstBaselineAnchor.constraint(equalTo: titleLabel.firstBaselineAnchor),
+                detailLabel.leadingAnchor.constraint(greaterThanOrEqualTo: titleLabel.trailingAnchor, constant: 16),
+                detailLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
+                minimumAccessory
+            ]
+        }
+        NSLayoutConstraint.activate(constraints)
         textField = titleLabel
         imageView = icon
+        applyColors()
     }
+    override init(frame frameRect: NSRect) { fatalError("Use init(twoLine:)") }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    /// Selection is a neutral wash, so text keeps its normal colours on the
+    /// selected row: the table's emphasized style never reaches the labels.
+    override var backgroundStyle: NSView.BackgroundStyle {
+        get { .normal }
+        set { super.backgroundStyle = .normal }
+    }
+    private func applyColors() {
+        titleLabel.textColor = isStale ? .tertiaryLabelColor : .labelColor
+        detailLabel.textColor = twoLine && !isStale ? .secondaryLabelColor : .tertiaryLabelColor
+        icon.contentTintColor = showsSymbol ? .secondaryLabelColor : nil
+        icon.alphaValue = isStale ? 0.5 : 1
+    }
     func configure(_ result: LauncherResult) {
         representedID = result.id
-        alphaValue = result.isCurrent ? 1 : 0.42
+        isStale = !result.isCurrent
         titleLabel.stringValue = result.title
-        detailLabel.stringValue = result.detail.replacingOccurrences(of: NSHomeDirectory(), with: "~")
-        icon.image = NSImage(systemSymbolName: result.symbol, accessibilityDescription: nil)
+        detailLabel.stringValue = result.detail
+        detailLabel.isHidden = result.detail.isEmpty
+        showsSymbol = true
+        icon.image = NSImage(systemSymbolName: result.symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: LauncherMetrics.symbolPointSize, weight: .regular))
         setAccessibilityElement(true)
-        setAccessibilityLabel(result.title + ", " + detailLabel.stringValue)
+        setAccessibilityLabel(result.detail.isEmpty ? result.title : result.title + ", " + result.detail)
         setAccessibilityIdentifier(result.id)
-        if case .app(let app) = result.action {
-            AppIconCache.shared.load(app.path) { [weak self] image in
+        if let path = result.path {
+            IconCache.shared.load(path) { [weak self] image in
                 guard let self, self.representedID == result.id else { return }
+                self.showsSymbol = false
                 self.icon.image = image
+                self.applyColors()
             }
         }
+        applyColors()
     }
 }
 
 /// Icon disk reads do not hold up typing or the first panel frame.
-private final class AppIconCache: @unchecked Sendable {
-    static let shared = AppIconCache()
+private final class IconCache: @unchecked Sendable {
+    static let shared = IconCache()
     private let cache = NSCache<NSString, NSImage>()
     private let queue = DispatchQueue(label: "JevLauncher.icons", qos: .utility)
     func load(_ path: String, completion: @escaping (NSImage) -> Void) {
         if let image = cache.object(forKey: path as NSString) { completion(image); return }
         queue.async { [self] in
             let image = NSWorkspace.shared.icon(forFile: path)
+            image.size = NSSize(width: LauncherMetrics.iconSize, height: LauncherMetrics.iconSize)
             cache.setObject(image, forKey: path as NSString)
             DispatchQueue.main.async { completion(image) }
         }

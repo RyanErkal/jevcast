@@ -1,4 +1,5 @@
 import XCTest
+import LauncherCore
 @testable import JevLauncher
 
 final class LauncherFlowTests: XCTestCase {
@@ -10,10 +11,160 @@ final class LauncherFlowTests: XCTestCase {
         preferences.voiceEnabled = false
         preferences.jevEnabled = false
         preferences.fileFolders = []
-        let model = LauncherModel(preferences: preferences, catalogue: AppCatalogue(loadCache: false))
+        let model = LauncherModel(preferences: preferences, catalogue: AppCatalogue(loadCache: false),
+                                  keys: JevKeyCache(key: nil), clipboard: ClipboardHistory(pasteboard: FakePasteboard()))
         model.begin()
         defer { model.end() }
         body(model)
+    }
+    @MainActor private func makeModel(jev: JevChoosing, files: FileSearching? = nil, board: FakePasteboard? = nil) -> (LauncherModel, Preferences, UserDefaults, String) {
+        let suite = "JevLauncherTests." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        let preferences = Preferences(defaults: defaults)
+        preferences.voiceEnabled = false; preferences.jevEnabled = true; preferences.fileFolders = []
+        let model = LauncherModel(preferences: preferences, catalogue: AppCatalogue(loadCache: false), files: files ?? InstantFileSearch(),
+                                  jev: jev, keys: JevKeyCache(key: "test-key"), clipboard: ClipboardHistory(pasteboard: board ?? FakePasteboard()))
+        return (model, preferences, defaults, suite)
+    }
+    @MainActor func testJevReplyPromotesChosenWindowAction() async throws {
+        let jev = HeldJev()
+        let (model, _, defaults, suite) = makeModel(jev: jev)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        model.begin(); defer { model.end() }
+        let asked = expectation(description: "Jev asked")
+        jev.onChoose = { asked.fulfill() }
+        model.updateQuery("make it huge please", typed: true)
+        await fulfillment(of: [asked], timeout: 2)
+        let id = try XCTUnwrap(jev.candidates.first { $0.title == WindowAction.maximize.title }?.id)
+        XCTAssertFalse(id.contains("window:"), "Candidate IDs are opaque.")
+        jev.reply(id)
+        try await waitUntil { model.selected?.id == "window:maximize" }
+        XCTAssertEqual(model.results.first?.id, "window:maximize")
+        XCTAssertEqual(model.aiStatus, "Jev matched")
+    }
+    @MainActor func testStaleJevReplyCannotPromote() async throws {
+        let jev = HeldJev()
+        let (model, _, defaults, suite) = makeModel(jev: jev)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        model.begin(); defer { model.end() }
+        let asked = expectation(description: "Jev asked")
+        jev.onChoose = { asked.fulfill() }
+        model.updateQuery("make it huge please", typed: true)
+        await fulfillment(of: [asked], timeout: 2)
+        let id = try XCTUnwrap(jev.candidates.first { $0.title == WindowAction.maximize.title }?.id)
+        jev.onChoose = nil
+        model.updateQuery("left half", typed: true)
+        jev.reply(id)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(model.selected?.id, "window:left-half")
+        XCTAssertNotEqual(model.aiStatus, "Jev matched")
+    }
+    @MainActor func testJevErrorsMapToStatus() async throws {
+        let jev = HeldJev()
+        let (model, _, defaults, suite) = makeModel(jev: jev)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        model.begin(); defer { model.end() }
+        let asked = expectation(description: "Jev asked")
+        jev.onChoose = { asked.fulfill() }
+        model.updateQuery("make it huge please", typed: true)
+        await fulfillment(of: [asked], timeout: 2)
+        jev.fail(JevServiceError.requestFailed(statusCode: 429))
+        try await waitUntil { model.aiStatus == "Jev rate limited" }
+    }
+    @MainActor func testJevCandidatesCarryNoPaths() async throws {
+        let jev = HeldJev()
+        let files = InstantFileSearch()
+        files.entries = [FileEntry(path: "/Users/someone/Private/huge-plan.txt", name: "huge-plan.txt")]
+        let (model, _, defaults, suite) = makeModel(jev: jev, files: files)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        model.begin(); defer { model.end() }
+        let asked = expectation(description: "Jev asked")
+        jev.onChoose = { asked.fulfill() }
+        model.updateQuery("make it huge please", typed: true)
+        await fulfillment(of: [asked], timeout: 2)
+        XCTAssertTrue(jev.candidates.contains { $0.title == "huge-plan.txt" })
+        XCTAssertFalse(jev.candidates.contains { ($0.id + $0.title + $0.detail).contains("/") })
+        jev.reply(nil)
+    }
+    @MainActor func testFileSubtitleShowsFolderButKeepsFullPath() async throws {
+        let files = InstantFileSearch()
+        let path = NSHomeDirectory() + "/Downloads/invoice.pdf"
+        files.entries = [FileEntry(path: path, name: "invoice.pdf")]
+        let (model, preferences, defaults, suite) = makeModel(jev: HeldJev(), files: files)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        preferences.jevEnabled = false
+        model.begin(); defer { model.end() }
+        model.updateQuery("find file invoice", typed: true)
+        try await waitUntil { model.results.contains { $0.id == "file:" + path } }
+        let row = try XCTUnwrap(model.results.first { $0.id == "file:" + path })
+        XCTAssertEqual(row.detail, "~/Downloads")
+        XCTAssertEqual(row.path, path)
+    }
+    @MainActor func testShortMixedQueriesSkipSpotlight() async throws {
+        let files = InstantFileSearch()
+        let (model, preferences, defaults, suite) = makeModel(jev: HeldJev(), files: files)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        preferences.jevEnabled = false
+        model.begin(); defer { model.end() }
+        model.updateQuery("ab", typed: true)
+        try await Task.sleep(nanoseconds: 250_000_000)
+        XCTAssertEqual(files.searches, 0)
+        model.updateQuery("abc", typed: true)
+        try await waitUntil { files.searches == 1 }
+    }
+    @MainActor func testQuicklinkRows() {
+        withModel { model in
+            model.updateQuery("gh swift ui", typed: true)
+            XCTAssertEqual(model.selected?.id, "quicklink:gh")
+            XCTAssertEqual(model.selected?.title, "Search GitHub for swift ui")
+            model.updateQuery("gh", typed: true)
+            XCTAssertEqual(model.selected?.id, "quicklink:gh")
+            XCTAssertEqual(model.selected?.title, "Search GitHub")
+        }
+    }
+    @MainActor func testClipboardModeListsAndFiltersEntries() {
+        let board = FakePasteboard()
+        let (model, _, defaults, suite) = makeModel(jev: HeldJev(), board: board)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        board.copy("first note"); model.clipboard.poll()
+        board.copy("second invoice"); model.clipboard.poll()
+        model.begin(); defer { model.end() }
+        model.updateQuery("clip", typed: true)
+        XCTAssertEqual(model.results.map(\.title), ["second invoice", "first note"])
+        model.updateQuery("clip note", typed: true)
+        XCTAssertEqual(model.results.map(\.title), ["first note"])
+        XCTAssertTrue(model.isClipboardSearch)
+    }
+    @MainActor func testUseBoostReordersCloseMatchesButNotExactOnes() {
+        withModel { model in
+            model.updateQuery("third", typed: true)
+            let ids = model.results.prefix(3).map(\.id)
+            let last = try? XCTUnwrap(ids.last)
+            for _ in 0..<30 { model.preferences.record(last!, query: "third") }
+            model.rebuild()
+            XCTAssertEqual(model.selected?.id, last)
+            model.updateQuery("left half", typed: true)
+            for _ in 0..<30 { model.preferences.record("window:left-two-thirds", query: "left half") }
+            model.rebuild()
+            XCTAssertEqual(model.selected?.id, "window:left-half")
+        }
+    }
+    @MainActor func testCalculatorAndWebAreNotRemembered() {
+        withModel { model in
+            model.updateQuery("2+2", typed: true)
+            model.execute()
+            XCTAssertTrue(model.preferences.frecency.records.isEmpty)
+            XCTAssertTrue(model.preferences.recentIDs.isEmpty)
+        }
+    }
+    @MainActor func testMessageNoticeWinsAndVoiceErrorLeavesFooter() {
+        withModel { model in
+            model.message = "Boom"
+            XCTAssertEqual(model.notice?.tone, .warning)
+            XCTAssertEqual(model.notice?.text, "Boom")
+            model.message = nil
+            XCTAssertNotEqual(model.notice?.tone, .warning)
+        }
     }
     @MainActor func testSpokenUpdateRanksCurrentActionAndTypingReplacesIt() {
         withModel { model in
@@ -111,6 +262,107 @@ final class LauncherFlowTests: XCTestCase {
         XCTAssertEqual(model.selected?.title, "beta.txt")
         XCTAssertTrue(model.results.allSatisfy(\.isCurrent))
     }
+    @MainActor func testEmptyQueryWithoutHistoryCollapsesToSearchBar() {
+        withModel { model in
+            model.preferences.voiceEnabled = true
+            model.rebuild()
+            XCTAssertTrue(model.rows.isEmpty)
+            XCTAssertTrue(model.results.isEmpty)
+            XCTAssertTrue(model.isCollapsed)
+            XCTAssertNil(model.selected)
+            XCTAssertNil(model.notice, "Voice setup belongs to Settings, not the launcher.")
+            XCTAssertNil(model.primaryActionTitle)
+        }
+    }
+    @MainActor func testEmptyQueryShowsFavouritesThenRecentOnly() {
+        withModel { model in
+            let preferences = model.preferences
+            preferences.record("window:left-half", query: "left")
+            preferences.record("quicklink:gh", query: "gh")
+            preferences.record("window:right-half", query: "right")
+            preferences.favourites = ["window:right-half", "app:/Missing/Gone.app"]
+            model.rebuild()
+            XCTAssertEqual(model.results.map(\.id), ["window:right-half", "quicklink:gh", "window:left-half"])
+            XCTAssertEqual(model.rows.map(\.id), ["section:Favourites", "window:right-half", "section:Recent", "quicklink:gh", "window:left-half"])
+            XCTAssertEqual(model.selected?.id, "window:right-half")
+            XCTAssertFalse(model.isCollapsed)
+            preferences.favourites = []
+            model.rebuild()
+            XCTAssertEqual(model.rows.map(\.id), ["window:right-half", "quicklink:gh", "window:left-half"], "One group has no label.")
+        }
+    }
+    @MainActor func testMixedSearchGroupsTopHitFirstAndCapsFiles() async throws {
+        let files = InstantFileSearch()
+        files.entries = (1...6).map { FileEntry(path: "/tmp/notes/third draft \($0).txt", name: "third draft \($0).txt") }
+        let (model, preferences, defaults, suite) = makeModel(jev: HeldJev(), files: files)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        preferences.jevEnabled = false
+        model.begin(); defer { model.end() }
+        model.updateQuery("third", typed: true)
+        try await waitUntil { model.results.contains { $0.group == .files } }
+        let top = try XCTUnwrap(model.results.first)
+        XCTAssertEqual(model.selected?.id, top.id)
+        XCTAssertEqual(model.rows.first?.id, "section:" + top.group.title, "The top hit's group comes first.")
+        XCTAssertEqual(model.results.filter { $0.group == .files }.count, LauncherSections.mixedFileLimit)
+        // Groups are contiguous, and each has one label.
+        let groups = model.results.map(\.group).reduce(into: [LauncherGroup]()) { if $0.last != $1 { $0.append($1) } }
+        XCTAssertEqual(groups.count, Set(groups).count)
+        XCTAssertEqual(model.rows.filter { $0.result == nil }.count, groups.count)
+        // Arrow keys move over results only, across group boundaries.
+        for _ in 0..<model.results.count { model.moveSelection(1) }
+        XCTAssertEqual(model.selected?.id, model.results.last?.id)
+        model.updateQuery("find file third", typed: true)
+        try await waitUntil { model.results.count == 6 }
+        XCTAssertTrue(model.rows.allSatisfy { $0.result != nil }, "Files alone need no label.")
+    }
+    @MainActor func testPrimaryActionFollowsSelection() async throws {
+        withModel { model in
+            model.updateQuery("2+2", typed: true)
+            XCTAssertEqual(model.primaryActionTitle, "Copy")
+            model.updateQuery("left half", typed: true)
+            XCTAssertEqual(model.primaryActionTitle, "Move Window")
+            model.updateQuery("gh swift", typed: true)
+            XCTAssertEqual(model.primaryActionTitle, "Search GitHub")
+            model.updateQuery("example.com", typed: true)
+            XCTAssertEqual(model.primaryActionTitle, "Open URL")
+            model.updateQuery("zzqx wvvy", typed: true)
+            XCTAssertEqual(model.selected?.id, "web")
+            XCTAssertEqual(model.primaryActionTitle, "Search " + model.preferences.webEngine)
+        }
+        let files = InstantFileSearch()
+        files.entries = [FileEntry(path: "/tmp/invoice.pdf", name: "invoice.pdf")]
+        let (model, preferences, defaults, suite) = makeModel(jev: HeldJev(), files: files)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        preferences.jevEnabled = false
+        model.begin(); defer { model.end() }
+        model.updateQuery("find file invoice", typed: true)
+        try await waitUntil { model.selected != nil }
+        XCTAssertEqual(model.primaryActionTitle, "Open File")
+    }
+    @MainActor func testSingleLineAccessories() {
+        withModel { model in
+            model.updateQuery("left half", typed: true)
+            XCTAssertEqual(model.selected?.detail, model.targetName)
+            XCTAssertEqual(model.selected?.isTwoLine, false)
+            model.updateQuery("gh", typed: true)
+            XCTAssertEqual(model.selected?.detail, "github.com")
+            model.updateQuery("10 km in mi", typed: true)
+            XCTAssertEqual(model.selected?.isTwoLine, true)
+        }
+        let app = AppEntry(path: "/Applications/Safari.app", name: "Safari", bundleID: nil)
+        XCTAssertEqual(LauncherModel.appDetail(app, running: true), "Running")
+        XCTAssertEqual(LauncherModel.appDetail(app, running: false), "")
+    }
+    func testFolderDetailKeepsTheLastTwoComponents() {
+        let home = "/Users/test"
+        XCTAssertEqual(LauncherModel.folderDetail(home + "/Downloads/invoice.pdf", home: home), "~/Downloads")
+        XCTAssertEqual(LauncherModel.folderDetail(home + "/Dev/docs/a.md", home: home), "~/Dev/docs")
+        XCTAssertEqual(LauncherModel.folderDetail(home + "/Dev/docs/scripts/dist/a.md", home: home), "…/scripts/dist")
+        XCTAssertEqual(LauncherModel.folderDetail(home + "/a.md", home: home), "~")
+        XCTAssertEqual(LauncherModel.folderDetail("/tmp/a.md", home: home), "/tmp")
+        XCTAssertEqual(LauncherModel.folderDetail("/Volumes/Data/a/b/c.txt", home: home), "…/a/b")
+        XCTAssertEqual(LauncherModel.folderDetail("/Users/tester/x/y/z.txt", home: home), "…/x/y", "A sibling home is not ~.")
+    }
     @MainActor func testCalculatorAndURLDoNotNeedAI() {
         withModel { model in
             model.updateQuery("12 * (8 + 2)", typed: true)
@@ -121,6 +373,51 @@ final class LauncherFlowTests: XCTestCase {
             model.updateQuery("not a url", typed: true)
             XCTAssertFalse(model.results.contains { $0.id == "url" })
         }
+    }
+}
+
+@MainActor private func waitUntil(timeout: TimeInterval = 2, _ condition: () -> Bool) async throws {
+    let deadline = Date().addingTimeInterval(timeout)
+    while !condition() {
+        guard Date() < deadline else { return XCTFail("Condition not met in time") }
+        try await Task.sleep(nanoseconds: 10_000_000)
+    }
+}
+
+/// Jev stand-in whose replies the test releases by hand.
+private final class HeldJev: JevChoosing, @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending: [CheckedContinuation<String?, Error>] = []
+    private var lastCandidates: [JevCandidate] = []
+    private var chooseHandler: (@Sendable () -> Void)?
+    var onChoose: (@Sendable () -> Void)? {
+        get { lock.withLock { chooseHandler } }
+        set { lock.withLock { chooseHandler = newValue } }
+    }
+    var candidates: [JevCandidate] { lock.withLock { lastCandidates } }
+    func choose(query: String, candidates: [JevCandidate], apiKey: String) async throws -> String? {
+        try await withCheckedThrowingContinuation { continuation in
+            let handler = lock.withLock { () -> (@Sendable () -> Void)? in
+                pending.append(continuation); lastCandidates = candidates; return chooseHandler
+            }
+            handler?()
+        }
+    }
+    func reply(_ id: String?) { next()?.resume(returning: id) }
+    func fail(_ error: Error) { next()?.resume(throwing: error) }
+    private func next() -> CheckedContinuation<String?, Error>? {
+        lock.withLock { pending.isEmpty ? nil : pending.removeFirst() }
+    }
+}
+
+@MainActor private final class InstantFileSearch: FileSearching {
+    var onStatus: ((String) -> Void)?
+    var entries: [FileEntry] = []
+    var searches = 0
+    func stop() {}
+    func search(_ text: String, folders: [String], completion: @escaping ([FileEntry]) -> Void) {
+        searches += 1
+        completion(entries)
     }
 }
 

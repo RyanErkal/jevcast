@@ -56,7 +56,7 @@ final class ResultActions {
         dismissedByOwner = true
         activeMenu?.cancelTrackingWithoutAnimation()
     }
-    func show(model: LauncherModel, in view: NSView, preview: @escaping () -> Void, dismissed: () -> Void) {
+    func show(model: LauncherModel, in view: NSView, at point: NSPoint, preview: @escaping () -> Void, dismissed: () -> Void) {
         guard let result = model.selected else { return }
         // Pause recognition so the menu always acts on the row the user opened.
         model.pauseListening()
@@ -79,7 +79,7 @@ final class ResultActions {
                 model.preferences.toggleFavourite(result.id); model.rebuild()
             }
         }
-        menu.popUp(positioning: nil, at: NSPoint(x: view.bounds.width - 195, y: 45), in: view)
+        menu.popUp(positioning: nil, at: point, in: view)
         activeMenu = nil; callbacks = []
         if !performedAction && !dismissedByOwner { dismissed() }
     }

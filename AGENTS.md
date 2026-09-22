@@ -7,4 +7,5 @@ Public images come only from --snapshot-ui <dir> --demo. Never publish captures 
 Names and IDs live in Sources/JevLauncher/AppIdentity.swift and scripts/build.sh; AppIdentityTests keeps them in step.
 Preserve user apps and settings. Do not change Spotlight, Raycast, or Rectangle shortcuts automatically.
 Do not execute shell text inferred by a model. Jev may only select known action IDs.
+Website: static files in site/, no build step, no third-party requests.
 Releases: docs/RELEASING.md. Code layout and diagnostic flags: docs/DEVELOPMENT.md.

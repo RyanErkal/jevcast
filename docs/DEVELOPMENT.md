@@ -50,3 +50,12 @@ Snapshots render the app's own views. They show layout only, not window material
 - The build records the real SDK version in the binary. Without it, macOS 26 draws standard windows in the older style. The minimum system stays macOS 14.
 - The bundle is assembled in `dist/.stage.*` and then moved into place, so a running copy is never changed in place.
 - A local build is signed ad hoc. macOS can ask for permissions again after a rebuild.
+
+## Website
+
+`site/` is the landing page: static HTML, CSS, and one small script, with no build step and no third-party requests. The display font is self-hosted under the SIL Open Font License (`site/fonts/OFL.txt`).
+
+- Preview: `python3 -m http.server 4388 --directory site`, then open `http://localhost:4388`.
+- Images: the launcher states in `site/images/launcher-*.png` come from `--snapshot-ui <dir> --demo`. Replace them only with demo renders.
+- Deploy: `vercel deploy site --prod`. `site/vercel.json` sets the security headers.
+- The download link points to the newest GitHub release, so a release needs no website change.

@@ -573,6 +573,40 @@ final class LauncherFlowTests: XCTestCase {
         model.updateQuery("clip links", typed: true)
         XCTAssertEqual(model.results.map(\.title), ["https://example.com/page"])
     }
+    @MainActor func testPortRowsStopWithBackspaceAndStayOpen() {
+        var closed = false
+        withModel { model in
+            model.onClose = { _ in closed = true }
+            model.updateQuery("port 65001", typed: true)
+            // A process ID that does not exist, so stopping it fails safely.
+            model.listeners = [ListeningPort(pid: 999_999, command: "node", port: 65001)]
+            var details = ProcessSnapshot(pid: 999_999); details.uid = getuid(); details.executable = "/opt/homebrew/bin/node"
+            details.arguments = "node server.js"; details.cpu = 2.5; details.residentKB = 51_200; details.uptime = 120
+            model.portDetails = [999_999: details]
+            model.rebuild()
+            let row = try! XCTUnwrap(model.selected)
+            XCTAssertEqual(row.title, "node  :65001")
+            XCTAssertTrue(row.detail.contains("2.5% CPU · 50 MB · up 2 min"), row.detail)
+            XCTAssertEqual(model.primaryActionTitle, "Open localhost:65001")
+            XCTAssertTrue(model.notice?.text.contains("⌘⌫") == true, "Before a row is picked, ⌘⌫ stops.")
+            model.select(row.id)
+            XCTAssertTrue(model.notice?.text.contains("Press ⌫ to stop") == true)
+            XCTAssertTrue(model.stopSelectedPort())
+            XCTAssertEqual(model.pendingConfirmID, row.id, "The first ⌫ asks.")
+            XCTAssertTrue(model.notice?.text.contains("Press ⌫ again") == true)
+            model.stopSelectedPort()
+            XCTAssertNil(model.pendingConfirmID)
+            XCTAssertTrue(model.message?.contains("no longer running") == true, model.message ?? "")
+            XCTAssertFalse(closed, "Stopping never closes the launcher.")
+            // Another user's process explains instead of failing.
+            details.uid = getuid() + 1
+            model.portDetails = [999_999: details]; model.message = nil
+            model.rebuild(); model.select(row.id)
+            model.stopSelectedPort()
+            XCTAssertTrue(model.message?.contains("sudo kill 999999") == true)
+            XCTAssertNil(model.pendingConfirmID)
+        }
+    }
     @MainActor func testBuiltInCommandsMatchByAlias() {
         withModel { model in
             model.updateQuery("caffeinate", typed: true)

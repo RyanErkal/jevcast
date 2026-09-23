@@ -2,6 +2,14 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.2.3] - 2026-09-23
+
+### Changed
+
+- ⌫ stops a port's process, not Return, and the launcher stays open. The first ⌫ asks and the second stops. The row disappears and the strip says what stopped. ⌫ stops only after you pick the row with ↑↓ or a click, so typing still deletes text. ⌘⌫ stops the selected process at any time.
+- Return on a port opens `http://localhost:<port>` in your browser.
+- ⌘K on a port adds Stop, next to Force Stop.
+
 ## [1.2.2] - 2026-09-23
 
 ### Added

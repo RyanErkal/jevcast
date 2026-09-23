@@ -95,9 +95,16 @@ extension LauncherModel {
         return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
     }
 
-    /// The strip text for a port lookup that is running or found nothing.
+    /// The strip text for a port lookup: what just stopped, how to stop, or why the list is empty.
     var portNotice: String? {
-        guard let portQuery, listeners.isEmpty else { return nil }
+        guard let portQuery else { return nil }
+        if let stoppedNotice { return stoppedNotice }
+        if let selected, case .stopProcess(let listener) = selected.action {
+            if portOwner(listener) == .otherUser { return "Owned by another user. ⌘K copies a sudo kill command." }
+            return manualSelection ? "Press ⌫ to stop \(portName(listener)). Return opens it in your browser."
+                                   : "Press ⌘⌫ to stop \(portName(listener)), or pick a row with ↑↓ and press ⌫."
+        }
+        guard listeners.isEmpty else { return nil }
         if isLoadingPorts { return "Looking for listening ports…" }
         return portQuery.port.map { "Nothing is listening on port \($0)." } ?? "No TCP ports are listening."
     }
@@ -156,10 +163,36 @@ extension LauncherModel {
         }
     }
 
-    /// Ends a process that ignored Stop, from the actions menu.
-    func forceStop(_ listener: ListeningPort) {
-        do { try CommandRunner.stop(listener, force: true); onClose?(true) }
-        catch { message = error.localizedDescription }
+    /// ⌫ on a port row: the first press asks, the second stops the process. The launcher stays
+    /// open and the list refreshes. Returns false when the selected row is not a port.
+    @discardableResult
+    func stopSelectedPort(force: Bool = false, confirmed: Bool = false) -> Bool {
+        guard let result = selected, case .stopProcess(let listener) = result.action else { return false }
+        let name = portName(listener)
+        if portOwner(listener) == .otherUser {
+            message = "\(name) belongs to another user. To stop it, run sudo kill \(listener.pid) in Terminal. ⌘K copies the command."
+            return true
+        }
+        guard confirmed || force || pendingConfirmID == result.id else { pendingConfirmID = result.id; stoppedNotice = nil; return true }
+        pendingConfirmID = nil
+        do {
+            try CommandRunner.stop(listener, force: force)
+            listeners.removeAll { $0.pid == listener.pid && $0.port == listener.port }
+            manualSelection = false
+            message = nil
+            stoppedNotice = (force ? "Force stopped " : "Stopped ") + "\(name) on :\(listener.port)."
+            rebuild()
+        } catch {
+            message = error.localizedDescription
+        }
+        return true
+    }
+
+    /// Stops a process from the actions menu, where choosing Stop is already deliberate.
+    /// `force` sends SIGKILL, for a process that ignored a normal stop. The launcher stays open.
+    func stop(_ listener: ListeningPort, force: Bool) {
+        select(listener.id)
+        stopSelectedPort(force: force, confirmed: true)
     }
 
     /// "stop node on port 3000", for the confirmation strip.

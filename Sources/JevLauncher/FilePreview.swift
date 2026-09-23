@@ -96,7 +96,8 @@ final class ResultActions {
             if model.portOwner(listener) == .otherUser {
                 add("Copy sudo kill \(listener.pid)") { model.copy("sudo kill \(listener.pid)"); model.message = "Command copied. Paste it in Terminal." }
             } else {
-                add("Force Stop") { model.forceStop(listener) }
+                add("Stop") { model.stop(listener, force: false) }
+                add("Force Stop") { model.stop(listener, force: true) }
             }
             add("Copy PID") { model.copy(String(listener.pid)); model.message = "PID copied" }
             if let arguments = details?.arguments, !arguments.isEmpty {

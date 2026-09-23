@@ -48,7 +48,7 @@ Press **Option–Space** and type. If another app already uses that shortcut, ch
 | `gh swiftui`, `yt piano`, `maps cafes`, `wiki moon`        | Searches a site. Add your own keywords in Settings › Search.             |
 | `clip`                                                     | Shows the last 50 text items you copied. Return copies one again.        |
 | `wi-fi settings`                                           | Opens that System Settings pane.                                         |
-| `port 3000`, `kill 5173`, `ports`                          | Lists what listens on a local port. Return twice stops it.               |
+| `port 3000`, `kill 5173`, `ports`                          | Lists what listens on a local port. ⌫ twice stops it.                    |
 | `dark mode`, `caffeinate`, `empty trash`, `my ip`          | Runs a built-in command. Disruptive ones ask for a second Return.        |
 | The name of your own command                               | Runs a command you added in Settings › Commands.                         |
 | `notes left half`                                          | Opens Notes, then arranges its window.                                   |
@@ -119,7 +119,7 @@ Turn on **Listen when the launcher opens** in Settings › Input and allow Micro
 
 ### Commands
 
-Type `port 3000` to see what listens on that port, then press Return twice to stop it. `ports` lists every listener with its CPU, memory, uptime, project folder, and whether it is open to your network. Your own servers come first. macOS services and other users' processes are marked, because they restart or need an administrator. ⌘K opens the port in a browser, shows its folder, force stops it, or copies its PID or command line. Built-in commands, such as **Toggle Dark Mode**, **Keep Mac Awake for 1 Hour**, and **Copy Local IP Address**, run fixed programs with fixed arguments and no shell. Add your own in Settings › Commands. Those run with `zsh -lc` from your home folder. Put `{input}` in a command to pass text typed after its name, as a quoted argument. Settings › Commands also holds **workflows**, which run several steps from one name, and **snippets**. Jev can choose any of these by name, but it never sees or writes command text.
+Type `port 3000` to see what listens on that port. Pick a row and press ⌫ twice to stop it, and the launcher stays open. ⌘⌫ works without picking the row first. Return opens the port in your browser. `ports` lists every listener with its CPU, memory, uptime, project folder, and whether it is open to your network. Your own servers come first. macOS services and other users' processes are marked, because they restart or need an administrator. ⌘K opens the port in a browser, shows its folder, force stops it, or copies its PID or command line. Built-in commands, such as **Toggle Dark Mode**, **Keep Mac Awake for 1 Hour**, and **Copy Local IP Address**, run fixed programs with fixed arguments and no shell. Add your own in Settings › Commands. Those run with `zsh -lc` from your home folder. Put `{input}` in a command to pass text typed after its name, as a quoted argument. Settings › Commands also holds **workflows**, which run several steps from one name, and **snippets**. Jev can choose any of these by name, but it never sees or writes command text.
 
 ### Jev memory and usage
 

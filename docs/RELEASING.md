@@ -50,7 +50,7 @@ Unit tests cannot prove these. Do them on a Mac with a real keyboard, and record
 - [ ] Voice input transcribes speech and stops when you type.
 - [ ] With a TypeSafe key, a loose request such as "make this window bigger" selects a window action.
 - [ ] **Check for Updates…** reports the right result.
-- [ ] `port <n>` lists a real local server, and two Returns stop it.
+- [ ] `port <n>` lists a real local server with CPU and memory. Picking it and pressing ⌫ twice stops it, and the launcher stays open.
 - [ ] A built-in command, such as Toggle Dark Mode, runs. Empty Trash asks for a second Return.
 - [ ] A command added in Settings › Search runs from the launcher.
 - [ ] `notes left half` with Notes closed opens Notes, then arranges it.

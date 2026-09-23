@@ -55,7 +55,6 @@ struct LauncherResult: Identifiable {
     var needsConfirmation: Bool {
         switch action {
         case .command(let command): return command.confirm
-        case .stopProcess: return true
         default: return false
         }
     }
@@ -120,6 +119,9 @@ final class LauncherModel: ObservableObject {
             return Notice(symbol: "macwindow.badge.plus", text: "Window control needs Accessibility access.", tone: .info, action: .allowAccessibility)
         }
         if let pending = selected, pending.id == pendingConfirmID {
+            if case .stopProcess = pending.action {
+                return Notice(symbol: "exclamationmark.circle", text: "Press ⌫ again to " + confirmPhrase(pending) + ".", tone: .warning)
+            }
             return Notice(symbol: "exclamationmark.circle", text: "Press Return again to " + confirmPhrase(pending) + ".", tone: .warning)
         }
         if let portNotice { return Notice(symbol: "network", text: portNotice, tone: .info) }
@@ -145,9 +147,7 @@ final class LauncherModel: ObservableObject {
             return "Open URL"
         case .copy, .clipboard: return "Copy"
         case .command, .custom: return selected.id == pendingConfirmID ? "Confirm" : "Run Command"
-        case .stopProcess(let listener):
-            if portOwner(listener) == .otherUser { return "Needs Administrator" }
-            return selected.id == pendingConfirmID ? "Confirm" : "Stop Process"
+        case .stopProcess(let listener): return "Open localhost:\(listener.port)"
         case .appThenWindow: return "Open and Arrange"
         case .shortcut: return "Run Shortcut"
         case .workflow: return "Run Workflow"
@@ -202,6 +202,8 @@ final class LauncherModel: ObservableObject {
     var listeners: [ListeningPort] = []
     /// CPU, memory, and command line for each listening process, refreshed while the list is open.
     var portDetails: [Int32: ProcessSnapshot] = [:]
+    /// "Stopped node on :3000.", shown until the query changes.
+    var stoppedNotice: String?
     var isLoadingPorts = false
     /// The row that is waiting for a second Return.
     @Published var pendingConfirmID: String?
@@ -236,7 +238,7 @@ final class LauncherModel: ObservableObject {
         visible = true; acceptsSpeech = true; manualSelection = false; query = ""; message = nil; voiceError = nil
         parsedFileQuery = FileSearchQuery(text: ""); fileStatus = ""
         previousFileResults = []; fileResults = []; promotedID = nil; semanticResult = nil; revision = UUID()
-        portQuery = nil; listeners = []; portDetails = [:]; isLoadingPorts = false; pendingConfirmID = nil
+        portQuery = nil; listeners = []; portDetails = [:]; stoppedNotice = nil; isLoadingPorts = false; pendingConfirmID = nil
         jevPick = nil; menuCommands = []
         rebuild()
         ShortcutsCatalogue.shared.refreshIfStale()
@@ -278,7 +280,7 @@ final class LauncherModel: ObservableObject {
             if !fileResults.isEmpty { previousFileResults = fileResults }
         } else { previousFileResults = [] }
         query = text; message = nil; manualSelection = false; fileResults = []; promotedID = nil; semanticResult = nil
-        pendingConfirmID = nil; portQuery = PortQuery.parse(text); listeners = []; portDetails = [:]; jevPick = nil
+        pendingConfirmID = nil; portQuery = PortQuery.parse(text); listeners = []; portDetails = [:]; stoppedNotice = nil; jevPick = nil
         revision = UUID(); let current = revision
         work?.cancel(); aiWork?.cancel(); files.stop(); aiStatus = ""; aiError = nil
         if typed { voiceError = nil }
@@ -548,7 +550,7 @@ final class LauncherModel: ObservableObject {
         guard !available.isEmpty else { return }
         let index = available.firstIndex(where: { $0.id == selectedID }) ?? 0
         selectedID = available[min(max(index + delta, 0), available.count - 1)].id
-        manualSelection = true; pendingConfirmID = nil
+        manualSelection = true; pendingConfirmID = nil; stoppedNotice = nil
     }
     func select(_ id: String) {
         guard results.contains(where: { $0.id == id && $0.isCurrent }) else { selectedID = nil; return }
@@ -558,10 +560,6 @@ final class LauncherModel: ObservableObject {
     var selected: LauncherResult? { results.first { $0.id == selectedID && $0.isCurrent } }
     func execute(paste: Bool = false) {
         guard let result = selected else { message = "Choose an action first."; return }
-        if case .stopProcess(let listener) = result.action, portOwner(listener) == .otherUser {
-            message = "\(portName(listener)) belongs to another user. To stop it, run sudo kill \(listener.pid) in Terminal. ⌘K copies the command."
-            return
-        }
         if result.needsConfirmation && pendingConfirmID != result.id { pendingConfirmID = result.id; return }
         pendingConfirmID = nil
         // Freeze the visible action before stopping speech or accepting an async response.
@@ -587,7 +585,9 @@ final class LauncherModel: ObservableObject {
             case .clipboard(let item): clipboard.restore(item)
             case .command(let command): run(command)
             case .custom(let command, let input): run(command, input: input)
-            case .stopProcess(let listener): try CommandRunner.stop(listener)
+            case .stopProcess(let listener):
+                // Return opens the server. ⌫ stops it, without closing the launcher.
+                guard let url = URL(string: "http://localhost:\(listener.port)"), NSWorkspace.shared.open(url) else { throw LauncherError("The browser could not open port \(listener.port).") }
             case .appThenWindow(let app, let action): openThenArrange(app, action)
             case .shortcut(let name): runShortcut(name)
             case .workflow(let workflow): run(workflow)
@@ -606,7 +606,7 @@ final class LauncherModel: ObservableObject {
             case .copy, .clipboard, .snippet:
                 onClose?(true)
                 if paste { Paster.pasteSoon() }
-            case .command, .custom, .stopProcess, .timer, .cancelTimer, .shortcut, .workflow: onClose?(true)
+            case .command, .custom, .timer, .cancelTimer, .shortcut, .workflow: onClose?(true)
             case .menu: onClose?(true)
             case .window(_, let pid):
                 onClose?(pid == nil)

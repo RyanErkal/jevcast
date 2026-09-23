@@ -81,6 +81,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
                 self.hide()
                 return nil
             case 36, 76: self.model.execute(paste: event.modifierFlags.contains(.shift)); return nil
+            case 51:
+                // ⌫ stops a port's process once the row is picked; ⌘⌫ stops it at once. Otherwise ⌫ edits the search.
+                guard case .stopProcess = self.model.selected?.action,
+                      event.modifierFlags.contains(.command) || self.model.manualSelection
+                        || self.model.pendingConfirmID == self.model.selectedID else { return event }
+                self.model.stopSelectedPort()
+                return nil
             case 6 where event.modifierFlags.contains(.command) && !event.modifierFlags.contains(.shift):
                 // ⌘Z undoes a Jev pick. Otherwise the search field keeps its own undo.
                 return self.model.undoJevPick() ? nil : event

@@ -33,7 +33,7 @@ extension LauncherModel {
         return Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: date) ?? date
     }
 
-    static func addReminder(_ create: CreateQuery) async throws {
+    static func addReminder(_ create: CreateQuery, url: URL? = nil) async throws {
         let store = Permissions.events
         if EKEventStore.authorizationStatus(for: .reminder) == .notDetermined { await Permissions.request(.reminders) }
         guard EKEventStore.authorizationStatus(for: .reminder) == .fullAccess else {
@@ -41,6 +41,7 @@ extension LauncherModel {
         }
         let reminder = EKReminder(eventStore: store)
         reminder.title = create.title
+        reminder.url = url
         guard let list = store.defaultCalendarForNewReminders() else { throw LauncherError("Reminders has no default list.") }
         reminder.calendar = list
         if let date = create.date {

@@ -57,6 +57,10 @@ final class ScheduledJobTests: XCTestCase {
         let sunday = LaunchSchedule(calendar: [.init(minute: 0, hour: 12, weekday: 7)])
         XCTAssertEqual(sunday.nextRun(after: date("2026-09-23T12:00:00Z"), calendar: calendar), date("2026-09-27T11:00:00Z"), "Weekday 7 is Sunday.")
         XCTAssertNil(LaunchSchedule(interval: 60).nextRun(after: Date(), calendar: calendar))
+        // Day and Weekday together fire on either, as launchd does: Friday 25th comes before the 13th.
+        let either = LaunchSchedule(calendar: [.init(minute: 0, hour: 0, day: 13, weekday: 5)])
+        XCTAssertEqual(either.nextRun(after: date("2026-09-23T12:00:00Z"), calendar: calendar), date("2026-09-24T23:00:00Z"))
+        XCTAssertEqual(either.summary, "Every Friday and on day 13 at 00:00")
     }
 
     func testLaunchStatusAndDisabled() {
@@ -64,8 +68,8 @@ final class ScheduledJobTests: XCTestCase {
         XCTAssertEqual(status["com.example.a"], LaunchStatus(pid: 123, lastExit: 0))
         XCTAssertEqual(status["com.example.b"], LaunchStatus(pid: nil, lastExit: 78))
         XCTAssertEqual(status["com.example.c"]?.lastExit, -9)
-        let disabled = LaunchStatus.parseDisabled("disabled services = {\n\t\"com.example.a\" => disabled\n\t\"com.example.b\" => enabled\n\t\"com.example.c\" => true\n}")
-        XCTAssertEqual(disabled, ["com.example.a", "com.example.c"])
+        let overrides = LaunchStatus.parseOverrides("disabled services = {\n\t\"com.example.a\" => disabled\n\t\"com.example.b\" => enabled\n\t\"com.example.c\" => true\n}")
+        XCTAssertEqual(overrides, ["com.example.a": true, "com.example.b": false, "com.example.c": true])
     }
 
     func testCronParsingAndSummaries() {
@@ -92,8 +96,25 @@ final class ScheduledJobTests: XCTestCase {
         let quarter = CronJob.parse("*/15 * * * * poll")[0]
         XCTAssertEqual(quarter.nextRun(after: date("2026-09-23T10:07:00Z"), calendar: calendar), date("2026-09-23T10:15:00Z"))
         // Day of month OR day of week when both are set.
+        // "*/2" counts as unrestricted, as in Vixie cron, so only Mondays match.
+        let stepped = CronJob.parse("0 9 */2 * 1 weekly")[0]
+        XCTAssertEqual(stepped.nextRun(after: date("2026-09-23T12:00:00Z"), calendar: calendar), date("2026-09-28T08:00:00Z"))
         let either = CronJob.parse("0 0 13 * 5 spooky")[0]
         XCTAssertEqual(either.nextRun(after: date("2026-09-23T12:00:00Z"), calendar: calendar), date("2026-09-24T23:00:00Z"), "Friday 25th matches the weekday.")
+    }
+
+    func testOutOfRangeCalendarEntryIsDropped() throws {
+        let data = plist(["Label": "bad", "Program": "/bin/true", "StartCalendarInterval": [["Month": 0], ["Weekday": -1], ["Hour": 5, "Minute": 0]]])
+        let job = try XCTUnwrap(LaunchJob.parse(data, path: "x", domain: .userAgent))
+        XCTAssertEqual(job.schedule.calendar, [.init(minute: 0, hour: 5)])
+        XCTAssertEqual(job.schedule.summary, "Every day at 05:00")
+    }
+
+    func testConditionalKeepAliveAndRelativeProgram() throws {
+        let data = plist(["Label": "k", "ProgramArguments": ["bash", "-c", "true"], "KeepAlive": ["SuccessfulExit": false], "RunAtLoad": true])
+        let job = try XCTUnwrap(LaunchJob.parse(data, path: "x", domain: .userAgent))
+        XCTAssertEqual(job.schedule.summary, "Restarts when needed, and at login")
+        XCTAssertEqual(job.warnings(programExists: false), [], "launchd finds a bare program name on PATH.")
     }
 
     func testWarningsAndQuoting() {

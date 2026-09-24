@@ -9,6 +9,12 @@ protocol ThingSource: AnyObject {
     var section: String { get }
     /// Rows that match `filter`, best first. Throws `SourceProblem` when access is missing.
     func load(_ filter: String) async throws -> [LauncherResult]
+    /// Drops cached data, so the next load reads the Mac again.
+    func invalidate()
+}
+
+extension ThingSource {
+    func invalidate() {}
 }
 
 /// Why a source shows nothing, with the button that fixes it.
@@ -28,38 +34,46 @@ extension LauncherModel {
         case .calendar: made = CalendarSource()
         case .reminders: made = RemindersSource()
         case .contacts: made = ContactsSource()
+        case .tabs: made = TabsSource()
+        case .history: made = HistorySource()
         default: made = nil
         }
         sources[kind] = made
         return made
     }
 
-    /// Loads the rows for the source query in the search field.
-    func loadSource(revision current: UUID) {
+    /// Loads the rows for the source query in the search field. A newer load cancels an older one.
+    func loadSource(revision current: UUID, delay: UInt64 = 0) {
         guard let sourceQuery, let source = source(sourceQuery.kind) else { return }
-        isLoadingSource = sourceRows.isEmpty
+        isLoadingSource = !sourceRows.contains(where: \.isCurrent)
         sourceProblem = nil
-        rebuild()
+        sourceTask?.cancel()
         let filter = sourceQuery.filter
-        Task { @MainActor [weak self] in
-            do {
-                let rows = try await source.load(filter)
-                guard let self, self.visible, self.revision == current else { return }
+        sourceTask = Task { @MainActor [weak self] in
+            if delay > 0 { try? await Task.sleep(nanoseconds: delay) }
+            guard !Task.isCancelled, let self, self.visible, self.revision == current else { return }
+            self.rebuild()
+            let outcome: Result<[LauncherResult], Error>
+            do { outcome = .success(try await source.load(filter)) } catch { outcome = .failure(error) }
+            guard !Task.isCancelled, self.visible, self.revision == current else { return }
+            switch outcome {
+            case .success(let rows):
                 self.sourceRows = rows.map { row in var row = row; row.section = .named(source.section); return row }
                 self.sourceProblem = nil
-            } catch {
-                guard let self, self.visible, self.revision == current else { return }
+            case .failure(let error):
                 self.sourceRows = []
                 self.sourceProblem = error as? SourceProblem ?? SourceProblem(text: error.localizedDescription)
             }
-            self?.isLoadingSource = false
-            self?.rebuild()
+            self.isLoadingSource = false
+            self.rebuild()
         }
     }
 
-    /// Reloads the list after a verb that keeps the launcher open.
+    /// Reloads the list after a verb that keeps the launcher open. The source reads fresh data.
     func reloadSource() {
-        if sourceQuery != nil { loadSource(revision: revision) } else { rebuild() }
+        guard let sourceQuery else { rebuild(); return }
+        source(sourceQuery.kind)?.invalidate()
+        loadSource(revision: revision)
     }
 
     /// The strip text for a source: a permission problem, a verb's result, or why the list is empty.

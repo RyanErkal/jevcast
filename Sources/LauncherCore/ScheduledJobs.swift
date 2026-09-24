@@ -53,7 +53,8 @@ public struct LaunchJob: Equatable, Sendable, Identifiable {
     public func warnings(programExists: Bool) -> [String] {
         guard let executable else { return ["No program"] }
         var found: [String] = []
-        if !programExists { found.append("Program missing") }
+        // A bare name such as "bash" is found on PATH by launchd, so only an absolute path can be missing.
+        if executable.hasPrefix("/") && !programExists { found.append("Program missing") }
         let risky = ["/tmp/", "/private/tmp/", "/var/tmp/", "/Users/Shared/", "/Downloads/"]
         if risky.contains(where: { executable.contains($0) }) { found.append("Runs from an unusual folder") }
         return found
@@ -74,6 +75,7 @@ public struct LaunchSchedule: Equatable, Sendable {
     public var interval: Int?
     public var runAtLoad = false
     public var keepAlive = false
+    public var keepAliveConditions = false
     public var watchesPaths = false
     public var onMount = false
 
@@ -84,17 +86,26 @@ public struct LaunchSchedule: Equatable, Sendable {
     }
 
     init(plist: [String: Any]) {
+        // An out-of-range value makes the entry invalid, as launchd rejects it, so it is dropped.
         func entry(_ value: Any) -> CalendarEntry? {
             guard let dict = value as? [String: Any] else { return nil }
-            func int(_ key: String) -> Int? { (dict[key] as? NSNumber)?.intValue }
-            return CalendarEntry(minute: int("Minute"), hour: int("Hour"), day: int("Day"), weekday: int("Weekday"), month: int("Month"))
+            var valid = true
+            func int(_ key: String, _ range: ClosedRange<Int>) -> Int? {
+                guard let value = (dict[key] as? NSNumber)?.intValue else { return nil }
+                if !range.contains(value) { valid = false }
+                return value
+            }
+            let entry = CalendarEntry(minute: int("Minute", 0...59), hour: int("Hour", 0...23), day: int("Day", 1...31),
+                                      weekday: int("Weekday", 0...7), month: int("Month", 1...12))
+            return valid ? entry : nil
         }
         if let list = plist["StartCalendarInterval"] as? [Any] { calendar = list.compactMap(entry) }
         else if let single = plist["StartCalendarInterval"].flatMap(entry) { calendar = [single] }
         interval = (plist["StartInterval"] as? NSNumber)?.intValue
         runAtLoad = plist["RunAtLoad"] as? Bool ?? false
-        // KeepAlive is a bool or a dictionary of conditions. Either way launchd restarts the job.
-        if let bool = plist["KeepAlive"] as? Bool { keepAlive = bool } else { keepAlive = plist["KeepAlive"] is [String: Any] }
+        // KeepAlive is a bool, or a dictionary of conditions under which launchd restarts the job.
+        keepAlive = plist["KeepAlive"] as? Bool ?? false
+        keepAliveConditions = plist["KeepAlive"] is [String: Any]
         watchesPaths = plist["WatchPaths"] != nil || plist["QueueDirectories"] != nil
         onMount = plist["StartOnMount"] as? Bool ?? false
     }
@@ -106,6 +117,7 @@ public struct LaunchSchedule: Equatable, Sendable {
         if calendar.count > 2 { parts.append("and \(calendar.count - 2) more times") }
         if let interval, interval > 0 { parts.append("Every " + Self.duration(interval)) }
         if keepAlive { parts.append("Always running") }
+        if keepAliveConditions { parts.append("Restarts when needed") }
         if watchesPaths { parts.append("When files change") }
         if onMount { parts.append("When a disk mounts") }
         if runAtLoad && !keepAlive { parts.append(parts.isEmpty ? "At login" : "and at login") }
@@ -125,9 +137,16 @@ public struct LaunchSchedule: Equatable, Sendable {
         for _ in 0..<(366 * 4) {
             let parts = cal.dateComponents([.month, .day, .weekday], from: day)
             let weekday = (parts.weekday ?? 1) - 1 // launchd: 0 and 7 are Sunday.
-            let dayMatches = (entry.month.map { $0 == parts.month } ?? true)
-                && (entry.day.map { $0 == parts.day } ?? true)
-                && (entry.weekday.map { $0 % 7 == weekday } ?? true)
+            // As in cron, a Day and a Weekday together fire on either one.
+            let dayOK = entry.day.map { $0 == parts.day }, weekdayOK = entry.weekday.map { $0 % 7 == weekday }
+            let dayMatches = (entry.month.map { $0 == parts.month } ?? true) && {
+                switch (dayOK, weekdayOK) {
+                case let (day?, weekday?): return day || weekday
+                case let (day?, nil): return day
+                case let (nil, weekday?): return weekday
+                case (nil, nil): return true
+                }
+            }()
             if dayMatches {
                 let hours = entry.hour.map { [$0] } ?? Array(0..<24)
                 let minutes = entry.minute.map { [$0] } ?? Array(0..<60)
@@ -155,7 +174,8 @@ public struct LaunchSchedule: Equatable, Sendable {
         case (nil, nil): time = "every minute"
         }
         var when: String
-        if let weekday = entry.weekday { when = "Every " + weekdays[weekday % 7] }
+        if let weekday = entry.weekday, let day = entry.day { when = "Every \(weekdays[weekday % 7]) and on day \(day)" }
+        else if let weekday = entry.weekday { when = "Every " + weekdays[weekday % 7] }
         else if let day = entry.day { when = "On day \(day) of " + (entry.month.map { months[($0 - 1) % 12] } ?? "each month") }
         else if let month = entry.month { when = "Every day in " + months[(month - 1) % 12] }
         else { when = entry.hour == nil ? "" : "Every day" }
@@ -189,18 +209,20 @@ public struct LaunchStatus: Equatable, Sendable {
         return found
     }
 
-    /// Parses `launchctl print-disabled`: lines such as `"com.example.job" => disabled`.
-    public static func parseDisabled(_ output: String) -> Set<String> {
-        var labels = Set<String>()
+    /// Parses `launchctl print-disabled`: lines such as `"com.example.job" => disabled`. True means disabled.
+    /// An override wins over the plist's own `Disabled` key.
+    public static func parseOverrides(_ output: String) -> [String: Bool] {
+        var overrides: [String: Bool] = [:]
         for line in output.split(whereSeparator: \.isNewline) {
             let parts = line.components(separatedBy: "=>")
             guard parts.count == 2 else { continue }
             let value = parts[1].trimmingCharacters(in: .whitespaces)
-            guard value == "disabled" || value == "true" else { continue }
             let label = parts[0].trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-            if !label.isEmpty { labels.insert(label) }
+            guard !label.isEmpty else { continue }
+            if value == "disabled" || value == "true" { overrides[label] = true }
+            else if value == "enabled" || value == "false" { overrides[label] = false }
         }
-        return labels
+        return overrides
     }
 }
 
@@ -251,8 +273,9 @@ public struct CronJob: Equatable, Sendable, Identifiable {
             guard let values = field(text, range: ranges[index], names: index == 3 ? monthNames : index == 4 ? dayNames : [:]) else { return nil }
             fields.append(index == 4 ? Set(values.map { $0 % 7 }) : values)
         }
+        // Vixie cron treats any field that starts with "*", such as "*/2", as unrestricted for the OR rule.
         return CronJob(line: line, command: command, summary: describe(spec), fields: fields,
-                       dayOfMonthAny: spec[2] == "*", dayOfWeekAny: spec[4] == "*")
+                       dayOfMonthAny: spec[2].hasPrefix("*"), dayOfWeekAny: spec[4].hasPrefix("*"))
     }
 
     static let monthNames = ["jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6, "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12]

@@ -27,6 +27,8 @@ struct Thing {
     let verbs: [Verb]
     var path: String?
     var twoLine = true
+    /// How Jev sees this row, or nil to keep it from Jev.
+    var jevDetail: String?
     var primary: Verb? { verbs.first }
 }
 

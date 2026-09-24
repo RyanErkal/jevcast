@@ -16,8 +16,14 @@ final class ScheduledSource: ThingSource {
         ("/Library/LaunchDaemons", .daemon)
     ]
 
+    /// The last scan, reused for a few seconds while the user types a filter.
+    private var cache: (at: Date, scan: Scan)?
+    func invalidate() { cache = nil }
+
     func load(_ filter: String) async throws -> [LauncherResult] {
-        let scan = await Self.scan()
+        let scan: Scan
+        if let cache, Date().timeIntervalSince(cache.at) < 5 { scan = cache.scan }
+        else { scan = await Self.scan(); cache = (Date(), scan) }
         let words = filter.lowercased().split(separator: " ").map(String.init)
         let showApple = words.contains("apple")
         let failingOnly = words.contains { ["failing", "failed", "errors", "broken"].contains($0) }
@@ -35,14 +41,14 @@ final class ScheduledSource: ThingSource {
             if failingOnly, (status?.lastExit ?? 0) == 0 { continue }
             let name = displayName(job)
             if !text.isEmpty, SearchRanking.score(query: text, title: name, aliases: [job.label, job.executable ?? ""]) == nil { continue }
-            let off = job.disabledInPlist || scan.disabled.contains(job.label)
+            let off = scan.overrides[job.label] ?? job.disabledInPlist
             let warnings = job.warnings(programExists: job.executable.map { FileManager.default.fileExists(atPath: $0) } ?? false)
             rows.append(row(job, name: name, status: status, off: off, warnings: warnings, now: now))
         }
-        for job in scan.cron {
+        for (index, job) in scan.cron.enumerated() {
             if failingOnly { continue }
             if !text.isEmpty, SearchRanking.score(query: text, title: job.command) == nil { continue }
-            rows.append(cronRow(job, now: now))
+            rows.append(cronRow(job, index: index, now: now))
         }
         return rows
     }
@@ -52,7 +58,7 @@ final class ScheduledSource: ThingSource {
     struct Scan {
         var jobs: [LaunchJob] = []
         var status: [String: LaunchStatus] = [:]
-        var disabled = Set<String>()
+        var overrides: [String: Bool] = [:]
         var cron: [CronJob] = []
     }
 
@@ -63,7 +69,7 @@ final class ScheduledSource: ThingSource {
         async let crontab = try? CommandRunner.capture(["/usr/bin/crontab", "-l"], allowFailure: true)
         let jobs = await Task.detached(priority: .userInitiated) { readJobs() }.value
         return Scan(jobs: jobs, status: LaunchStatus.parse(await list ?? ""),
-                    disabled: LaunchStatus.parseDisabled(await disabled ?? ""), cron: CronJob.parse(await crontab ?? ""))
+                    overrides: LaunchStatus.parseOverrides(await disabled ?? ""), cron: CronJob.parse(await crontab ?? ""))
     }
 
     nonisolated static func readJobs() -> [LaunchJob] {
@@ -130,7 +136,13 @@ final class ScheduledSource: ThingSource {
             if off {
                 verbs.append(Verb(title: "Turn On", after: .stay) {
                     _ = try await CommandRunner.capture(["/bin/launchctl", "enable", target + "/" + job.label])
-                    _ = try? await CommandRunner.capture(["/bin/launchctl", "bootstrap", target, plist])
+                    // bootstrap fails the same way when the job is already loaded, so check the result instead.
+                    var bootstrapError = ""
+                    do { _ = try await CommandRunner.capture(["/bin/launchctl", "bootstrap", target, plist]) }
+                    catch { bootstrapError = ": " + error.localizedDescription }
+                    if (try? await CommandRunner.capture(["/bin/launchctl", "print", target + "/" + job.label])) == nil {
+                        throw LauncherError("\(job.label) is turned on but did not load" + bootstrapError)
+                    }
                     return "Turned on \(job.label)."
                 })
             } else {
@@ -159,7 +171,9 @@ final class ScheduledSource: ThingSource {
         }
         if job.domain == .daemon {
             verbs.append(Verb(title: "Copy sudo Command to Turn Off", after: .stay) {
-                copyText("sudo launchctl bootout system " + ShellQuote.quote(plist)); return "Command copied. Paste it in Terminal."
+                let service = ShellQuote.quote("system/" + job.label)
+                copyText("sudo launchctl disable \(service) && sudo launchctl bootout \(service)")
+                return "Command copied. Paste it in Terminal. The daemon stays off after a restart."
             })
         }
         verbs.append(Verb(title: "Open Login Items Settings") {
@@ -169,7 +183,7 @@ final class ScheduledSource: ThingSource {
         return verbs
     }
 
-    private func cronRow(_ job: CronJob, now: Date) -> LauncherResult {
+    private func cronRow(_ job: CronJob, index: Int, now: Date) -> LauncherResult {
         var parts = [job.summary]
         if let next = job.nextRun(after: now) { parts.append("next " + next.formatted(.relative(presentation: .named))) }
         parts.append("crontab")
@@ -177,7 +191,7 @@ final class ScheduledSource: ThingSource {
             Verb(title: "Copy Command", after: .stay) { copyText(job.command); return "Command copied." },
             Verb(title: "Copy Line", after: .stay) { copyText(job.line); return "Line copied." }
         ]
-        return LauncherResult(id: job.id, title: job.command, detail: parts.joined(separator: " · "), symbol: "calendar.badge.clock",
+        return LauncherResult(id: job.id + "#\(index)", title: job.command, detail: parts.joined(separator: " · "), symbol: "calendar.badge.clock",
                               action: .thing(Thing(verbs: verbs)), score: 1900)
     }
 }

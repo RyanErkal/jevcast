@@ -19,13 +19,15 @@ extension LauncherModel {
         ("route:timers", "Running timers", "Show and cancel timers", { _ in "timers" }),
         ("route:scheduled", "Scheduled tasks", "Show what runs on a schedule or in the background: launch agents, daemons, cron jobs, login items, and timers", { _ in "scheduled tasks" }),
         ("route:calendar", "Calendar events", "Show upcoming events and meetings, and join video calls", { _ in "calendar" }),
-        ("route:reminders", "Reminders", "Show open reminders and to-dos, and complete them", { _ in "reminders" })
+        ("route:reminders", "Reminders", "Show open reminders and to-dos, and complete them", { _ in "reminders" }),
+        ("route:tabs", "Open browser tabs", "Find, switch to, or close tabs open in the web browser", { _ in "tabs" }),
+        ("route:contacts", "Find a contact", "Find a person to email, message, or call", { q in "contact " + QueryText.remainder(of: q, removing: ["contact", "email", "call", "message", "text", "phone"]) })
     ]
 
     /// Called after every change to the query. Waits for a pause, then answers from
     /// memory or asks Jev. Skips requests that already have one clear local answer.
     func scheduleJev(_ trimmed: String, revision current: UUID) {
-        guard !isFileSearch, !isClipboardSearch, portQuery == nil, trimmed.count >= 2 else { return }
+        guard !isFileSearch, !isClipboardSearch, portQuery == nil, sourceQuery == nil, trimmed.count >= 2 else { return }
         let top = results.first(where: \.isCurrent)?.score ?? 0
         guard top < Self.exactScore else { return }
         // Memory needs no key and no network, so it works even with Jev off.
@@ -115,6 +117,9 @@ extension LauncherModel {
         for command in SystemCommands.all { add("command:" + command.id, command.title, command.detail) }
         add(Self.portsCandidateID, "Stop the process on a port", "Find the app or server listening on a local TCP port and stop it")
         for route in Self.routes { add(route.id, route.title, route.detail) }
+        for row in allContextRows() {
+            if case .thing(let thing) = row.action, let detail = thing.jevDetail { add(row.id, row.title, detail) }
+        }
         for command in preferences.customCommands { add("custom:" + command.id, command.name, "Run the user's own command") }
         for workflow in preferences.workflows { add("workflow:" + workflow.id, workflow.name, "Run the user's saved workflow") }
         for link in preferences.quicklinks {
@@ -163,6 +168,7 @@ extension LauncherModel {
         case .workflow(let workflow): return (workflow.name, "Run the user's saved workflow")
         case .snippet(let snippet): return (snippet.name, "Copy the user's saved text snippet")
         case .menu(let command): return (command.title, "Menu item in the front app")
+        case .thing(let thing): return thing.jevDetail.map { (row.title, $0) }
         default: return nil
         }
     }
@@ -171,6 +177,7 @@ extension LauncherModel {
         if id == Self.portsCandidateID || Self.routes.contains(where: { $0.id == id }) { return true }
         if id.hasPrefix("menu:") { return menuCommands.contains { $0.id == id } }
         if results.contains(where: { $0.id == id }) { return true }
+        if id.hasPrefix("this:") { return allContextRows().contains { $0.id == id } }
         if catalogue.entries.contains(where: { $0.id == id }) { return true }
         if id.hasPrefix("window:") { return WindowAction(rawValue: String(id.dropFirst(7))) != nil }
         if id.hasPrefix("quicklink:") { return preferences.quicklinks.contains { "quicklink:" + $0.id == id } }
@@ -215,6 +222,7 @@ extension LauncherModel {
             return LauncherResult(id: id, title: "Search " + link.name, detail: Self.hostDetail(url), symbol: "link", action: .url(url), score: 0)
         }
         if let command = menuCommands.first(where: { $0.id == id }) { return menuRow(command, score: 0) }
+        if id.hasPrefix("this:") { return allContextRows().first { $0.id == id } }
         return commandRow(id: id, score: 0) ?? extraRow(id: id)
     }
 

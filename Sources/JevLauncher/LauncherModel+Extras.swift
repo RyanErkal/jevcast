@@ -62,6 +62,7 @@ extension LauncherModel {
         }
         if let row = naturalQuicklinkRow(q) { rows.append(row) }
         if let create = CreateQuery.parse(q) { rows.append(createRow(create)) }
+        rows += contextRows(q)
         return rows
     }
 

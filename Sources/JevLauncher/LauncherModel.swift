@@ -228,6 +228,11 @@ final class LauncherModel: ObservableObject {
     var sourceNote: String?
     var isLoadingSource = false
     var sources: [SourceQuery.Kind: ThingSource] = [:]
+    /// The page, files, or selected text in front when the launcher opened.
+    var frontContext: FrontContext?
+    /// Changes each time the launcher opens, so late work from an earlier opening is dropped.
+    var visibleSession = UUID()
+    var sourceTask: Task<Void, Never>?
     /// The row that is waiting for a second Return.
     @Published var pendingConfirmID: String?
     private var subscriptions = Set<AnyCancellable>()
@@ -263,7 +268,7 @@ final class LauncherModel: ObservableObject {
         previousFileResults = []; fileResults = []; promotedID = nil; semanticResult = nil; revision = UUID()
         portQuery = nil; listeners = []; portDetails = [:]; stoppedNotice = nil; isLoadingPorts = false; pendingConfirmID = nil
         sourceQuery = nil; sourceRows = []; sourceProblem = nil; sourceNote = nil; isLoadingSource = false
-        jevPick = nil; menuCommands = []
+        jevPick = nil; menuCommands = []; frontContext = nil; visibleSession = UUID()
         rebuild()
         ShortcutsCatalogue.shared.refreshIfStale()
         startWork?.cancel()
@@ -273,6 +278,7 @@ final class LauncherModel: ObservableObject {
             if let targetApp {
                 self.windows.captureTarget(appPID: targetApp.processIdentifier)
                 self.loadMenuCommands(for: targetApp)
+                self.loadContext(for: targetApp)
             }
             if self.preferences.voiceEnabled && self.acceptsSpeech && self.speech.permissionsGranted { self.speech.start() }
         }
@@ -290,7 +296,7 @@ final class LauncherModel: ObservableObject {
         if !speech.isStarting && !speech.isListening { voiceError = speech.status }
     }
     func end() {
-        visible = false; revision = UUID()
+        visible = false; revision = UUID(); sourceTask?.cancel()
         startWork?.cancel(); speech.stop(); work?.cancel(); aiWork?.cancel(); files.stop()
         aiStatus = ""; aiError = nil
     }
@@ -305,7 +311,12 @@ final class LauncherModel: ObservableObject {
         } else { previousFileResults = [] }
         query = text; message = nil; manualSelection = false; fileResults = []; promotedID = nil; semanticResult = nil
         pendingConfirmID = nil; portQuery = PortQuery.parse(text); listeners = []; portDetails = [:]; stoppedNotice = nil; jevPick = nil
-        sourceQuery = isFileSearch || portQuery != nil ? nil : SourceQuery.parse(text); sourceRows = []; sourceProblem = nil; sourceNote = nil
+        let previousKind = sourceQuery?.kind
+        sourceQuery = isFileSearch || portQuery != nil ? nil : SourceQuery.parse(text)
+        if sourceQuery.map({ source($0.kind) == nil }) ?? false { sourceQuery = nil }
+        // The same source keeps its rows on screen, not runnable, until the new filter loads.
+        sourceRows = sourceQuery?.kind == previousKind ? sourceRows.map { var row = $0; row.isCurrent = false; return row } : []
+        sourceProblem = nil; sourceNote = nil; sourceTask?.cancel()
         revision = UUID(); let current = revision
         work?.cancel(); aiWork?.cancel(); files.stop(); aiStatus = ""; aiError = nil
         if typed { voiceError = nil }
@@ -315,7 +326,7 @@ final class LauncherModel: ObservableObject {
         // Clipboard filters and keyword searches with text stay local and skip file search.
         guard !trimmed.isEmpty, !isClipboardSearch, Quicklink.match(trimmed, in: preferences.quicklinks)?.query.isEmpty ?? true else { return }
         if let portQuery { loadPorts(portQuery, revision: current, promoteFirst: false) }
-        if sourceQuery != nil { loadSource(revision: current); return }
+        if sourceQuery != nil { loadSource(revision: current, delay: 120_000_000) }
         if portQuery == nil && (isFileSearch || trimmed.count >= 3) {
             work = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 120_000_000)

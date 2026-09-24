@@ -381,9 +381,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     }
     @objc func checkForUpdates() { updates.checkAndReport() }
     @objc func showAbout() { AboutPanel.show() }
-    @objc func openWebsite() { NSWorkspace.shared.open(AppIdentity.website) }
-    @objc func openSourceCode() { NSWorkspace.shared.open(AppIdentity.repository) }
-    @objc func reportIssue() { NSWorkspace.shared.open(AppIdentity.issues) }
+    @objc func openWebsite() { Frontmost.open(AppIdentity.website) }
+    @objc func openSourceCode() { Frontmost.open(AppIdentity.repository) }
+    @objc func reportIssue() { Frontmost.open(AppIdentity.issues) }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { show(); return true }
     func applicationWillTerminate(_ notification: Notification) {
         backdrop.close(); resultActions.dismiss(); preview.close()

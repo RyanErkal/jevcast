@@ -20,7 +20,7 @@ final class TaskRunsSource: ThingSource {
                 copyText(run.file.flatMap { try? String(contentsOfFile: $0, encoding: .utf8) } ?? preview); return "Result copied."
             })
             if let file = run.file {
-                verbs.append(Verb(title: "Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file)]); return nil })
+                verbs.append(Verb(title: "Show in Finder") { Frontmost.reveal([URL(fileURLWithPath: file)]); return nil })
             }
             return LauncherResult(id: "lunarun:" + run.id, title: run.taskName,
                                   detail: run.date.formatted(.relative(presentation: .named)) + " · " + preview,

@@ -151,7 +151,7 @@ extension LauncherModel {
 
     func openThenArrange(_ app: AppEntry, _ action: WindowAction) {
         let config = NSWorkspace.OpenConfiguration(); config.activates = true
-        NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: app.path), configuration: config) { [weak self] running, error in
+        Frontmost.openApplication(at: URL(fileURLWithPath: app.path), configuration: config) { [weak self] running, error in
             Task { @MainActor in
                 guard let self else { return }
                 if let error { self.showFailure(error.localizedDescription); return }
@@ -231,9 +231,9 @@ extension LauncherModel {
                         guard let app = self.catalogue.entries.first(where: { $0.id == step.value }) else {
                             throw LauncherError("An app in \(workflow.name) is no longer installed.")
                         }
-                        if let url = app.launchURL.flatMap(URL.init(string:)) { NSWorkspace.shared.open(url); continue }
+                        if let url = app.launchURL.flatMap(URL.init(string:)) { Frontmost.open(url); continue }
                         let config = NSWorkspace.OpenConfiguration(); config.activates = true
-                        let running = try await NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: app.path), configuration: config)
+                        let running = try await Frontmost.openApplication(at: URL(fileURLWithPath: app.path), configuration: config)
                         lastApp = (running.processIdentifier, app.name)
                     case .window:
                         guard let action = WindowAction(rawValue: step.value) else { continue }

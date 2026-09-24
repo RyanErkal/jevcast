@@ -29,7 +29,7 @@ struct LunaResultView: View {
                 Spacer()
                 Button("Copy") { copyText(text) }
                 if let file = run.file {
-                    Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file)]) }
+                    Button("Show in Finder") { Frontmost.reveal([URL(fileURLWithPath: file)]) }
                 }
             }
             .font(.callout)
@@ -65,7 +65,7 @@ struct LunaTaskSettings: View {
         }
         Button("Open Results Folder") {
             try? FileManager.default.createDirectory(at: LunaTaskCenter.folder, withIntermediateDirectories: true)
-            NSWorkspace.shared.open(LunaTaskCenter.folder)
+            Frontmost.open(LunaTaskCenter.folder)
         }
         .controlSize(.small)
     }

@@ -61,7 +61,7 @@ struct MailSetupView: View {
                 Text("Nothing leaves your Mac unless you use Luna on a message.").font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("Open Full Disk Access") { Permissions.open("Privacy_AllFiles") }
-                    Button("Show Jevcast in Finder") { NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL]) }
+                    Button("Show Jevcast in Finder") { Frontmost.reveal([Bundle.main.bundleURL]) }
                     Button("Restart Jevcast") { Relaunch.now() }.keyboardShortcut(.defaultAction)
                 }
             } else {

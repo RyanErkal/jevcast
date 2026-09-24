@@ -76,7 +76,7 @@ final class UpdateChecker: ObservableObject {
                 alert.informativeText = "You have version \(currentVersion). The download page opens in your browser."
                 alert.addButton(withTitle: "Open Download Page")
                 alert.addButton(withTitle: "Later")
-                if alert.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.open(release.page) }
+                if alert.runModal() == .alertFirstButtonReturn { Frontmost.open(release.page) }
             case .current:
                 alert.messageText = "\(AppIdentity.name) is up to date"
                 alert.informativeText = "Version \(currentVersion) is the newest version."

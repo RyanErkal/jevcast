@@ -599,27 +599,27 @@ final class LauncherModel: ObservableObject {
         do {
             switch result.action {
             case .app(let app) where app.launchURL != nil:
-                guard let url = app.launchURL.flatMap(URL.init(string:)), NSWorkspace.shared.open(url) else { throw LauncherError("That settings pane could not be opened.") }
+                guard let url = app.launchURL.flatMap(URL.init(string:)), Frontmost.open(url) else { throw LauncherError("That settings pane could not be opened.") }
             case .app(let app):
                 guard FileManager.default.fileExists(atPath: app.path) else { throw LauncherError("This app moved or was removed. Refresh apps in Settings › Search › Advanced.") }
                 let url = URL(fileURLWithPath: app.path)
                 let config = NSWorkspace.OpenConfiguration(); config.activates = true
-                NSWorkspace.shared.openApplication(at: url, configuration: config) { [weak self] _, error in
+                Frontmost.openApplication(at: url, configuration: config) { [weak self] _, error in
                     guard let error else { return }
                     Task { @MainActor in self?.showFailure(error.localizedDescription) }
                 }
             case .file(let file):
-                guard NSWorkspace.shared.open(URL(fileURLWithPath: file.path)) else { throw LauncherError("The file could not be opened.") }
+                guard Frontmost.open(URL(fileURLWithPath: file.path)) else { throw LauncherError("The file could not be opened.") }
             case .window(let action, let pid): try windows.execute(action, appPID: pid)
             case .url(let url):
-                guard NSWorkspace.shared.open(url) else { throw LauncherError("The URL could not be opened.") }
+                guard Frontmost.open(url) else { throw LauncherError("The URL could not be opened.") }
             case .copy(let text): copy(text)
             case .clipboard(let item): clipboard.restore(item)
             case .command(let command): run(command)
             case .custom(let command, let input): run(command, input: input)
             case .stopProcess(let listener):
                 // Return opens the server. ⌫ stops it, without closing the launcher.
-                guard let url = URL(string: "http://localhost:\(listener.port)"), NSWorkspace.shared.open(url) else { throw LauncherError("The browser could not open port \(listener.port).") }
+                guard let url = URL(string: "http://localhost:\(listener.port)"), Frontmost.open(url) else { throw LauncherError("The browser could not open port \(listener.port).") }
             case .appThenWindow(let app, let action): openThenArrange(app, action)
             case .shortcut(let name): runShortcut(name)
             case .workflow(let workflow): run(workflow)
@@ -656,7 +656,7 @@ final class LauncherModel: ObservableObject {
     }
     func revealSelected() {
         guard let path = selected?.path else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]); onClose?(false)
+        Frontmost.reveal([URL(fileURLWithPath: path)]); onClose?(false)
     }
     func copyPath() { if let path = selected?.path { copy(path); message = "Path copied" } }
     func copy(_ text: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }

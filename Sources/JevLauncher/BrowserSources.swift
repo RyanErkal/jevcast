@@ -150,8 +150,8 @@ final class HistorySource: ThingSource {
             Verb(title: "Open in " + (browser?.name ?? "Browser")) {
                 guard let url = URL(string: visit.url) else { return nil }
                 if let browser, let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: browser.bundleID) {
-                    _ = try await NSWorkspace.shared.open([url], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
-                } else { NSWorkspace.shared.open(url) }
+                    _ = try await Frontmost.open([url], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
+                } else { Frontmost.open(url) }
                 return nil
             },
             Verb(title: "Copy URL", after: .stay) { copyText(visit.url); return "URL copied." },

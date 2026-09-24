@@ -138,7 +138,7 @@ final class ScheduledSource: ThingSource {
         let plist = job.plistPath
         var verbs: [Verb] = [
             Verb(title: "Reveal in Finder") {
-                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: plist)]); return nil
+                Frontmost.reveal([URL(fileURLWithPath: plist)]); return nil
             }
         ]
         if job.domain.isAgent {
@@ -169,14 +169,14 @@ final class ScheduledSource: ThingSource {
             }
         }
         verbs.append(Verb(title: "Open Property List") {
-            NSWorkspace.shared.open(URL(fileURLWithPath: plist)); return nil
+            Frontmost.open(URL(fileURLWithPath: plist)); return nil
         })
         for log in Set([job.standardOutPath, job.standardErrorPath].compactMap { $0 }).sorted()
         where FileManager.default.fileExists(atPath: log) {
             verbs.append(Verb(title: "Open Log " + (log as NSString).lastPathComponent) {
                 let console = URL(fileURLWithPath: "/System/Applications/Utilities/Console.app")
                 let config = NSWorkspace.OpenConfiguration(); config.activates = true
-                _ = try await NSWorkspace.shared.open([URL(fileURLWithPath: log)], withApplicationAt: console, configuration: config)
+                _ = try await Frontmost.open([URL(fileURLWithPath: log)], withApplicationAt: console, configuration: config)
                 return nil
             })
         }
@@ -192,7 +192,7 @@ final class ScheduledSource: ThingSource {
             })
         }
         verbs.append(Verb(title: "Open Login Items Settings") {
-            if let url = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension") { NSWorkspace.shared.open(url) }
+            if let url = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension") { Frontmost.open(url) }
             return nil
         })
         return verbs
@@ -216,7 +216,7 @@ final class ScheduledSource: ThingSource {
         })
         verbs.append(Verb(title: "Open Results Folder") {
             try? FileManager.default.createDirectory(at: LunaTaskCenter.folder, withIntermediateDirectories: true)
-            NSWorkspace.shared.open(LunaTaskCenter.folder); return nil
+            Frontmost.open(LunaTaskCenter.folder); return nil
         })
         verbs.append(Verb(title: "Delete Task", after: .stay) { center.remove(task.id); return "Deleted \(task.name)." })
         let symbol = !refused.isEmpty || last?.succeeded == false ? "exclamationmark.triangle" : task.enabled ? "sparkles" : "pause.circle"

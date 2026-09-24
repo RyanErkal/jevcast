@@ -127,7 +127,7 @@ extension LauncherModel {
                 rows.append(row("open-in:" + other.bundleID, "Open This Page in \(other.name)", "arrow.up.forward.app",
                                 jev: "Open the current web page in the \(other.name) browser",
                                 verb: Verb(title: "Open") {
-                                    _ = try await NSWorkspace.shared.open([link], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
+                                    _ = try await Frontmost.open([link], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
                                     return nil
                                 }))
             }
@@ -149,7 +149,7 @@ extension LauncherModel {
                             verb: Verb(title: "Search") {
                                 var components = URLComponents(string: self.preferences.webEngine == "DuckDuckGo" ? "https://duckduckgo.com/" : "https://www.google.com/search")!
                                 components.queryItems = [URLQueryItem(name: "q", value: String(text.prefix(500)))]
-                                if let url = components.url { NSWorkspace.shared.open(url) }
+                                if let url = components.url { Frontmost.open(url) }
                                 return nil
                             }))
             rows.append(row("remind-text", "Remind Me About Selected Text Tomorrow", "checklist", jev: "Make a reminder for tomorrow with the selected text",

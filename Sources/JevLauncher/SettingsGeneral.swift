@@ -37,7 +37,7 @@ struct GeneralSettings: View {
                     Text(updateStatus).font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     if let release = updates.available {
-                        Button("Download \(release.version)") { NSWorkspace.shared.open(release.page) }.controlSize(.small)
+                        Button("Download \(release.version)") { Frontmost.open(release.page) }.controlSize(.small)
                     } else {
                         Button("Check Now") { updates.checkAndReport() }.controlSize(.small).disabled(updates.state == .checking)
                     }

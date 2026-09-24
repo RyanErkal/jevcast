@@ -86,12 +86,12 @@ final class ResultActions {
         case .stopProcess(let listener):
             let details = model.portDetails[listener.pid]
             add("Open http://localhost:\(listener.port)") {
-                if let url = URL(string: "http://localhost:\(listener.port)") { NSWorkspace.shared.open(url) }
+                if let url = URL(string: "http://localhost:\(listener.port)") { Frontmost.open(url) }
                 model.onClose?(false)
             }
             if let folder = details?.folder {
                 add("Show Folder in Finder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: folder)]); model.onClose?(false)
+                    Frontmost.reveal([URL(fileURLWithPath: folder)]); model.onClose?(false)
                 }
             }
             menu.addItem(.separator())

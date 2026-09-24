@@ -45,11 +45,11 @@ final class CalendarSource: ThingSource {
         let eventID = event.eventIdentifier
         let id = eventID ?? UUID().uuidString
         var verbs: [Verb] = []
-        if let link { verbs.append(Verb(title: "Join Call") { NSWorkspace.shared.open(link); return nil }) }
+        if let link { verbs.append(Verb(title: "Join Call") { Frontmost.open(link); return nil }) }
         verbs.append(Verb(title: "Open in Calendar") {
             // ical://ekevent is not documented. Without an identifier, open Calendar itself.
             let url = eventID.flatMap { URL(string: "ical://ekevent/\($0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? $0)?method=show&options=more") }
-            if url.map({ NSWorkspace.shared.open($0) }) != true { Self.openApp("com.apple.iCal") }
+            if url.map({ Frontmost.open($0) }) != true { Self.openApp("com.apple.iCal") }
             return nil
         })
         // Only the organizer's own events move. Moving an invitation makes a local change the server may undo.
@@ -97,7 +97,7 @@ final class CalendarSource: ThingSource {
 
     static func openApp(_ bundleID: String) {
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return }
-        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+        Frontmost.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
 }
 
@@ -152,7 +152,7 @@ final class RemindersSource: ThingSource {
             },
             Verb(title: "Open in Reminders") {
                 let url = URL(string: "x-apple-reminderkit://REMCDReminder/" + id)
-                if url.map({ NSWorkspace.shared.open($0) }) != true { CalendarSource.openApp("com.apple.reminders") }
+                if url.map({ Frontmost.open($0) }) != true { CalendarSource.openApp("com.apple.reminders") }
                 return nil
             },
             Verb(title: "Move to Tomorrow", after: .stay) { [store] in
@@ -228,23 +228,23 @@ final class ContactsSource: ThingSource {
         var verbs: [Verb] = []
         for email in person.emails.prefix(3) {
             verbs.append(Verb(title: "Email " + email) { [compose] in
-                if let compose { compose(email) } else if let url = URL(string: "mailto:" + email) { NSWorkspace.shared.open(url) }
+                if let compose { compose(email) } else if let url = URL(string: "mailto:" + email) { Frontmost.open(url) }
                 return nil
             })
         }
         for phone in person.phones.prefix(3) {
             let digits = phone.filter { $0.isNumber || $0 == "+" }
             verbs.append(Verb(title: "Message " + phone) {
-                if let url = URL(string: "sms:" + digits) { NSWorkspace.shared.open(url) }
+                if let url = URL(string: "sms:" + digits) { Frontmost.open(url) }
                 return nil
             })
             verbs.append(Verb(title: "Call " + phone) {
-                if let url = URL(string: "tel:" + digits) { NSWorkspace.shared.open(url) }
+                if let url = URL(string: "tel:" + digits) { Frontmost.open(url) }
                 return nil
             })
         }
         verbs.append(Verb(title: "Open in Contacts") {
-            if let url = URL(string: "addressbook://" + person.id) { NSWorkspace.shared.open(url) }
+            if let url = URL(string: "addressbook://" + person.id) { Frontmost.open(url) }
             return nil
         })
         for email in person.emails.prefix(3) { verbs.append(Verb(title: "Copy " + email, after: .stay) { copyText(email); return "Email copied." }) }

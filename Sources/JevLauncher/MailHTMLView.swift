@@ -41,7 +41,7 @@ struct MailHTMLView: NSViewRepresentable {
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
             // Only the message itself loads. A click on a web or mail link opens outside Jevcast.
             if action.navigationType == .linkActivated, let url = action.request.url {
-                if ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") { NSWorkspace.shared.open(url) }
+                if ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") { Frontmost.open(url) }
                 decisionHandler(.cancel)
                 return
             }

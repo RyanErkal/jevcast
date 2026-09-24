@@ -29,6 +29,6 @@ enum Permissions {
 
     static func open(_ pane: String) {
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?" + pane) else { return }
-        NSWorkspace.shared.open(url)
+        Frontmost.open(url)
     }
 }

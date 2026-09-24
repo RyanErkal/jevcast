@@ -81,7 +81,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     @objc private func toggleLauncher() { toggle() }
     @objc private func toggleVoice() { preferences.voiceEnabled.toggle() }
-    @objc private func openUpdate() { if let release = updates.available { NSWorkspace.shared.open(release.page) } }
+    @objc private func openUpdate() { if let release = updates.available { Frontmost.open(release.page) } }
     @objc private func openPermission(_ sender: NSMenuItem) {
         guard let permission = sender.representedObject as? Permission else { return }
         permission.openSystemSettings()

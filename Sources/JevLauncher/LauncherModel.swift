@@ -420,10 +420,11 @@ final class LauncherModel: ObservableObject {
             rows += compoundRows(q, among: rows)
         }
         let answer = isFileSearch ? nil : (Calculator.evaluate(q) ?? QueryText.substitutingAnswer(q, last: answers.first).flatMap(Calculator.evaluate))
+        let clockAnswer = isFileSearch || answer != nil ? nil : TimeZoneQuery.evaluate(q)
         // A finished sum or conversion is the answer. Beside it, keep only whole-name and
         // prefix matches (90 and up), so "12 * (8 + 2)" does not list "Left Two Thirds"
         // for its "2". File rows already had to match every word.
-        if answer != nil && q.contains(where: \.isNumber) {
+        if (answer != nil && q.contains(where: \.isNumber)) || clockAnswer != nil {
             rows.removeAll { row in
                 if case .file = row.action { return false }
                 return row.score < 90
@@ -441,6 +442,7 @@ final class LauncherModel: ObservableObject {
             let kind = q.rangeOfCharacter(from: .letters) == nil ? "Calculator" : "Conversion"
             rows.append(LauncherResult(id: "calculator", title: answer, detail: kind, symbol: "equal.square", action: .copy(answer), score: 2000))
         }
+        if let clockAnswer { rows.append(Self.clockRow(clockAnswer)) }
         if !isFileSearch, let url = Self.directURL(q) {
             rows.append(LauncherResult(id: "url", title: "Open " + q, detail: "", symbol: "globe", action: .url(url), score: 1500))
         }

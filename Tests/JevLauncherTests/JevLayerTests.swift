@@ -76,3 +76,30 @@ final class JevLayerTests: XCTestCase {
         XCTAssertEqual(jev.calls.count, 2)
     }
 }
+
+/// Jev stand-in that sees the query, so it can tell the source question from the target question.
+private final class ClockJev: JevChoosing, @unchecked Sendable {
+    func choose(query: String, candidates: [JevCandidate], apiKey: String) async throws -> String? {
+        if query.hasPrefix("The place the time is in") { return candidates.first { $0.title == "New York" }?.id }
+        if query.hasPrefix("The place to give the time in") { return candidates.first { $0.title == "Ireland" }?.id }
+        return candidates.first { $0.title == "Convert a time between places" }?.id
+    }
+}
+
+final class ClockJevTests: XCTestCase {
+    @MainActor func testJevChoosesPlacesAndCodeConverts() async throws {
+        let suite = "JevLauncherTests." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = Preferences(defaults: defaults)
+        preferences.voiceEnabled = false; preferences.jevEnabled = true; preferences.jevLayered = false; preferences.fileFolders = []
+        let model = LauncherModel(preferences: preferences, catalogue: AppCatalogue(loadCache: false), jev: ClockJev(),
+                                  keys: JevKeyCache(key: "test-key"), clipboard: ClipboardHistory(pasteboard: FakePasteboard()))
+        model.begin(); defer { model.end() }
+        model.updateQuery("what is 6pm for my mate in cork if im in georgia", typed: true)
+        try await until(timeout: 3) { model.aiStatus == "Jev matched" || model.aiStatus == "No clear AI match" }
+        XCTAssertEqual(model.selected?.id, "clock")
+        XCTAssertTrue(model.selected?.detail.contains("6:00 PM") ?? false)
+        XCTAssertTrue(model.selected?.detail.contains("New York → Ireland") ?? false)
+    }
+}

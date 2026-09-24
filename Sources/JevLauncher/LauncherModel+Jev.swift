@@ -76,6 +76,17 @@ extension LauncherModel {
                 ? layeredChoice(text, candidates: candidates, ids: ids, key: key, revision: current)
                 : jev.choose(query: text, candidates: candidates, apiKey: key).flatMap { ids[$0] }
             guard !Task.isCancelled, visible, self.revision == current else { return }
+            if chosen == Self.clockCandidateID {
+                // Not cached or remembered: the answer depends on the time of day.
+                let row = try await clockRow(for: text, key: key)
+                guard !Task.isCancelled, visible, self.revision == current else { return }
+                aiStatus = row == nil ? "No clear AI match" : "Jev matched"
+                guard let row else { return }
+                usage?.recordMatch()
+                semanticResult = row; promotedID = row.id; jevPick = (row.id, false)
+                rebuild()
+                return
+            }
             // A pick that moves an app Jev chose is not cached: the ID alone would move the active window.
             if jevWindowTarget == nil { replyCache[LearnedIntents.normalize(text)] = (chosen, Date()) }
             aiStatus = chosen == nil ? "No clear AI match" : "Jev matched"
@@ -132,6 +143,7 @@ extension LauncherModel {
         // 3. Every action, so loose phrasing still has a target.
         for action in WindowAction.allCases { add("window:" + action.rawValue, action.title, "Arrange the active window") }
         for command in SystemCommands.all { add("command:" + command.id, command.title, command.detail) }
+        if let clock = clockCandidate() { add(clock.id, clock.title, clock.detail) }
         add(Self.portsCandidateID, "Stop the process on a port", "Find the app or server listening on a local TCP port and stop it")
         for route in Self.routes { add(route.id, route.title, route.detail) }
         if lunaReady { add(Self.askID, "Ask Luna", "Answer a question, explain something, or write new text with the Luna writing model") }

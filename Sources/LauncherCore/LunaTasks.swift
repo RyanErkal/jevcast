@@ -166,7 +166,7 @@ public enum LunaTaskQuery {
 
     /// "brief me on my meetings" is a request; "standup notes" and "forecast london" are searches.
     static let requestVerbs: Set<String> = ["brief", "summarise", "summarize", "check", "remind", "tell", "give", "write", "plan", "list",
-                                            "review", "send", "draft", "suggest", "make", "prepare", "find", "show", "read", "explain", "what", "how", "create"]
+                                            "review", "send", "draft", "suggest", "make", "prepare", "find", "show", "read", "explain", "create"]
     static func isRequest(_ prompt: String) -> Bool {
         let words = prompt.lowercased().split(separator: " ").map(String.init)
         return words.count >= 2 && words.contains { requestVerbs.contains($0) }

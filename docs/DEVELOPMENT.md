@@ -31,6 +31,7 @@ The package has two targets.
   - `Mail*.swift`: the mail window. `MailStore.swift` reads Apple Mail's index and `.emlx` files; `MailActions.swift` changes mail through Apple Mail; `MIMEMessage.swift` and `MailIndex.swift` in LauncherCore parse messages and hold Mail's fixed AppleScript.
   - `SQLiteReader.swift`: a read-only SQLite reader with bound values.
   - `LunaTaskCenter.swift`, `LunaTaskViews.swift`, `TaskRunsSource.swift`: scheduled Luna tasks, their results, and the result window. `LunaTasks.swift` in LauncherCore parses schedules and decides when a task is due.
+  - `Dictation*.swift`, `AudioCapture.swift`, `AppleSpeechEngine.swift`, `TextInserter.swift`, `SettingsDictation.swift`: hold Right Command to dictate (macOS 26). Audio stays in memory; transcripts are JSON Lines in `~/Library/Application Support/Jevcast/Dictation/`. `DictationHold.swift`, `DictationText.swift`, and `TranscriptStore.swift` in LauncherCore hold the key state machine, local clean-up, and the history files.
   - `JevLayers.swift` in LauncherCore: the kinds of request for layered Jev matching, and how the two first answers are combined.
 
 ## Rename the app

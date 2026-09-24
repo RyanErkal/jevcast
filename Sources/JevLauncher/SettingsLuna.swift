@@ -52,6 +52,9 @@ struct LunaSettings: View {
                 Toggle("Mail messages, for summaries and reply drafts", isOn: $preferences.lunaSendsMail)
                 Toggle("Calendar and reminders, for scheduled tasks", isOn: $preferences.lunaSendsCalendar)
                 Toggle("Unread mail list (senders, subjects, previews), for scheduled tasks", isOn: $preferences.lunaSendsUnreadMail)
+                if DictationEngines.isSupported {
+                    Toggle("Dictation transcripts, to fix punctuation and remove fillers", isOn: $preferences.lunaSendsDictation)
+                }
                 Text("Task results show in notifications, which can appear on the lock screen. Change that in System Settings › Notifications.")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("File paths, clipboard history, and audio are never sent.").font(.caption).foregroundStyle(.secondary)

@@ -64,7 +64,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>NSApplicationSupportsSecureRestorableState</key><true/>
 <key>NSHumanReadableCopyright</key><string>© 2026 Ryan Erkal. MIT License.</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
-<key>NSMicrophoneUsageDescription</key><string>Transcribe your voice while the launcher is open. Audio is not saved.</string>
+<key>NSMicrophoneUsageDescription</key><string>Transcribe your voice while the launcher is open, or while you hold Right Command to dictate. Audio is not saved.</string>
 <key>NSSpeechRecognitionUsageDescription</key><string>Turn spoken launcher commands into text using on-device speech recognition.</string>
 <key>NSCalendarsFullAccessUsageDescription</key><string>List your events, join calls, and add events you type in the launcher.</string>
 <key>NSRemindersFullAccessUsageDescription</key><string>List, complete, and add reminders from the launcher.</string>

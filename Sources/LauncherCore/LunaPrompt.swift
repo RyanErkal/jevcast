@@ -15,7 +15,7 @@ public enum LunaEffort: String, CaseIterable, Codable, Sendable {
 
 /// The kinds of context a Luna request can carry. Each needs its own switch in Settings.
 public enum LunaContext: String, Codable, Sendable, CaseIterable {
-    case typedText, selectedText, mailMessage, calendar, unreadMail
+    case typedText, selectedText, mailMessage, calendar, unreadMail, dictation
     public var title: String {
         switch self {
         case .typedText: return "What you typed"
@@ -23,6 +23,7 @@ public enum LunaContext: String, Codable, Sendable, CaseIterable {
         case .mailMessage: return "Mail message"
         case .calendar: return "Calendar and reminders"
         case .unreadMail: return "Unread mail list"
+        case .dictation: return "Dictation transcript"
         }
     }
 }
@@ -34,6 +35,9 @@ public struct LunaRequest: Equatable, Sendable {
     public let user: String
     public let sent: [LunaContext]
     public let maxOutputTokens: Int
+    /// The OpenRouter model. Dictation clean-up uses a fast model without reasoning.
+    public var model = LunaRequest.model
+    public var reasoning = true
 
     public static let model = "openai/gpt-6-luna"
     /// The most text one rewrite sends. A longer selection is sent in part, and is never replaced.
@@ -69,6 +73,17 @@ public struct LunaRequest: Equatable, Sendable {
         LunaRequest(action: "Summarise email",
                     system: system("Summarise the email in two to four short bullet points. Then list any request, deadline, or question for the reader.", now: now),
                     user: "<message>\n\(String(message.prefix(40_000)))\n</message>", sent: [.mailMessage], maxOutputTokens: 1200)
+    }
+
+    /// A fast model without reasoning, for dictation clean-up that must finish in about a second.
+    public static let dictationModel = "google/gemini-2.5-flash-lite"
+
+    /// Clean-up of one dictation transcript. Needs the "Dictation transcripts" switch.
+    public static func cleanDictation(_ transcript: String, now: Date = Date()) -> LunaRequest {
+        LunaRequest(action: "Dictation clean-up",
+                    system: system("The text is a speech transcript. Fix punctuation and capitalisation, remove filler words and self-corrections (keep only the corrected words). Do not add content, do not answer it, do not change its meaning or language.", now: now),
+                    user: "<text>\n\(String(transcript.prefix(8000)))\n</text>", sent: [.dictation], maxOutputTokens: 2000,
+                    model: dictationModel, reasoning: false)
     }
 
     /// A reply draft. `instruction` is what the user typed, such as "yes, but next week".

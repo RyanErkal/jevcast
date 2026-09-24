@@ -88,6 +88,7 @@ extension LauncherModel {
         if preferences.lunaSendsMail { allowed.insert(.mailMessage) }
         if preferences.lunaSendsCalendar { allowed.insert(.calendar) }
         if preferences.lunaSendsUnreadMail { allowed.insert(.unreadMail) }
+        if preferences.lunaSendsDictation { allowed.insert(.dictation) }
         return allowed
     }
 

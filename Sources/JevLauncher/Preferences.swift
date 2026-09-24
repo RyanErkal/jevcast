@@ -18,6 +18,11 @@ final class Preferences: ObservableObject {
     @Published var lunaSendsMail: Bool { didSet { defaults.set(lunaSendsMail, forKey: "lunaSendsMail") } }
     @Published var lunaSendsCalendar: Bool { didSet { defaults.set(lunaSendsCalendar, forKey: "lunaSendsCalendar") } }
     @Published var lunaSendsUnreadMail: Bool { didSet { defaults.set(lunaSendsUnreadMail, forKey: "lunaSendsUnreadMail") } }
+    /// Luna cleans dictation transcripts. Off until the user turns it on.
+    @Published var lunaSendsDictation: Bool { didSet { defaults.set(lunaSendsDictation, forKey: "lunaSendsDictation") } }
+    /// Hold Right Command to dictate into the front app. Off until the user turns it on.
+    @Published var dictationEnabled: Bool { didSet { defaults.set(dictationEnabled, forKey: "dictationEnabled") } }
+    @Published var dictationRetention: DictationRetention { didSet { defaults.set(dictationRetention.rawValue, forKey: "dictationRetention") } }
     @Published var edgeSnapping: Bool { didSet { defaults.set(edgeSnapping, forKey: "edgeSnapping") } }
     @Published var windowShortcuts: Bool { didSet { defaults.set(windowShortcuts, forKey: "windowShortcuts") } }
     @Published var gap: Double { didSet { defaults.set(gap, forKey: "gap") } }
@@ -71,6 +76,9 @@ final class Preferences: ObservableObject {
         lunaSendsMail = d.bool(forKey: "lunaSendsMail")
         lunaSendsCalendar = d.bool(forKey: "lunaSendsCalendar")
         lunaSendsUnreadMail = d.bool(forKey: "lunaSendsUnreadMail")
+        lunaSendsDictation = d.bool(forKey: "lunaSendsDictation")
+        dictationEnabled = d.bool(forKey: "dictationEnabled")
+        dictationRetention = d.string(forKey: "dictationRetention").flatMap(DictationRetention.init(rawValue:)) ?? .days30
         edgeSnapping = d.bool(forKey: "edgeSnapping")
         windowShortcuts = d.bool(forKey: "windowShortcuts")
         gap = d.object(forKey: "gap") as? Double ?? 8

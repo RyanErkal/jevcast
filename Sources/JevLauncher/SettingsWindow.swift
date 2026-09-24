@@ -7,22 +7,24 @@ import SwiftUI
 @MainActor
 final class SettingsWindow: NSWindowController, NSToolbarDelegate {
     enum Tab: String, CaseIterable {
-        case general, search, commands, windows, input, luna, usage
+        case general, search, commands, windows, input, dictation, luna, usage
         var title: String {
             switch self {
             case .general: return "General"; case .search: return "Search"
             case .commands: return "Commands"; case .windows: return "Windows"
-            case .input: return "Input"; case .luna: return "Luna"; case .usage: return "Usage"
+            case .input: return "Input"; case .dictation: return "Dictation"; case .luna: return "Luna"; case .usage: return "Usage"
             }
         }
         var symbol: String {
             switch self {
             case .general: return "gearshape"; case .search: return "magnifyingglass"
             case .commands: return "terminal"; case .windows: return "macwindow"
-            case .input: return "waveform"; case .luna: return "sparkles"; case .usage: return "chart.bar"
+            case .input: return "waveform"; case .dictation: return "mic"; case .luna: return "sparkles"; case .usage: return "chart.bar"
             }
         }
         var identifier: NSToolbarItem.Identifier { NSToolbarItem.Identifier(rawValue) }
+        /// Dictation needs macOS 26, so its tab is hidden on older systems.
+        static var shown: [Tab] { allCases.filter { $0 != .dictation || DictationEngines.isSupported } }
     }
     static let width: CGFloat = 600
     static let minHeight: CGFloat = 200
@@ -33,11 +35,13 @@ final class SettingsWindow: NSWindowController, NSToolbarDelegate {
     private let catalogue: AppCatalogue
     private let status: LauncherStatus
     private let updates: UpdateChecker
+    private let dictation: DictationController
     private let changed: () -> Void
     private let hosting = NSHostingView(rootView: AnyView(EmptyView()))
     private var current: Tab = .general
 
-    init(preferences: Preferences, model: LauncherModel, catalogue: AppCatalogue, status: LauncherStatus, updates: UpdateChecker, changed: @escaping () -> Void) {
+    init(preferences: Preferences, model: LauncherModel, catalogue: AppCatalogue, status: LauncherStatus, updates: UpdateChecker, dictation: DictationController, changed: @escaping () -> Void) {
+        self.dictation = dictation
         self.preferences = preferences; self.model = model; self.catalogue = catalogue; self.status = status; self.updates = updates; self.changed = changed
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 400),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
@@ -95,6 +99,7 @@ final class SettingsWindow: NSWindowController, NSToolbarDelegate {
         case .windows: WindowSettings(preferences: preferences, model: model, changed: changed)
         case .commands: CommandSettings(preferences: preferences, catalogue: catalogue)
         case .input: InputSettings(preferences: preferences, speech: model.speech)
+        case .dictation: DictationSettings(preferences: preferences, dictation: dictation, openLuna: { [weak self] in self?.select(.luna) })
         case .luna: LunaSettings(preferences: preferences, log: model.lunaLog, jevKeys: model.keys, lunaKeys: model.lunaKeys, tasks: model.lunaTasks)
         case .usage: UsageSettings(preferences: preferences, usage: JevUsageLog.shared)
         }
@@ -113,7 +118,7 @@ final class SettingsWindow: NSWindowController, NSToolbarDelegate {
         item.action = #selector(selectTab(_:))
         return item
     }
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { Tab.allCases.map(\.identifier) }
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { Tab.allCases.map(\.identifier) }
-    func toolbarSelectableItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { Tab.allCases.map(\.identifier) }
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { Tab.shown.map(\.identifier) }
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { Tab.shown.map(\.identifier) }
+    func toolbarSelectableItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { Tab.shown.map(\.identifier) }
 }

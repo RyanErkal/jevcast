@@ -29,14 +29,14 @@ struct LunaService: LunaWriting {
         guard apiKey.hasPrefix("sk-or-") else { throw Failure(text: "Luna needs an OpenRouter key (sk-or-…). Add one in Settings › Luna.") }
         var urlRequest = URLRequest(url: endpoint)
         urlRequest.httpMethod = "POST"
-        urlRequest.timeoutInterval = effort == .fast ? 45 : 180
+        urlRequest.timeoutInterval = !request.reasoning ? 10 : effort == .fast ? 45 : 180
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         urlRequest.setValue(AppIdentity.name, forHTTPHeaderField: "X-Title")
-        let body = Body(model: LunaRequest.model,
+        let body = Body(model: request.model,
                         messages: [.init(role: "system", content: request.system), .init(role: "user", content: request.user)],
-                        reasoning: .init(effort: effort.apiValue, exclude: true),
-                        max_tokens: request.maxOutputTokens + (effort == .fast ? 2000 : 16_000),
+                        reasoning: request.reasoning ? .init(effort: effort.apiValue, exclude: true) : nil,
+                        max_tokens: request.maxOutputTokens + (!request.reasoning ? 0 : effort == .fast ? 2000 : 16_000),
                         usage: .init(include: true))
         urlRequest.httpBody = try JSONEncoder().encode(body)
         let (data, response): (Data, URLResponse)
@@ -73,7 +73,7 @@ struct LunaService: LunaWriting {
         struct Usage: Encodable { let include: Bool }
         let model: String
         let messages: [Message]
-        let reasoning: Reasoning
+        let reasoning: Reasoning?
         let max_tokens: Int
         let usage: Usage
     }

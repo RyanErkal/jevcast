@@ -2,7 +2,7 @@
 Native macOS launcher and window manager. Swift Package, SwiftUI + AppKit, macOS 14+. Open source (MIT).
 Use small focused files. No external dependencies. Keep local actions off network paths.
 Only three features use the network: the daily GitHub update check, opt-in Jev matching, and opt-in Luna writing through OpenRouter. Never send paths, clipboard text, or audio.
-Selected text and mail content go to Luna only when the user turns on that kind in Settings › Luna. Code checks each request against those switches, and every send is logged without its text.
+Selected text, mail content, and dictation transcripts go to Luna only when the user turns on that kind in Settings › Luna. Code checks each request against those switches, and every send is logged without its text.
 Run swift test and scripts/build.sh. Report real UI and permission testing separately from build proof.
 Public images come only from --snapshot-ui <dir> --demo. Never publish captures of real files or apps.
 Names and IDs live in Sources/JevLauncher/AppIdentity.swift and scripts/build.sh; AppIdentityTests keeps them in step.

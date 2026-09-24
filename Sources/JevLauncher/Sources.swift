@@ -33,7 +33,7 @@ extension LauncherModel {
         case .scheduled: made = ScheduledSource(timers: timers, catalogue: catalogue)
         case .calendar: made = CalendarSource()
         case .reminders: made = RemindersSource()
-        case .contacts: made = ContactsSource(compose: { [weak self] address in self?.composeMail?(address) })
+        case .contacts: made = ContactsSource(compose: Self.usesJevcastMail ? { [weak self] address in self?.composeMail?(address) } : nil)
         case .tabs: made = TabsSource()
         case .history: made = HistorySource()
         case .mail: made = MailSource(model: self)
@@ -41,6 +41,13 @@ extension LauncherModel {
         }
         sources[kind] = made
         return made
+    }
+
+    /// Jevcast writes mail only for people who use Apple Mail: it can read it, and it opens mailto links.
+    static var usesJevcastMail: Bool {
+        guard case .ready = MailStore.status(), let mailto = URL(string: "mailto:x@example.com"),
+              let handler = NSWorkspace.shared.urlForApplication(toOpen: mailto) else { return false }
+        return Bundle(url: handler)?.bundleIdentifier == MailActions.bundleID
     }
 
     /// Loads the rows for the source query in the search field. A newer load cancels an older one.

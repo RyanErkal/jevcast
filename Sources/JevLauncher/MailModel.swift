@@ -26,7 +26,14 @@ final class MailModel: ObservableObject {
     @Published var place: Place = .inbox { didSet { if oldValue != place { selectedID = nil; reload() } } }
     @Published var search = "" { didSet { if oldValue != search { reloadSoon() } } }
     @Published private(set) var messages: [MailSummary] = []
-    @Published var selectedID: Int64? { didSet { if oldValue != selectedID { loadSelected() } } }
+    /// Setting this from the list or the keyboard marks the message read. The model's own
+    /// selections, after a reload, use `select(_:byUser:)` with false and change nothing.
+    @Published var selectedID: Int64? {
+        didSet { if oldValue != selectedID { loadSelected(markRead: !selectingQuietly) } }
+    }
+    private var selectingQuietly = false
+    /// A message to select once the list that holds it loads, such as one picked in the launcher.
+    private var pending: Int64?
     @Published private(set) var detail: MIMEMessage?
     @Published private(set) var detailMissing = false
     @Published var banner: String?
@@ -103,8 +110,18 @@ final class MailModel: ObservableObject {
             guard let (messages, boxes) = result else { self.banner = "Mail's index could not be read. Try again in a moment."; return }
             self.messages = messages
             if !boxes.isEmpty { self.mailboxes = boxes }
+            if let pending = self.pending {
+                self.pending = nil
+                if !messages.contains(where: { $0.rowID == pending }),
+                   let found = try? MailStore.messages(root: root, .init(mailboxes: [], rowIDs: [pending])).first {
+                    self.messages.insert(found, at: self.messages.firstIndex { $0.date < found.date } ?? self.messages.count)
+                }
+                self.select(pending, byUser: true)
+                return
+            }
             if keepSelection, let previous, messages.contains(where: { $0.rowID == previous }) { return }
-            if self.selectedID == nil || !messages.contains(where: { $0.rowID == self.selectedID }) { self.selectedID = messages.first?.rowID }
+            // A message that left the list is not replaced by one that would be marked read.
+            if self.selectedID == nil || !messages.contains(where: { $0.rowID == self.selectedID }) { self.select(messages.first?.rowID, byUser: false) }
         }
     }
 
@@ -117,17 +134,37 @@ final class MailModel: ObservableObject {
         }
     }
 
-    private func loadSelected() {
+    func select(_ rowID: Int64?, byUser: Bool) {
+        let unchanged = rowID == selectedID
+        selectingQuietly = !byUser
+        selectedID = rowID
+        selectingQuietly = false
+        // The same row again, such as a message the list just inserted, still needs its body.
+        if unchanged, detail == nil, !detailMissing { loadSelected(markRead: byUser) }
+    }
+
+    /// Opens one message from the launcher: its own mailbox, selected once the list loads.
+    func open(_ rowID: Int64) {
+        guard let root, let found = try? MailStore.messages(root: root, .init(mailboxes: [], rowIDs: [rowID])).first else { return }
+        pending = rowID
+        let target = Place.mailbox(found.mailbox)
+        if place == target { reload() } else { place = target }
+    }
+
+    private var loadingID: Int64?
+
+    private func loadSelected(markRead: Bool) {
         detail = nil; detailMissing = false; summary = nil
         guard let root, let message = selected, let box = mailbox(message.mailbox) else { return }
         let rowID = message.rowID
+        loadingID = rowID
         Task { @MainActor [weak self] in
             let parsed = await Task.detached(priority: .userInitiated) { MailStore.message(root: root, mailbox: box, rowID: rowID) }.value
-            guard let self, self.selectedID == rowID else { return }
+            guard let self, self.selectedID == rowID, self.loadingID == rowID else { return }
             self.detail = parsed
             self.detailMissing = parsed == nil
-            // Opening a message marks it read, as Mail does.
-            if !message.read { self.perform("mark read") { try await MailActions.setRead(true, message, in: box) } update: { $0.read = true } }
+            // Opening a message yourself marks it read, as Mail does.
+            if markRead, !message.read { self.perform("mark read") { try await MailActions.setRead(true, message, in: box) } update: { $0.read = true } }
         }
     }
 
@@ -139,7 +176,8 @@ final class MailModel: ObservableObject {
         let index = messages.firstIndex { $0.rowID == message.rowID }
         if removes, let index {
             messages.remove(at: index)
-            selectedID = messages.indices.contains(index) ? messages[index].rowID : messages.last?.rowID
+            // The next message shows but stays unread until you pick it.
+            select(messages.indices.contains(index) ? messages[index].rowID : messages.last?.rowID, byUser: false)
         } else if let index, let update { update(&messages[index]) }
         Task { @MainActor [weak self] in
             do { try await action() }

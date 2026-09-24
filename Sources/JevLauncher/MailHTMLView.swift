@@ -11,7 +11,8 @@ struct MailHTMLView: NSViewRepresentable {
     static let policy = "default-src 'none'; img-src data: cid:; style-src 'unsafe-inline'; font-src data:"
 
     static func document(_ html: String) -> String {
-        let meta = "<meta http-equiv=\"Content-Security-Policy\" content=\"\(policy)\"><meta charset=\"utf-8\">"
+        // DNS prefetch is outside the policy, so it is turned off too.
+        let meta = "<meta http-equiv=\"Content-Security-Policy\" content=\"\(policy)\"><meta http-equiv=\"x-dns-prefetch-control\" content=\"off\"><meta charset=\"utf-8\">"
         let style = "<style>body{font:13px -apple-system,sans-serif;margin:0;word-wrap:break-word}img{max-width:100%;height:auto}</style>"
         return meta + style + html
     }
@@ -24,8 +25,8 @@ struct MailHTMLView: NSViewRepresentable {
         config.defaultWebpagePreferences.allowsContentJavaScript = false
         config.preferences.javaScriptCanOpenWindowsAutomatically = false
         let view = WKWebView(frame: .zero, configuration: config)
+        // A white page, as in Mail, because most HTML mail assumes one.
         view.navigationDelegate = context.coordinator
-        view.setValue(false, forKey: "drawsBackground")
         return view
     }
 

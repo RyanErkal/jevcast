@@ -42,6 +42,7 @@ enum MailStore {
         var text = ""
         var unreadOnly = false
         var flaggedOnly = false
+        var rowIDs: [Int64] = []
         var limit = 300
     }
 
@@ -49,7 +50,7 @@ enum MailStore {
     static func messages(root: String, _ query: Query) throws -> [MailSummary] {
         let db = try open(root)
         let cols = db.columns("messages")
-        guard !query.mailboxes.isEmpty || query.flaggedOnly || query.unreadOnly else { return [] }
+        guard !query.mailboxes.isEmpty || query.flaggedOnly || query.unreadOnly || !query.rowIDs.isEmpty else { return [] }
         let read = cols.contains("read") ? "m.read" : "(m.flags & 1)"
         let flagged = cols.contains("flagged") ? "m.flagged" : "((m.flags >> 4) & 1)"
         let deleted = cols.contains("deleted") ? "m.deleted" : "((m.flags >> 1) & 1)"
@@ -68,6 +69,10 @@ enum MailStore {
         if !query.mailboxes.isEmpty {
             sql += " AND m.mailbox IN (" + Array(repeating: "?", count: query.mailboxes.count).joined(separator: ",") + ")"
             arguments += query.mailboxes.map { .int($0) }
+        }
+        if !query.rowIDs.isEmpty {
+            sql += " AND m.ROWID IN (" + Array(repeating: "?", count: query.rowIDs.count).joined(separator: ",") + ")"
+            arguments += query.rowIDs.map { .int($0) }
         }
         if query.unreadOnly { sql += " AND \(read) = 0" }
         if query.flaggedOnly { sql += " AND \(flagged) = 1" }
@@ -110,7 +115,11 @@ enum MailStore {
         // Some layouts differ. Search this mailbox's folder, at most a few levels down.
         let names = Set(relative.map { ($0 as NSString).lastPathComponent })
         guard let enumerator = FileManager.default.enumerator(atPath: folder) else { return nil }
+        var visited = 0
         while let item = enumerator.nextObject() as? String {
+            // A huge mailbox is not walked in full for one missing file.
+            visited += 1
+            if visited > 20_000 { return nil }
             if enumerator.level > 7 { enumerator.skipDescendants(); continue }
             if item.hasSuffix(".mbox") { enumerator.skipDescendants(); continue }
             if names.contains((item as NSString).lastPathComponent) { return folder + "/" + item }

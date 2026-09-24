@@ -13,7 +13,11 @@ final class MailWindow: NSWindowController, NSWindowDelegate {
         window.title = "Mail"
         window.isReleasedWhenClosed = false
         window.setFrameAutosaveName("JevcastMail")
-        window.contentView = NSHostingView(rootView: MailRootView(model: model))
+        // A hosting controller brings the SwiftUI toolbar and search field into the window.
+        let hosting = NSHostingController(rootView: MailRootView(model: model))
+        hosting.sceneBridgingOptions = [.toolbars, .title]
+        window.contentViewController = hosting
+        window.setContentSize(NSSize(width: 1180, height: 760))
         window.center()
         super.init(window: window)
         window.delegate = self
@@ -23,8 +27,9 @@ final class MailWindow: NSWindowController, NSWindowDelegate {
     /// Opens the window, optionally on one message.
     func show(select rowID: Int64? = nil, compose address: String? = nil) {
         model.start()
-        if let rowID { model.place = .inbox; model.selectedID = rowID }
-        if let address { model.compose(to: address) }
+        if let rowID { model.open(rowID) }
+        // An open draft is kept; a contact's address fills a new one only when none is open.
+        if let address, model.draft == nil { model.compose(to: address) }
         NSApp.activate()
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)

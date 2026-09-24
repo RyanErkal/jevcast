@@ -36,23 +36,33 @@ public struct MIMEMessage: Equatable, Sendable {
             return parse(data)
         }
         let start = data.index(after: newline)
+        guard count >= 0 else { return parse(data[start...]) }
         let end = min(data.endIndex, start + count)
         return parse(data[start..<end])
     }
 
+    /// Nesting and part limits, so a hostile message cannot exhaust the stack or the CPU.
+    static let maxDepth = 12, maxParts = 400
+
     public static func parse(_ data: Data) -> MIMEMessage? {
-        let (headerData, body) = splitHeaders(Data(data))
+        var parts = 0
+        return parse(Data(data), depth: 0, parts: &parts)
+    }
+
+    static func parse(_ data: Data, depth: Int, parts: inout Int) -> MIMEMessage? {
+        let (headerData, body) = splitHeaders(data)
         let headers = parseHeaders(headerData)
         guard !headers.isEmpty else { return nil }
         var message = MIMEMessage(headers: headers)
-        walk(headers: headers, body: body, into: &message, depth: 0)
+        walk(headers: headers, body: body, into: &message, depth: depth, parts: &parts)
         return message
     }
 
     // MARK: Parts
 
-    private static func walk(headers: [(name: String, value: String)], body: Data, into message: inout MIMEMessage, depth: Int) {
-        guard depth < 12 else { return }
+    private static func walk(headers: [(name: String, value: String)], body: Data, into message: inout MIMEMessage, depth: Int, parts: inout Int) {
+        parts += 1
+        guard depth < maxDepth, parts <= maxParts else { return }
         let contentType = value(headers, "Content-Type") ?? "text/plain"
         let (type, params) = parameters(contentType)
         let disposition = value(headers, "Content-Disposition").map(parameters)
@@ -62,11 +72,11 @@ public struct MIMEMessage: Equatable, Sendable {
         if type.hasPrefix("multipart/"), let boundary = params["boundary"] {
             for part in split(body, boundary: boundary) {
                 let (partHeaders, partBody) = splitHeaders(part)
-                walk(headers: parseHeaders(partHeaders), body: partBody, into: &message, depth: depth + 1)
+                walk(headers: parseHeaders(partHeaders), body: partBody, into: &message, depth: depth + 1, parts: &parts)
             }
             return
         }
-        if type == "message/rfc822", let inner = parse(decode(body, encoding)) {
+        if type == "message/rfc822", let inner = parse(decode(body, encoding), depth: depth + 1, parts: &parts) {
             // A forwarded message: its text follows, and its attachments count as this message's.
             if message.plainText == nil, let text = inner.plainText { message.plainText = text }
             if message.html == nil, let html = inner.html { message.html = html }
@@ -144,16 +154,29 @@ public struct MIMEMessage: Equatable, Sendable {
         return (type, params)
     }
 
+    /// Splits a multipart body on its boundary lines, as bytes, so 8-bit parts keep their bytes.
     static func split(_ body: Data, boundary: String) -> [Data] {
-        let text = String(decoding: body, as: UTF8.self)
-        let marker = "--" + boundary
+        let bytes = [UInt8](body), marker = [UInt8](("--" + boundary).utf8)
+        guard !marker.isEmpty, bytes.count >= marker.count else { return [] }
+        // Boundary lines start at the beginning of a line.
+        var starts: [Int] = []
+        var index = 0
+        while index + marker.count <= bytes.count {
+            let atLineStart = index == 0 || bytes[index - 1] == 0x0A
+            if atLineStart && bytes[index] == marker[0] && Array(bytes[index..<index + marker.count]) == marker { starts.append(index); index += marker.count; continue }
+            index += 1
+        }
         var parts: [Data] = []
-        let pieces = text.components(separatedBy: marker)
-        for piece in pieces.dropFirst() {
-            if piece.hasPrefix("--") { break }
-            var part = piece
-            if part.hasPrefix("\r\n") { part.removeFirst(2) } else if part.hasPrefix("\n") { part.removeFirst() }
-            parts.append(Data(part.utf8))
+        for (n, start) in starts.enumerated() {
+            let after = start + marker.count
+            if after + 1 < bytes.count, bytes[after] == 0x2D, bytes[after + 1] == 0x2D { break } // "--" ends the list.
+            var from = after
+            while from < bytes.count, bytes[from] != 0x0A { from += 1 }
+            from = min(from + 1, bytes.count)
+            var to = n + 1 < starts.count ? starts[n + 1] : bytes.count
+            // The line break before the next boundary belongs to the boundary.
+            if to > from, bytes[to - 1] == 0x0A { to -= 1; if to > from, bytes[to - 1] == 0x0D { to -= 1 } }
+            if to > from { parts.append(Data(bytes[from..<to])) }
         }
         return parts
     }
@@ -256,10 +279,26 @@ public enum HTMLText {
         }
         let entities = ["&nbsp;": " ", "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": "\"", "&#39;": "'", "&apos;": "'", "&rsquo;": "’", "&lsquo;": "‘", "&rdquo;": "”", "&ldquo;": "“", "&mdash;": "—", "&ndash;": "–", "&hellip;": "…"]
         for (entity, value) in entities { text = text.replacingOccurrences(of: entity, with: value) }
-        text = text.replacingOccurrences(of: #"&#(\d+);"#, with: " ", options: .regularExpression)
+        text = decodeNumericEntities(text)
         text = text.replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
         text = text.replacingOccurrences(of: #"\n\s*\n\s*\n+"#, with: "\n\n", options: .regularExpression)
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+extension HTMLText {
+    /// "&#8217;" and "&#x2019;" become the characters they name.
+    static func decodeNumericEntities(_ text: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: #"&#([xX]?)([0-9a-fA-F]{1,6});"#) else { return text }
+        var result = "", last = text.startIndex
+        for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+            guard let whole = Range(match.range, in: text), let hex = Range(match.range(at: 1), in: text), let digits = Range(match.range(at: 2), in: text) else { continue }
+            result += text[last..<whole.lowerBound]
+            let value = UInt32(text[digits], radix: text[hex].isEmpty ? 10 : 16)
+            result += value.flatMap(Unicode.Scalar.init).map { String(Character($0)) } ?? " "
+            last = whole.upperBound
+        }
+        return result + text[last...]
     }
 }
 

@@ -7,6 +7,8 @@ import LauncherCore
 final class MailSource: ThingSource {
     let section = "Mail"
     private weak var model: LauncherModel?
+    /// Below a whole-name match (100), so "mail" still opens Apple Mail first.
+    static let openScore = 96.0
     init(model: LauncherModel) { self.model = model }
 
     func load(_ filter: String) async throws -> [LauncherResult] {
@@ -14,7 +16,7 @@ final class MailSource: ThingSource {
         let compose = Verb(title: "New Message") { [weak model] in model?.composeMail?(""); return nil }
         guard case .ready(let root) = MailStore.status() else {
             return [LauncherResult(id: "mail:open", title: "Open Mail", detail: "Needs Full Disk Access to read Apple Mail", symbol: "envelope",
-                                   action: .thing(Thing(verbs: [open, compose], twoLine: false)), score: 3100)]
+                                   action: .thing(Thing(verbs: [open, compose], twoLine: false)), score: Self.openScore)]
         }
         let (boxes, messages) = try await Task.detached(priority: .userInitiated) { () throws -> ([MailMailbox], [MailSummary]) in
             let boxes = try MailStore.mailboxes(root: root)
@@ -25,8 +27,10 @@ final class MailSource: ThingSource {
         }.value
         let unread = boxes.filter { $0.role == .inbox }.map(\.unread).reduce(0, +)
         var rows = [LauncherResult(id: "mail:open", title: "Open Mail", detail: unread == 0 ? "Inbox" : "\(unread) unread in Inbox",
-                                   symbol: "envelope", action: .thing(Thing(verbs: [open, compose], twoLine: false)), score: 3100)]
-        rows += messages.enumerated().map { index, message in row(message, mailbox: boxes.first { $0.rowID == message.mailbox }, score: 3000 - Double(index)) }
+                                   symbol: "envelope", action: .thing(Thing(verbs: [open, compose], twoLine: false)), score: Self.openScore)]
+        // A search ranks its messages first; the plain "mail" list stays below the Mail app.
+        let base = filter.isEmpty ? 95.0 : 3000.0
+        rows += messages.enumerated().map { index, message in row(message, mailbox: boxes.first { $0.rowID == message.mailbox }, score: base - Double(index) * 0.01) }
         return rows
     }
 

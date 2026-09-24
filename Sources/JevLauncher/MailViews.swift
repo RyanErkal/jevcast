@@ -125,7 +125,9 @@ struct MailList: View {
         .overlay { if model.messages.isEmpty { Text(model.search.isEmpty ? "No messages" : "No matches").foregroundStyle(.secondary) } }
         .onAppear { listFocused = true }
         .onKeyPress(characters: .letters.union(CharacterSet(charactersIn: "#")), phases: .down) { press in
-            handle(press.characters, shift: press.modifiers.contains(.shift)) ? .handled : .ignored
+            // ⌘E, ⌃S, and other shortcuts are not mail keys.
+            guard press.modifiers.isDisjoint(with: [.command, .control, .option]) else { return .ignored }
+            return handle(press.characters, shift: press.modifiers.contains(.shift)) ? .handled : .ignored
         }
         .onKeyPress(.delete) { model.delete(); return .handled }
     }
@@ -218,7 +220,7 @@ struct MailReader: View {
 
     @ViewBuilder private func body(_ message: MailSummary) -> some View {
         if let detail = model.detail {
-            if let html = detail.html, detail.plainText == nil || html.count > 200 {
+            if let html = detail.html, detail.plainText == nil || html.utf8.count > 200 {
                 MailHTMLView(html: html).padding(.horizontal, 10)
             } else {
                 ScrollView {
@@ -287,7 +289,7 @@ struct ComposeView: View {
                 TextEditor(text: binding.body).font(.system(size: 13)).frame(minHeight: 220)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
                 if binding.wrappedValue.mode != .new {
-                    Text("Mail adds the original message below your text.").font(.caption).foregroundStyle(.secondary)
+                    Text("Mail adds the original message below your text when it can.").font(.caption).foregroundStyle(.secondary)
                 }
                 HStack {
                     Spacer()

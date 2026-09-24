@@ -2,6 +2,28 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.3.0] - 2026-09-24
+
+### Added
+
+- **Things on your Mac, with verbs.** Rows from each source below have their own actions. Return runs the first one, and ⌘K lists all of them.
+- **Scheduled tasks.** "scheduled tasks", "what runs at login", or "cron" lists launch agents, daemons, crontab lines, and timers. Each row shows its schedule in plain words, the next run, whether it runs or failed, and warnings for a missing program or an unusual folder. Agents can run now, turn off, or turn on. "scheduled tasks failing" shows only jobs whose last run failed.
+- **Calendar and Reminders.** "calendar", "agenda", or "my day" lists events. Join Call opens Zoom, Meet, or Teams links. Your own events move 15 minutes or an hour later. "reminders" lists open reminders, overdue first, to complete or move to tomorrow.
+- **Make reminders and events.** "remind me to call mum at 5pm", "remind me to stretch in 20 minutes", and "add event lunch with Sam friday 1pm".
+- **Contacts.** "contact sam" finds a person to email, message, call, or copy.
+- **Browser tabs and history.** "tabs" lists tabs in Safari, Chrome, Arc, Brave, Edge, Vivaldi, and Dia, to switch to, close, or copy. One row closes duplicate tabs. "history <words>" searches browser history on this Mac.
+- **This.** Type "this", or an action such as "copy link", to act on the page, Finder selection, or selected text in front: copy a link, make a reminder, open the page in another browser, or compress files.
+- **Luna.** An opt-in writing model, GPT-6 Luna through OpenRouter, with Fast, High, and Max effort. "ask …" answers a question in the panel. With selected text, Luna fixes, shortens, rewrites, summarises, explains, or translates it, and Return replaces the selection. Jev decides what a request means; Luna only writes text.
+- **Mail.** "mail" or "inbox" opens a keyboard-first mail window on top of Apple Mail: Inbox, Unread, Flagged, each account's mailboxes, a message list, and a reading pane. Archive, delete, move, flag, reply, forward, and new messages go through Apple Mail, which starts hidden. Luna can summarise a message or draft a reply. "mail <words>" searches from the launcher.
+- **Settings › Luna.** Effort, an OpenRouter key, a switch for each kind of context Luna may read, and an activity log of each request without its text.
+- `--diagnose-source '<query>'` and `--diagnose-mail` for checks on a real Mac.
+
+### Privacy
+
+- Luna is off until you turn it on. Selected text and mail go to Luna only when you turn on each one. Jevcast checks every request against those switches before it sends it.
+- HTML mail shows with scripts off, and every remote load is blocked, so tracking pixels do not load.
+- Jevcast reads Apple Mail, Calendar, Reminders, Contacts, browser tabs, and browser history on this Mac only. Each needs its own macOS permission.
+
 ## [1.2.3] - 2026-09-23
 
 ### Changed

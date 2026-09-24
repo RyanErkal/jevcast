@@ -34,7 +34,7 @@ extension Diagnostics {
     /// never subjects, names, or addresses.
     static func mail() {
         let status = MailStore.status()
-        print("Mail status: \(status)")
+        if case .ready(let root) = status { print("Mail status: ready (\((root as NSString).lastPathComponent))") } else { print("Mail status: \(status)") }
         guard case .ready(let root) = status else { exit(status == .noMail ? 1 : 2) }
         do {
             let db = try MailStore.open(root)

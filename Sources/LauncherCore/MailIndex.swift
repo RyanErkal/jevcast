@@ -24,7 +24,8 @@ public struct MailMailbox: Equatable, Sendable, Identifiable, Hashable {
     public enum Role: Sendable { case inbox, sent, drafts, archive, trash, junk, other }
     public var role: Role {
         let lower = name.lowercased(), full = path.lowercased()
-        if lower == "inbox" { return .inbox }
+        // Only the top-level Inbox is the inbox; "Old/Inbox" is an ordinary folder.
+        if full == "inbox" { return .inbox }
         if ["sent", "sent messages", "sent items", "sent mail"].contains(lower) { return .sent }
         if lower == "drafts" { return .drafts }
         if lower == "archive" || full == "[gmail]/all mail" || lower == "all mail" { return .archive }
@@ -42,7 +43,10 @@ public struct MailMailbox: Equatable, Sendable, Identifiable, Hashable {
     /// Where the archive for an account lives: its "Archive" mailbox, or Gmail's All Mail.
     public static func archive(for account: String, in mailboxes: [MailMailbox]) -> MailMailbox? {
         let own = mailboxes.filter { $0.accountID == account }
-        return own.first { $0.name.lowercased() == "archive" } ?? own.first { $0.role == .archive }
+        // A top-level Archive first, then Gmail's All Mail, and never a nested "Clients/Archive" before those.
+        return own.first { $0.path.lowercased() == "archive" }
+            ?? own.first { $0.path.lowercased() == "[gmail]/all mail" }
+            ?? own.filter { $0.role == .archive }.min { $0.path.count < $1.path.count }
     }
 }
 
@@ -115,21 +119,32 @@ public enum MailScripts {
     /// `argv` 4: the reply text; 5: "true" to reply to all. The quoted original stays below the text.
     public static let reply = onMessage("""
           set r to reply m opening window false reply to all ((item 5 of argv) is "true")
-          delay 0.3
-          set quoted to content of r
-          set content of r to (item 4 of argv) & return & return & quoted
-          send r
+          set quoted to ""
+          repeat 10 times
+            delay 0.2
+            set quoted to content of r
+            if quoted is not "" then exit repeat
+          end repeat
+          if quoted is "" then
+            set content of r to (item 4 of argv)
+          else
+            set content of r to (item 4 of argv) & return & return & quoted
+          end if
+          if not (send r) then error "Mail did not send the message." number 1002
     """)
     /// `argv` 4: the text above the forwarded message; 5: recipient addresses, one per line.
     public static let forward = onMessage("""
           set f to forward m opening window false
-          delay 0.3
+          delay 0.5
           repeat with a in paragraphs of (item 5 of argv)
             if (a as text) is not "" then make new to recipient at end of to recipients of f with properties {address:(a as text)}
           end repeat
-          set quoted to content of f
-          set content of f to (item 4 of argv) & return & return & quoted
-          send f
+          -- The body is left as Mail made it when there is no text to add, so attachments stay.
+          if (item 4 of argv) is not "" then
+            set quoted to content of f
+            set content of f to (item 4 of argv) & return & return & quoted
+          end if
+          if not (send f) then error "Mail did not send the message." number 1002
     """)
 
     /// `argv`: to (one per line), cc (one per line), subject, body.
@@ -144,7 +159,7 @@ public enum MailScripts {
           repeat with a in paragraphs of (item 2 of argv)
             if (a as text) is not "" then make new cc recipient at end of cc recipients of o with properties {address:(a as text)}
           end repeat
-          send o
+          if not (send o) then error "Mail did not send the message." number 1002
         end tell
       end timeout
     end run

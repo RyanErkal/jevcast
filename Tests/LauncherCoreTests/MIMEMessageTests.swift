@@ -86,3 +86,35 @@ final class MIMEMessageTests: XCTestCase {
         XCTAssertTrue(MailScripts.send.contains("subject:(item 3 of argv), content:(item 4 of argv)"))
     }
 }
+
+final class MIMEHostileTests: XCTestCase {
+    func testDeeplyNestedForwardsDoNotCrash() {
+        var raw = "Subject: leaf\nContent-Type: text/plain\n\nbottom\n"
+        for _ in 0..<2000 { raw = "Subject: x\nContent-Type: message/rfc822\n\n" + raw }
+        XCTAssertNotNil(MIMEMessage.parse(Data(raw.utf8)), "Parsing stops at the depth limit instead of overflowing the stack.")
+    }
+
+    func testEightBitPartsKeepTheirBytes() throws {
+        var data = Data("Subject: x\nContent-Type: multipart/alternative; boundary=b\n\n--b\nContent-Type: text/plain; charset=iso-8859-1\nContent-Transfer-Encoding: 8bit\n\ncaf".utf8)
+        data.append(0xE9)
+        data.append(Data("\n--b--\n".utf8))
+        let message = try XCTUnwrap(MIMEMessage.parse(data))
+        XCTAssertEqual(message.plainText, "café")
+    }
+
+    func testBoundaryOnlyAtLineStart() throws {
+        let raw = "Subject: x\nContent-Type: multipart/mixed; boundary=b\n\n--b\nContent-Type: text/plain\n\nsee --b inside\n--b--\n"
+        XCTAssertEqual(try XCTUnwrap(MIMEMessage.parse(Data(raw.utf8))).plainText, "see --b inside")
+    }
+
+    func testNumericEntities() {
+        XCTAssertEqual(HTMLText.plain("It&#8217;s &#x2019;ok&#39;"), "It’s ’ok'")
+    }
+
+    func testNestedArchiveAndInboxAreNotChosen() {
+        let nested = MailMailbox(rowID: 5, url: "imap://A/Clients/Archive", unread: 0, total: 0)
+        let top = MailMailbox(rowID: 6, url: "imap://A/Archive", unread: 0, total: 0)
+        XCTAssertEqual(MailMailbox.archive(for: "A", in: [nested, top]), top)
+        XCTAssertEqual(MailMailbox(rowID: 7, url: "imap://A/Old/Inbox", unread: 0, total: 0).role, .other)
+    }
+}

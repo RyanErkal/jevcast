@@ -58,3 +58,15 @@ Unit tests cannot prove these. Do them on a Mac with a real keyboard, and record
 - [ ] Settings › Usage counts a Jev request.
 - [ ] A menu item of the front app, a Shortcut, a workflow, a snippet (Shift–Return pastes), a timer notification, and `:tada` all work.
 - [ ] With voice on and sound playing through the built-in speakers, the speakers mute while listening and come back after. Headphones are not muted.
+
+**Sources, Luna, and Mail:**
+
+- [ ] `scheduled tasks` lists your agents with plain-words schedules. Turn Off and Turn On change a test agent, and the row updates.
+- [ ] `calendar` and `reminders` ask for access once, then list items. Join Call opens a meeting link. Complete removes a reminder.
+- [ ] `remind me to test in 2 minutes` makes a reminder that notifies. `add event test tomorrow 3pm` adds an event.
+- [ ] `contact <name>` lists a person. Email opens the Jevcast compose window.
+- [ ] `tabs` in Safari, Chrome, and Dia asks for Automation once, lists tabs, and Switch to Tab and Close Tab act on the right tab.
+- [ ] With a page open, `copy link` copies it. Opening the launcher over a browser without typing shows no Automation prompt.
+- [ ] With Luna on and an OpenRouter key: `ask what is 2+2` answers. With Selected text on, Fix Spelling replaces a selection in TextEdit. With it off, no selected-text request is sent, and Settings › Luna logs each request.
+- [ ] `mail` without Full Disk Access shows the setup view. With it, the Inbox lists messages. Archive, Delete, Flag, Reply, and a new message act on the right message in Apple Mail.
+- [ ] An HTML newsletter shows without remote images, and a link opens in the browser.

@@ -23,6 +23,13 @@ The package has two targets.
   - `UpdateService.swift`, `UpdateChecker.swift`: the daily GitHub release check.
   - `Settings*.swift`, `WelcomeWindow.swift`, `StatusMenu.swift`, `AppMenus.swift`: windows and menus.
   - `AppIdentity.swift`: name, bundle ID, and project links.
+  - `Thing.swift`, `Sources.swift`: rows with their own verbs, and sources that load them for a query such as "scheduled tasks". `SourceQuery.swift` in LauncherCore reads the keywords.
+  - `ScheduledSource.swift`: launchd jobs, crontab, and timers. `ScheduledJobs.swift` in LauncherCore parses plists and cron lines and computes the next run.
+  - `OrganizerSources.swift`, `LauncherModel+Create.swift`: Calendar, Reminders, and Contacts through EventKit and Contacts. `CreateQuery.swift` reads "remind me …" and "add event …".
+  - `BrowserSources.swift`, `FrontContext.swift`: tabs, history, and "this". `BrowserTabs.swift` in LauncherCore holds the fixed AppleScript for each browser.
+  - `LunaService.swift`, `LauncherModel+Luna.swift`, `SettingsLuna.swift`: Luna through OpenRouter, the context switches, and the activity log. `LunaPrompt.swift` in LauncherCore builds each request.
+  - `Mail*.swift`: the mail window. `MailStore.swift` reads Apple Mail's index and `.emlx` files; `MailActions.swift` changes mail through Apple Mail; `MIMEMessage.swift` and `MailIndex.swift` in LauncherCore parse messages and hold Mail's fixed AppleScript.
+  - `SQLiteReader.swift`: a read-only SQLite reader with bound values.
 
 ## Rename the app
 
@@ -36,6 +43,8 @@ Run the executable inside the app bundle, for example `"dist/Jevcast.app/Content
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
 | `--diagnose`                               | Prints catalogue size, first results for sample queries, and search timings. Opens nothing.            |
 | `--diagnose-files 'kind:pdf in:downloads'` | Prints file-search results from your folders for five seconds.                                         |
+| `--diagnose-source 'scheduled tasks'`      | Prints the rows and verbs a source query lists. Runs nothing. Tabs may ask for Automation access.       |
+| `--diagnose-mail`                          | Checks that Apple Mail can be read. Prints counts and column names only, never subjects or addresses.  |
 | `--diagnose-jev 'request' …`               | Runs each request through the launcher with the stored TypeSafe key and prints the pick, the top row, and the tokens used. Billed, and counted in Settings › Usage. |
 | `echo KEY \| … --store-jev-key`            | Saves a TypeSafe or OpenRouter key in the Keychain from standard input, as Settings › Input does. The key is never an argument or printed. |
 | `--open`                                   | Shows the launcher at launch.                                                                          |

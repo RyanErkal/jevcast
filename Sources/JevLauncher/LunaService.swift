@@ -29,14 +29,15 @@ struct LunaService: LunaWriting {
         guard apiKey.hasPrefix("sk-or-") else { throw Failure(text: "Luna needs an OpenRouter key (sk-or-…). Add one in Settings › Luna.") }
         var urlRequest = URLRequest(url: endpoint)
         urlRequest.httpMethod = "POST"
-        urlRequest.timeoutInterval = effort == .fast ? 45 : 180
+        urlRequest.timeoutInterval = effort == .high || effort == .max ? 180 : 45
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         urlRequest.setValue(AppIdentity.name, forHTTPHeaderField: "X-Title")
         let body = Body(model: LunaRequest.model,
                         messages: [.init(role: "system", content: request.system), .init(role: "user", content: request.user)],
                         reasoning: .init(effort: effort.apiValue, exclude: true),
-                        max_tokens: request.maxOutputTokens + (effort == .fast ? 2000 : 16_000),
+                        // Room for reasoning on top of the answer. With reasoning off, none is needed.
+                        max_tokens: request.maxOutputTokens + (effort == .off ? 0 : effort == .fast ? 2000 : 16_000),
                         usage: .init(include: true))
         urlRequest.httpBody = try JSONEncoder().encode(body)
         let (data, response): (Data, URLResponse)

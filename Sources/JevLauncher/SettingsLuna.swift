@@ -24,7 +24,7 @@ struct LunaSettings: View {
                 Text("Jev decides what a request means. Luna, GPT-6 Luna through OpenRouter, writes text when a request needs it: “ask …”, rewrites of selected text, and mail summaries and replies. Luna never runs actions.")
                     .font(.caption).foregroundStyle(.secondary)
                 Picker("Effort", selection: $preferences.lunaEffort) {
-                    ForEach(LunaEffort.allCases, id: \.self) { Text($0.title).tag($0) }
+                    ForEach(LunaEffort.choices, id: \.self) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 Text("Fast answers in seconds. High and Max think longer and cost more.").font(.caption).foregroundStyle(.secondary)

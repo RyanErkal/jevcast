@@ -71,7 +71,7 @@ final class Preferences: ObservableObject {
         jevEnabled = d.bool(forKey: "jevEnabled")
         jevLayered = d.object(forKey: "jevLayered") as? Bool ?? true
         lunaEnabled = d.bool(forKey: "lunaEnabled")
-        lunaEffort = d.string(forKey: "lunaEffort").flatMap(LunaEffort.init(rawValue:)) ?? .fast
+        lunaEffort = d.string(forKey: "lunaEffort").flatMap(LunaEffort.init(rawValue:)).flatMap { LunaEffort.choices.contains($0) ? $0 : nil } ?? .fast
         lunaSendsSelection = d.bool(forKey: "lunaSendsSelection")
         lunaSendsMail = d.bool(forKey: "lunaSendsMail")
         lunaSendsCalendar = d.bool(forKey: "lunaSendsCalendar")

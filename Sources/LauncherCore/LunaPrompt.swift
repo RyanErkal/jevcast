@@ -3,13 +3,18 @@ import Foundation
 /// Luna does work when a request needs writing or reading: an answer, a rewrite, a summary,
 /// a reply draft. Jev decides; Luna only writes text. Luna never picks or runs an action.
 public enum LunaEffort: String, CaseIterable, Codable, Sendable {
+    /// Reasoning off, for quick internal jobs such as dictation clean-up. Not a Settings choice.
+    /// Named `off`, not `none`, so it is never mistaken for `Optional.none`.
+    case off = "none"
     case fast, high, max
+    /// The efforts offered in Settings.
+    public static let choices: [LunaEffort] = [.fast, .high, .max]
     /// The OpenRouter `reasoning.effort` value.
     public var apiValue: String {
-        switch self { case .fast: return "low"; case .high: return "high"; case .max: return "max" }
+        switch self { case .off: return "none"; case .fast: return "low"; case .high: return "high"; case .max: return "max" }
     }
     public var title: String {
-        switch self { case .fast: return "Fast"; case .high: return "High"; case .max: return "Max" }
+        switch self { case .off: return "No reasoning"; case .fast: return "Fast"; case .high: return "High"; case .max: return "Max" }
     }
 }
 
@@ -35,7 +40,7 @@ public struct LunaRequest: Equatable, Sendable {
     public let user: String
     public let sent: [LunaContext]
     public let maxOutputTokens: Int
-    /// A fixed effort that replaces the Settings choice. Dictation clean-up uses the lowest, so it is quick.
+    /// A fixed effort that replaces the Settings choice. Dictation clean-up turns reasoning off, so it is quick.
     public var effort: LunaEffort?
 
     public static let model = "openai/gpt-6-luna"
@@ -77,12 +82,12 @@ public struct LunaRequest: Equatable, Sendable {
     /// The longest transcript Luna cleans. A longer one keeps the local clean-up, so no part is lost.
     public static let maxDictation = 8000
 
-    /// Clean-up of one dictation transcript, at the lowest effort. Needs the "Dictation transcripts" switch.
+    /// Clean-up of one dictation transcript, with reasoning off. Needs the "Dictation transcripts" switch.
     public static func cleanDictation(_ transcript: String, now: Date = Date()) -> LunaRequest {
         LunaRequest(action: "Dictation clean-up",
                     system: system("The text is a speech transcript. Fix punctuation and capitalisation, remove filler words and self-corrections (keep only the corrected words). Do not add content, do not answer it, do not change its meaning or language.", now: now),
                     user: "<text>\n\(String(transcript.prefix(maxDictation)))\n</text>", sent: [.dictation], maxOutputTokens: 2000,
-                    effort: .fast)
+                    effort: .off)
     }
 
     /// A reply draft. `instruction` is what the user typed, such as "yes, but next week".

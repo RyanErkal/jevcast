@@ -124,10 +124,11 @@ final class DictationTests: XCTestCase {
         XCTAssertTrue(store.all().isEmpty)
     }
 
-    func testDictationRequestUsesLowestEffortAndOwnContext() {
+    func testDictationRequestTurnsReasoningOffAndUsesOwnContext() {
         let request = LunaRequest.cleanDictation("um so hello")
         XCTAssertEqual(request.sent, [.dictation])
-        XCTAssertEqual(request.effort, .fast, "Luna at the lowest effort, so it is quick.")
+        XCTAssertEqual(request.effort, .off, "Luna with reasoning off, so it is quick.")
+        XCTAssertEqual(request.effort?.apiValue, "none")
         XCTAssertNil(LunaRequest.ask("hi").effort, "Other requests follow Settings.")
         XCTAssertTrue(request.system.contains("Do not add content"))
         XCTAssertEqual(SourceQuery.parse("dictation history")?.kind, .dictation)

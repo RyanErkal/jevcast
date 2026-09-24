@@ -15,6 +15,17 @@ final class DictationLunaTests: XCTestCase {
         return (model, preferences, { defaults.removePersistentDomain(forName: suite) })
     }
 
+    @MainActor func testDictationSwitchesAreOffByDefault() {
+        let (model, preferences, cleanup) = makeModel(luna: FakeLuna())
+        defer { cleanup() }
+        XCTAssertFalse(preferences.dictationEnabled, "Dictation is off until the user turns it on.")
+        XCTAssertFalse(preferences.lunaSendsDictation, "Luna clean-up is off until the user turns it on.")
+        preferences.lunaEnabled = true
+        XCTAssertFalse(model.allowedLunaContext.contains(.dictation), "Turning Luna on does not allow transcripts.")
+        preferences.lunaSendsDictation = true
+        XCTAssertTrue(model.allowedLunaContext.contains(.dictation))
+    }
+
     @MainActor func testSwitchOffSendsNothing() async {
         let luna = FakeLuna(reply: "Luna text.")
         let (model, preferences, cleanup) = makeModel(luna: luna)
@@ -44,7 +55,7 @@ final class DictationLunaTests: XCTestCase {
         let entry = try XCTUnwrap(model.lunaLog.entries.first)
         XCTAssertEqual(entry.action, "Dictation clean-up")
         XCTAssertEqual(entry.sent, [.dictation])
-        XCTAssertEqual(entry.effort, .fast, "Dictation uses Luna at the lowest effort, whatever Settings say.")
+        XCTAssertEqual(entry.effort, .off, "Dictation turns Luna's reasoning off, whatever Settings say.")
         preferences.lunaSendsDictation = false
         _ = await model.cleanDictation("again")
         XCTAssertEqual(luna.requests.count, 1, "Each request checks the switch.")

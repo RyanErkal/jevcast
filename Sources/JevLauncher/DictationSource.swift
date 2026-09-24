@@ -18,7 +18,8 @@ final class DictationSource: ThingSource {
             let text = entry.text
             let paste = Verb(title: "Paste Again", after: .close) { copyText(text); Paster.pasteSoon(); return nil }
             let copy = Verb(title: "Copy", after: .stay) { copyText(text); return "Copied." }
-            return LauncherResult(id: "dictation:\(entry.date.timeIntervalSince1970)", title: text,
+            // Dates keep whole seconds, so the text keeps two dictations in one second apart.
+            return LauncherResult(id: "dictation:\(entry.date.timeIntervalSince1970):\(text.hashValue)", title: text,
                                   detail: entry.date.formatted(.relative(presentation: .named)),
                                   symbol: "waveform", action: .thing(Thing(verbs: [paste, copy])), score: 3000 - Double(index))
         }

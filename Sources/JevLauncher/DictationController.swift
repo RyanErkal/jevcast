@@ -20,6 +20,10 @@ final class DictationController: ObservableObject {
     private lazy var hotkey = DictationHotkey { [weak self] in self?.handle($0) }
     private var session: Task<String, Error>?
     private var target: String?
+    /// A transcript is being made or pasted.
+    private var finishing = false
+    /// Why a hold did not record. Shown on release, so a chord such as ⌘C shows nothing.
+    private var refusal: String?
     private var observers: Set<AnyCancellable> = []
     /// Dictation waits while the launcher is open, because the launcher may be listening.
     var canStart: () -> Bool = { true }
@@ -71,14 +75,17 @@ final class DictationController: ObservableObject {
     }
 
     private func begin() {
-        guard let engine, canStart() else { return }
+        // One dictation at a time, so a new hold cannot restore the clipboard or pill of the last one.
+        guard let engine, canStart(), !finishing else { return }
+        // Without Accessibility, keys in other apps are not seen, so a chord such as ⌘C would look like a hold.
+        guard NSApp.isActive || AXIsProcessTrusted() else { refusal = "Allow Accessibility in Settings › Dictation."; return }
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: break
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .audio) { _ in }
             return
         default:
-            overlay.show(.error("Allow the microphone in Settings › Dictation."))
+            refusal = "Allow the microphone in Settings › Dictation."
             return
         }
         do {
@@ -87,11 +94,14 @@ final class DictationController: ObservableObject {
             session = Task { try await engine.transcribe(audio, format: format) }
             overlay.show(.recording)
         } catch {
-            overlay.show(.error(error.localizedDescription))
+            refusal = error.localizedDescription
         }
     }
 
     private func cancel() {
+        refusal = nil
+        // Nothing records, so the pill of a dictation still transcribing stays.
+        guard session != nil else { return }
         capture.stop()
         session?.cancel()
         session = nil
@@ -99,17 +109,30 @@ final class DictationController: ObservableObject {
     }
 
     private func finish(duration: TimeInterval) {
+        if let refusal {
+            self.refusal = nil
+            overlay.show(.error(refusal))
+            return
+        }
         guard let session, let engine else { return }
         self.session = nil
         capture.stop()
+        // The launcher opened during the hold, such as with ⌘Space: a shortcut, not dictation.
+        guard canStart() else { session.cancel(); overlay.hide(); return }
+        finishing = true
         overlay.show(.transcribing)
         let target = self.target
         Task { @MainActor [weak self] in
+            defer { self?.finishing = false }
             guard let self else { return }
             do {
                 let raw = try await session.value
+                // Another app came forward, as after ⌘Tab, whose Tab key the monitors do not see.
+                // Checked before Luna and again before the paste, so text never goes to the wrong app.
+                guard self.isFront(target) else { self.notPasted(raw); return }
                 let cleaned = await self.model.cleanDictation(raw)
                 guard !cleaned.text.isEmpty else { self.overlay.show(.message("No speech heard.")); return }
+                guard self.isFront(target) else { self.notPasted(cleaned.text); return }
                 switch TextInserter.insert(cleaned.text) {
                 case .pasted: self.overlay.hide()
                 case .onClipboard: self.overlay.show(.message("Copied. Allow Accessibility to paste."))
@@ -124,5 +147,15 @@ final class DictationController: ObservableObject {
                 self.overlay.show(.error(error.localizedDescription))
             }
         }
+    }
+
+    private func isFront(_ target: String?) -> Bool {
+        canStart() && NSWorkspace.shared.frontmostApplication?.bundleIdentifier == target
+    }
+
+    /// The text is dropped: not pasted and not kept. Silence after a shortcut shows nothing.
+    private func notPasted(_ text: String) {
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { overlay.hide() }
+        else { overlay.show(.message("Not pasted: the app in front changed.")) }
     }
 }

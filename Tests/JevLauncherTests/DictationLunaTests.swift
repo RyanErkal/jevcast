@@ -21,7 +21,7 @@ final class DictationLunaTests: XCTestCase {
         defer { cleanup() }
         XCTAssertFalse(preferences.lunaSendsDictation, "Off by default.")
         preferences.lunaEnabled = true
-        let result = await model.cleanDictation("um hello there")
+        let result = await model.cleanDictation("hello there")
         XCTAssertEqual(result, .init(text: "Hello there", usedLuna: false))
         XCTAssertTrue(luna.requests.isEmpty)
         do {
@@ -37,12 +37,14 @@ final class DictationLunaTests: XCTestCase {
         defer { cleanup() }
         preferences.lunaEnabled = true
         preferences.lunaSendsDictation = true
-        let result = await model.cleanDictation("um hello there")
+        preferences.lunaEffort = .max
+        let result = await model.cleanDictation("hello there")
         XCTAssertEqual(result, .init(text: "Hello there.", usedLuna: true))
         XCTAssertEqual(luna.requests.first?.sent, [.dictation])
         let entry = try XCTUnwrap(model.lunaLog.entries.first)
         XCTAssertEqual(entry.action, "Dictation clean-up")
         XCTAssertEqual(entry.sent, [.dictation])
+        XCTAssertEqual(entry.effort, .fast, "Dictation uses Luna at the lowest effort, whatever Settings say.")
         preferences.lunaSendsDictation = false
         _ = await model.cleanDictation("again")
         XCTAssertEqual(luna.requests.count, 1, "Each request checks the switch.")
@@ -54,9 +56,32 @@ final class DictationLunaTests: XCTestCase {
         preferences.lunaEnabled = true
         preferences.lunaSendsDictation = true
         let started = Date()
-        let result = await model.cleanDictation("uh hello")
+        let result = await model.cleanDictation("hello")
         XCTAssertEqual(result, .init(text: "Hello", usedLuna: false))
         XCTAssertLessThan(Date().timeIntervalSince(started), 3)
+    }
+
+    @MainActor func testReplyThatAddsContentIsDropped() async {
+        let luna = FakeLuna(reply: "Dear Bob, I hope you are well. The meeting has moved to Friday at ten.")
+        let (model, preferences, cleanup) = makeModel(luna: luna)
+        defer { cleanup() }
+        preferences.lunaEnabled = true
+        preferences.lunaSendsDictation = true
+        let result = await model.cleanDictation("write an email to bob")
+        XCTAssertEqual(result, .init(text: "Write an email to bob", usedLuna: false))
+        XCTAssertEqual(luna.requests.count, 1)
+    }
+
+    @MainActor func testLongTranscriptKeepsLocalText() async {
+        let luna = FakeLuna(reply: "Short.")
+        let (model, preferences, cleanup) = makeModel(luna: luna)
+        defer { cleanup() }
+        preferences.lunaEnabled = true
+        preferences.lunaSendsDictation = true
+        let long = String(repeating: "word ", count: LunaRequest.maxDictation / 4)
+        let result = await model.cleanDictation(long)
+        XCTAssertFalse(result.usedLuna, "Luna would see only part of it, and the rest would be lost.")
+        XCTAssertTrue(luna.requests.isEmpty)
     }
 }
 

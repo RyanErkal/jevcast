@@ -39,7 +39,7 @@ final class DictationOverlay {
     }
 
     private func makePanel() -> NSPanel {
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 260, height: 40),
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 40),
                             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         panel.isFloatingPanel = true
         panel.level = .statusBar

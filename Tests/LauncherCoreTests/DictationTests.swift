@@ -25,6 +25,15 @@ final class DictationTests: XCTestCase {
         XCTAssertEqual(hold.handle(.rightCommand(down: true, at: 13)), .start)
     }
 
+    func testPressAfterMissedReleaseStartsAgain() {
+        var hold = DictationHold()
+        XCTAssertEqual(hold.handle(.rightCommand(down: true, at: 10)), .start)
+        XCTAssertEqual(hold.handle(.otherKey), .cancel)
+        // The release was never seen, such as during secure input. The next press must still work.
+        XCTAssertEqual(hold.handle(.rightCommand(down: true, at: 20)), .start)
+        XCTAssertEqual(hold.handle(.rightCommand(down: false, at: 21)), .finish(duration: 1))
+    }
+
     func testOtherKeysWhileIdleDoNothing() {
         var hold = DictationHold()
         XCTAssertNil(hold.handle(.otherKey))
@@ -38,6 +47,15 @@ final class DictationTests: XCTestCase {
         XCTAssertEqual(DictationText.clean("hello , world"), "Hello, world")
         XCTAssertEqual(DictationText.clean("um uh"), "")
         XCTAssertEqual(DictationText.clean("éclair time"), "Éclair time")
+        XCTAssertEqual(DictationText.clean("eu tenho um  carro", fillers: false), "Eu tenho um carro", "“um” is a word in Portuguese.")
+    }
+
+    func testLunaCleanupMayOnlyTidy() {
+        XCTAssertTrue(DictationText.isFaithful("Meet at six.", to: "Meet at five, no, six"))
+        XCTAssertTrue(DictationText.isFaithful("I don’t know.", to: "I don't know"))
+        XCTAssertFalse(DictationText.isFaithful("It is three o'clock.", to: "What time is it"), "An answer is not a clean-up.")
+        XCTAssertFalse(DictationText.isFaithful("Dear Bob, I hope you are well. The meeting moved to Friday.", to: "Write an email to Bob"))
+        XCTAssertFalse(DictationText.isFaithful("", to: "Hello"))
     }
 
     private func makeStore() -> (TranscriptStore, URL) {
@@ -58,6 +76,26 @@ final class DictationTests: XCTestCase {
         XCTAssertTrue(files[0].hasSuffix(".jsonl"))
         let lines = try String(contentsOf: folder.appendingPathComponent(files[0]), encoding: .utf8).split(separator: "\n")
         XCTAssertEqual(lines.count, 2)
+        let file = try FileManager.default.attributesOfItem(atPath: folder.appendingPathComponent(files[0]).path)
+        XCTAssertEqual((file[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+        let directory = try FileManager.default.attributesOfItem(atPath: folder.path)
+        XCTAssertEqual((directory[.posixPermissions] as? NSNumber)?.intValue, 0o700)
+    }
+
+    func testDamagedLineIsSkippedAndNextEntryKept() throws {
+        let (store, folder) = makeStore()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let first = Transcript(text: "Café", date: Date(timeIntervalSince1970: 1_700_000_000), duration: 1, target: nil, engine: "apple-speech")
+        try store.append(first, retention: .all)
+        let file = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil).first)
+        // A crash cut the next line in the middle of "é", so it has no newline and broken UTF-8.
+        let handle = try FileHandle(forWritingTo: file)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(#"{"text":"Caf"#.utf8) + Data([0xC3]))
+        try handle.close()
+        let next = Transcript(text: "Next", date: Date(timeIntervalSince1970: 1_700_000_050), duration: 1, target: nil, engine: "apple-speech")
+        try store.append(next, retention: .all)
+        XCTAssertEqual(store.all(), [next, first])
     }
 
     func testRetention() throws {
@@ -86,11 +124,11 @@ final class DictationTests: XCTestCase {
         XCTAssertTrue(store.all().isEmpty)
     }
 
-    func testDictationRequestUsesFastModelAndOwnContext() {
+    func testDictationRequestUsesLowestEffortAndOwnContext() {
         let request = LunaRequest.cleanDictation("um so hello")
         XCTAssertEqual(request.sent, [.dictation])
-        XCTAssertFalse(request.reasoning)
-        XCTAssertEqual(request.model, LunaRequest.dictationModel)
+        XCTAssertEqual(request.effort, .fast, "Luna at the lowest effort, so it is quick.")
+        XCTAssertNil(LunaRequest.ask("hi").effort, "Other requests follow Settings.")
         XCTAssertTrue(request.system.contains("Do not add content"))
         XCTAssertEqual(SourceQuery.parse("dictation history")?.kind, .dictation)
         XCTAssertEqual(SourceQuery.parse("dictation history meeting")?.filter, "meeting")

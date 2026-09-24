@@ -34,27 +34,31 @@ public struct TranscriptStore: Sendable {
     /// Adds one entry, unless the retention keeps none.
     public func append(_ transcript: Transcript, retention: DictationRetention) throws {
         guard retention != .none else { return }
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        // Only this user may read the history: the file is created 0600, never wider for a moment.
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let file = folder.appendingPathComponent(Self.dayName(transcript.date) + ".jsonl")
         var line = try Self.encoder().encode(transcript)
         line.append(0x0A)
-        if let handle = try? FileHandle(forWritingTo: file) {
-            defer { try? handle.close() }
-            try handle.seekToEnd()
-            try handle.write(contentsOf: line)
-        } else {
-            try line.write(to: file, options: [.atomic])
-            // Only this user may read the history.
-            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        let descriptor = open(file.path, O_RDWR | O_CREAT | O_APPEND | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        defer { try? handle.close() }
+        // A line cut short, such as by a crash, must not swallow this entry.
+        let end = try handle.seekToEnd()
+        if end > 0 {
+            try handle.seek(toOffset: end - 1)
+            if try handle.read(upToCount: 1) != Data([0x0A]) { line.insert(0x0A, at: 0) }
         }
+        // O_APPEND writes at the end whatever the offset.
+        try handle.write(contentsOf: line)
     }
 
-    /// Every entry, newest first. A damaged line is skipped.
+    /// Every entry, newest first. A damaged line, even one with broken UTF-8, is skipped.
     public func all() -> [Transcript] {
         let decoder = Self.decoder()
         return dayFiles().flatMap { file -> [Transcript] in
-            guard let text = try? String(contentsOf: file, encoding: .utf8) else { return [] }
-            return text.split(separator: "\n").compactMap { try? decoder.decode(Transcript.self, from: Data($0.utf8)) }
+            guard let data = try? Data(contentsOf: file) else { return [] }
+            return data.split(separator: 0x0A).compactMap { try? decoder.decode(Transcript.self, from: Data($0)) }
         }
         .sorted { $0.date > $1.date }
     }

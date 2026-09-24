@@ -8,8 +8,9 @@ public enum DictationText {
     private static let spaceBeforePunctuation = try! NSRegularExpression(pattern: #" +([,.!?;:])"#)
 
     /// Removes "um", "uh", and "erm", collapses spaces, trims, and capitalises the first letter.
-    public static func clean(_ text: String) -> String {
-        var result = replace(fillers, in: text, with: "")
+    /// `fillers` is for English only: "um" is a word in Portuguese and German.
+    public static func clean(_ text: String, fillers removeFillers: Bool = true) -> String {
+        var result = removeFillers ? replace(fillers, in: text, with: "") : text
         result = replace(spaces, in: result, with: " ")
         result = replace(spaceBeforePunctuation, in: result, with: "$1")
         result = result.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -17,6 +18,20 @@ public enum DictationText {
         while let first = result.first, ",;".contains(first) { result = String(result.dropFirst()).trimmingCharacters(in: .whitespaces) }
         guard let first = result.first else { return "" }
         return first.uppercased() + result.dropFirst()
+    }
+
+    /// True when Luna's clean-up only removed words and fixed punctuation: it is not longer, and
+    /// nearly every word in it was spoken. An answer or added text fails, and the local text is used.
+    public static func isFaithful(_ cleaned: String, to transcript: String) -> Bool {
+        let spoken = words(transcript), kept = words(cleaned)
+        guard !kept.isEmpty, kept.count <= spoken.count + 2 else { return false }
+        let known = Set(spoken)
+        return Double(kept.filter(known.contains).count) >= Double(kept.count) * 0.8
+    }
+
+    private static func words(_ text: String) -> [String] {
+        text.lowercased().replacingOccurrences(of: "’", with: "'")
+            .split { !$0.isLetter && !$0.isNumber && $0 != "'" }.map(String.init)
     }
 
     private static func replace(_ regex: NSRegularExpression, in text: String, with template: String) -> String {

@@ -43,12 +43,22 @@ final class AppleSpeechEngine: DictationEngine {
             for try await result in transcriber.results { parts.append(String(result.text.characters)) }
             return parts.joined(separator: " ")
         }
-        try await analyzer.start(inputSequence: inputs)
-        for await buffer in audio {
-            if let converted = converter.convert(buffer) { feed.yield(AnalyzerInput(buffer: converted)) }
+        do {
+            try await analyzer.start(inputSequence: inputs)
+            for await buffer in audio {
+                if let converted = converter.convert(buffer) { feed.yield(AnalyzerInput(buffer: converted)) }
+            }
+            feed.finish()
+            // A cancelled dictation is not transcribed.
+            try Task.checkCancellation()
+            try await analyzer.finalizeAndFinishThroughEndOfInput()
+        } catch {
+            // Stop the analyzer too, so the results task ends instead of waiting forever.
+            feed.finish()
+            await analyzer.cancelAndFinishNow()
+            collector.cancel()
+            throw error
         }
-        feed.finish()
-        do { try await analyzer.finalizeAndFinishThroughEndOfInput() } catch { collector.cancel(); throw error }
         return try await collector.value
     }
 }

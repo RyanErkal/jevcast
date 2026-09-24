@@ -27,7 +27,8 @@ public struct DictationHold: Equatable, Sendable {
 
     public mutating func handle(_ event: Event) -> Output? {
         switch (state, event) {
-        case (.idle, .rightCommand(down: true, let time)):
+        // A press while cancelled means the release after a chord was missed: start afresh.
+        case (.idle, .rightCommand(down: true, let time)), (.cancelled, .rightCommand(down: true, let time)):
             state = .holding(since: time); return .start
         case (.holding(let since), .rightCommand(down: false, let time)):
             state = .idle

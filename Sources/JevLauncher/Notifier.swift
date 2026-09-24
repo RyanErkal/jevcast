@@ -7,6 +7,8 @@ import UserNotifications
 enum Notifier {
     /// Asks once. Returns false when the user has turned notifications off for Jevcast.
     static func authorize() async -> Bool {
+        // Outside an app bundle, such as in tests or a diagnostic run, macOS has no notifications to give.
+        guard Bundle.main.bundleIdentifier != nil, Bundle.main.bundleURL.pathExtension == "app" else { return false }
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
         switch settings.authorizationStatus {

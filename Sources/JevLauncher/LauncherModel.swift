@@ -200,6 +200,8 @@ final class LauncherModel: ObservableObject {
     var answers: [String] = []
     /// The row Jev or local memory put first, and where the pick came from.
     var jevPick: (id: String, remembered: Bool)?
+    /// The app whose window a layered Jev pick moves, when the request named one loosely.
+    var jevWindowTarget: NSRunningApplication?
     /// Jev answers this session by request, so retyping a request costs nothing. Nil means no match.
     var replyCache: [String: (id: String?, at: Date)] = [:]
     let keys: JevKeyCache
@@ -246,6 +248,13 @@ final class LauncherModel: ObservableObject {
     let luna: LunaWriting
     let lunaKeys: JevKeyCache
     let lunaLog: LunaActivityLog
+    /// Scheduled Luna tasks. Made on first use; the app starts its clock at launch.
+    lazy var lunaTasks = LunaTaskCenter(defaults: preferences.storage, send: { [weak self] request in
+        guard let self else { throw CancellationError() }
+        return try await self.sendLuna(request)
+    }, allowed: { [weak self] in self?.allowedLunaContext ?? [] })
+    /// Opens a task result window, set by the app.
+    var openTaskRun: ((LunaTaskRun) -> Void)?
     /// Opens Settings › Luna, set by the app.
     var openLunaSettings: (() -> Void)?
     /// Opens the mail window, on a message when given; opens a new message to an address.
@@ -331,7 +340,7 @@ final class LauncherModel: ObservableObject {
             if !fileResults.isEmpty { previousFileResults = fileResults }
         } else { previousFileResults = [] }
         query = text; message = nil; manualSelection = false; fileResults = []; promotedID = nil; semanticResult = nil
-        pendingConfirmID = nil; portQuery = PortQuery.parse(text); listeners = []; portDetails = [:]; stoppedNotice = nil; jevPick = nil
+        pendingConfirmID = nil; portQuery = PortQuery.parse(text); listeners = []; portDetails = [:]; stoppedNotice = nil; jevPick = nil; jevWindowTarget = nil
         let previousKind = sourceQuery?.kind
         sourceQuery = isFileSearch || portQuery != nil ? nil : SourceQuery.parse(text)
         if sourceQuery.map({ source($0.kind) == nil }) ?? false { sourceQuery = nil }

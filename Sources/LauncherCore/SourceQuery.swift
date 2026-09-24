@@ -5,7 +5,7 @@ import Foundation
 /// these rows to a normal search, so "calendar" still lists the Calendar app.
 public struct SourceQuery: Equatable, Sendable {
     public enum Kind: String, CaseIterable, Sendable {
-        case scheduled, calendar, reminders, contacts, tabs, history, mail
+        case scheduled, calendar, reminders, contacts, tabs, history, mail, taskRuns
     }
     public let kind: Kind
     /// Words after the keyword, such as "slack" in "tabs slack". Empty lists everything.
@@ -14,7 +14,8 @@ public struct SourceQuery: Equatable, Sendable {
 
     /// Longest keywords first, so "scheduled tasks" wins over "tasks".
     private static let keywords: [(phrase: String, kind: Kind, takesFilter: Bool)] = [
-        ("scheduled tasks", .scheduled, true), ("scheduled jobs", .scheduled, true), ("background tasks", .scheduled, true),
+        ("task results", .taskRuns, true), ("luna results", .taskRuns, true), ("task log", .taskRuns, true), ("task runs", .taskRuns, true),
+        ("luna tasks", .scheduled, true), ("scheduled tasks", .scheduled, true), ("scheduled jobs", .scheduled, true), ("background tasks", .scheduled, true),
         ("background items", .scheduled, true), ("launch agents", .scheduled, true), ("launch daemons", .scheduled, true),
         ("login items", .scheduled, true), ("cron jobs", .scheduled, true), ("what runs at login", .scheduled, false),
         ("what runs on my mac", .scheduled, false), ("scheduled", .scheduled, true), ("schedules", .scheduled, true),

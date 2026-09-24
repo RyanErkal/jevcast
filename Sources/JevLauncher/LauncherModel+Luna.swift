@@ -86,6 +86,7 @@ extension LauncherModel {
         var allowed: Set<LunaContext> = [.typedText]
         if preferences.lunaSendsSelection { allowed.insert(.selectedText) }
         if preferences.lunaSendsMail { allowed.insert(.mailMessage) }
+        if preferences.lunaSendsCalendar { allowed.insert(.calendar) }
         return allowed
     }
 
@@ -155,5 +156,30 @@ extension LauncherModel {
 
     func dismissLuna() {
         lunaWork?.cancel(); lunaWork = nil; lunaAnswer = nil
+    }
+}
+
+extension LauncherModel {
+    /// "every weekday at 8am brief me on my meetings": a row that schedules a Luna task.
+    func taskRows(_ q: String) -> [LauncherResult] {
+        guard let task = LunaTaskQuery.parse(q) else { return [] }
+        var parts = [task.schedule.summary]
+        if !task.contexts.isEmpty { parts.append("reads " + task.contexts.map(\.title).joined(separator: ", ").lowercased()) }
+        guard lunaReady else {
+            let verb = Verb(title: "Open Luna Settings") { [weak self] in self?.openLunaSettings?(); return nil }
+            return [LauncherResult(id: "lunatask:new", title: "Schedule with Luna: " + task.prompt, detail: "Turn on Luna in Settings › Luna first",
+                                   symbol: "sparkles", action: .thing(Thing(verbs: [verb], twoLine: false)), score: 1850)]
+        }
+        let refused = lunaTasks.refused(task)
+        if !refused.isEmpty { parts.append("turn on " + refused.map(\.title).joined(separator: " and ").lowercased() + " in Settings › Luna") }
+        let verb = Verb(title: "Schedule Task") { [weak self] in
+            guard let self else { return nil }
+            self.lunaTasks.add(task)
+            let next = task.nextRun(after: Date()).map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "soon"
+            _ = await Notifier.post(title: "Scheduled: " + task.name, body: task.schedule.summary + ". First run " + next + ". “scheduled tasks” lists it.")
+            return nil
+        }
+        return [LauncherResult(id: "lunatask:new", title: "Schedule with Luna: " + task.prompt, detail: parts.joined(separator: " · "),
+                               symbol: "calendar.badge.clock", action: .thing(Thing(verbs: [verb], twoLine: false)), score: 1850)]
     }
 }

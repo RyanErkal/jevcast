@@ -8,7 +8,11 @@ final class ScheduledSource: ThingSource {
     let section = "Scheduled Tasks"
     private let timers: TimerCenter
     private let catalogue: AppCatalogue
-    init(timers: TimerCenter, catalogue: AppCatalogue) { self.timers = timers; self.catalogue = catalogue }
+    private let tasks: LunaTaskCenter?
+    private let openRun: (LunaTaskRun) -> Void
+    init(timers: TimerCenter, catalogue: AppCatalogue, tasks: LunaTaskCenter? = nil, openRun: @escaping (LunaTaskRun) -> Void = { _ in }) {
+        self.timers = timers; self.catalogue = catalogue; self.tasks = tasks; self.openRun = openRun
+    }
 
     nonisolated static let folders: [(path: String, domain: LaunchJob.Domain)] = [
         (NSHomeDirectory() + "/Library/LaunchAgents", .userAgent),
@@ -30,6 +34,13 @@ final class ScheduledSource: ThingSource {
         let text = words.filter { !["apple", "failing", "failed", "errors", "broken", "all"].contains($0) }.joined(separator: " ")
         let now = Date()
         var rows: [LauncherResult] = []
+        if let tasks {
+            for task in tasks.tasks {
+                if failingOnly, tasks.lastRun(of: task.id)?.succeeded != false { continue }
+                if !text.isEmpty, SearchRanking.score(query: text, title: task.name, aliases: ["luna", task.prompt]) == nil { continue }
+                rows.append(lunaRow(task, center: tasks, now: now))
+            }
+        }
         for timer in timers.active where text.isEmpty && !failingOnly {
             rows.append(LauncherResult(id: "cancel:" + timer.id, title: timer.title,
                                        detail: "Jevcast timer · ends " + timer.fires.formatted(date: .omitted, time: .shortened),
@@ -184,6 +195,32 @@ final class ScheduledSource: ThingSource {
             return nil
         })
         return verbs
+    }
+
+    private func lunaRow(_ task: LunaTask, center: LunaTaskCenter, now: Date) -> LauncherResult {
+        let last = center.lastRun(of: task.id)
+        var parts = [task.schedule.summary]
+        if task.enabled, let next = task.nextRun(after: now) { parts.append("next " + next.formatted(.relative(presentation: .named))) }
+        if !task.enabled { parts.append("paused") }
+        if let last { parts.append(last.succeeded ? "last run " + last.date.formatted(.relative(presentation: .named)) : "last run failed") }
+        let refused = center.refused(task)
+        if !refused.isEmpty { parts.append("needs " + refused.map(\.title).joined(separator: " and ").lowercased() + " in Settings › Luna") }
+        parts.append("Luna task")
+        var verbs: [Verb] = []
+        let openRun = self.openRun
+        if let last { verbs.append(Verb(title: "Show Last Result") { openRun(last); return nil }) }
+        verbs.append(Verb(title: "Run Now", after: .stay) { center.run(task); return "Running \(task.name). A notification shows the result." })
+        verbs.append(Verb(title: task.enabled ? "Pause" : "Resume", after: .stay) {
+            center.setEnabled(task.id, !task.enabled); return task.enabled ? "Paused \(task.name)." : "Resumed \(task.name)."
+        })
+        verbs.append(Verb(title: "Open Results Folder") {
+            try? FileManager.default.createDirectory(at: LunaTaskCenter.folder, withIntermediateDirectories: true)
+            NSWorkspace.shared.open(LunaTaskCenter.folder); return nil
+        })
+        verbs.append(Verb(title: "Delete Task", after: .stay) { center.remove(task.id); return "Deleted \(task.name)." })
+        let symbol = !refused.isEmpty || last?.succeeded == false ? "exclamationmark.triangle" : task.enabled ? "sparkles" : "pause.circle"
+        return LauncherResult(id: "lunatask:" + task.id, title: task.name, detail: parts.joined(separator: " · "), symbol: symbol,
+                              action: .thing(Thing(verbs: verbs)), score: 3050)
     }
 
     private func cronRow(_ job: CronJob, index: Int, now: Date) -> LauncherResult {

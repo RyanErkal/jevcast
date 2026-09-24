@@ -21,7 +21,7 @@ final class LauncherFlowTests: XCTestCase {
         let suite = "JevLauncherTests." + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!
         let preferences = Preferences(defaults: defaults)
-        preferences.voiceEnabled = false; preferences.jevEnabled = true; preferences.fileFolders = []
+        preferences.voiceEnabled = false; preferences.jevEnabled = true; preferences.jevLayered = false; preferences.fileFolders = []
         let model = LauncherModel(preferences: preferences, catalogue: AppCatalogue(loadCache: false), files: files ?? InstantFileSearch(),
                                   jev: jev, keys: JevKeyCache(key: "test-key"), clipboard: ClipboardHistory(pasteboard: board ?? FakePasteboard()))
         return (model, preferences, defaults, suite)

@@ -71,9 +71,10 @@ extension LauncherModel {
         let (candidates, ids) = jevCandidates()
         aiStatus = Self.interpreting
         do {
-            let reply = try await jev.choose(query: text, candidates: candidates, apiKey: key)
+            let chosen = try await preferences.jevLayered
+                ? layeredChoice(text, candidates: candidates, ids: ids, key: key, revision: current)
+                : jev.choose(query: text, candidates: candidates, apiKey: key).flatMap { ids[$0] }
             guard !Task.isCancelled, visible, self.revision == current else { return }
-            let chosen = reply.flatMap { ids[$0] }
             replyCache[LearnedIntents.normalize(text)] = (chosen, Date())
             aiStatus = chosen == nil ? "No clear AI match" : "Jev matched"
             guard let chosen else { return }
@@ -92,10 +93,23 @@ extension LauncherModel {
     /// Candidates for Jev under opaque IDs. The list puts what matches the request's words first,
     /// then every action, then likely apps. No path or command text appears in any ID, title, or detail.
     func jevCandidates() -> (candidates: [JevCandidate], ids: [String: String]) {
+        Self.opaque(jevEntries(limit: Self.jevCandidateLimit))
+    }
+
+    static func opaque(_ entries: [(id: String, title: String, detail: String)]) -> (candidates: [JevCandidate], ids: [String: String]) {
+        var ids: [String: String] = [:]
+        let candidates = entries.enumerated().map { index, entry in
+            ids["c\(index)"] = entry.id
+            return JevCandidate(id: "c\(index)", title: entry.title, detail: entry.detail)
+        }
+        return (candidates, ids)
+    }
+
+    func jevEntries(limit: Int) -> [(id: String, title: String, detail: String)] {
         var entries: [(id: String, title: String, detail: String)] = []
         var included = Set<String>()
         func add(_ id: String, _ title: String, _ detail: String) {
-            guard entries.count < Self.jevCandidateLimit, included.insert(id).inserted else { return }
+            guard entries.count < limit, included.insert(id).inserted else { return }
             entries.append((id, title, detail))
         }
         // 1. What is on screen now.
@@ -130,12 +144,72 @@ extension LauncherModel {
         }
         // 4. The rest of the pool, likely apps first.
         for entry in pool { add(entry.id, entry.title, entry.detail) }
-        var ids: [String: String] = [:]
-        let candidates = entries.enumerated().map { index, entry in
-            ids["c\(index)"] = entry.id
-            return JevCandidate(id: "c\(index)", title: entry.title, detail: entry.detail)
+        return entries
+    }
+
+    // MARK: Layers
+
+    /// Most candidates one step can send. TypeSafe allows 254 plus no_match.
+    static let layerLimit = 250
+
+    func jevKind(of id: String) -> JevKind? {
+        JevKind.of(id, isSettingsPane: catalogue.entries.first { $0.id == id }?.launchURL != nil)
+    }
+
+    /// Two quick questions at once: the single-list pick, and which kind of request this is. When
+    /// they agree, the pick stands at no extra wait. When they differ, Jev chooses again among
+    /// every candidate of that kind. A window move that names an app asks which app, last.
+    func layeredChoice(_ text: String, candidates: [JevCandidate], ids: [String: String], key: String, revision current: UUID) async throws -> String? {
+        let everything = jevEntries(limit: .max)
+        let kinds = JevKind.allCases.filter { kind in everything.contains { jevKind(of: $0.id) == kind } }
+        var kindIDs: [String: JevKind] = [:]
+        let kindCandidates = kinds.enumerated().map { index, kind -> JevCandidate in
+            kindIDs["k\(index)"] = kind
+            return JevCandidate(id: "k\(index)", title: kind.title, detail: kind.detail)
         }
-        return (candidates, ids)
+        async let flat = jev.choose(query: text, candidates: candidates, apiKey: key)
+        async let layer = jev.choose(query: text, candidates: kindCandidates, apiKey: key)
+        let pick = try await flat.flatMap { ids[$0] }
+        // The kind step is a check. If it fails, the single-list answer stands on its own.
+        let kind = ((try? await layer) ?? nil).flatMap { kindIDs[$0] }
+        guard !Task.isCancelled, visible, revision == current else { return nil }
+        var chosen: String?
+        switch JevLayerPlan.decide(pick: pick, pickKind: pick.flatMap(jevKind), kind: kind) {
+        case .accept(let id): chosen = id
+        case .noMatch: chosen = nil
+        case .narrow(let kind):
+            let narrowed = Array(everything.filter { jevKind(of: $0.id) == kind }.prefix(Self.layerLimit))
+            if narrowed.count == 1 { chosen = narrowed[0].id }
+            else if !narrowed.isEmpty {
+                let (second, secondIDs) = Self.opaque(narrowed)
+                chosen = try await jev.choose(query: text, candidates: second, apiKey: key).flatMap { secondIDs[$0] }
+            }
+        }
+        if let id = chosen, id.hasPrefix("window:"), let action = WindowAction(rawValue: String(id.dropFirst(7))),
+           let target = try await windowTarget(text, action: action, key: key) {
+            jevWindowTarget = target
+        }
+        return chosen
+    }
+
+    /// Which running app's window a request means, such as "put slack on the left", when no app
+    /// name matched exactly. Nil keeps the active window.
+    func windowTarget(_ text: String, action: WindowAction, key: String) async throws -> NSRunningApplication? {
+        guard namedTarget(in: text) == nil else { return nil }
+        let known = Set(([action.title] + action.aliases).flatMap { $0.lowercased().split(separator: " ").map(String.init) })
+        let spare = LearnedIntents.normalize(text).split(separator: " ").map(String.init)
+            .filter { $0.count >= 3 && !known.contains($0) && !["the", "this", "that", "window", "move", "put", "make", "and", "screen", "half", "side"].contains($0) }
+        guard !spare.isEmpty else { return nil }
+        let apps = catalogue.runningApplications.filter { $0.processIdentifier != getpid() && $0.activationPolicy == .regular && $0.localizedName != nil }
+        // Ask only when a word loosely names a running app, such as "chrom" or "the slack one".
+        let hinted = apps.contains { app in spare.contains { SearchRanking.score(query: $0, title: app.localizedName ?? "") ?? 0 >= 0.6 } }
+        guard apps.count > 1, hinted else { return nil }
+        var byID: [String: NSRunningApplication] = [:]
+        let options = apps.prefix(Self.layerLimit).enumerated().map { index, app -> JevCandidate in
+            byID["a\(index)"] = app
+            return JevCandidate(id: "a\(index)", title: app.localizedName ?? "App", detail: "The window of this running app")
+        }
+        return try await jev.choose(query: text, candidates: options, apiKey: key).flatMap { byID[$0] }
     }
 
     /// Apps, settings panes, Shortcuts, snippets, and menu items, with favourite, recent, and running apps first.
@@ -202,7 +276,8 @@ extension LauncherModel {
             updateQuery(route.query(query), typed: false)
             return
         }
-        var row = results.first { $0.id == chosen } ?? semanticRow(for: chosen)
+        // A window pick with an app Jev chose moves that app, not the active window.
+        var row = (chosen.hasPrefix("window:") && jevWindowTarget != nil ? nil : results.first { $0.id == chosen }) ?? semanticRow(for: chosen)
         // "open notes on the left" and "notes left half": one pick becomes open, then arrange.
         if let base = row, let compound = compoundUpgrade(base) { row = compound }
         // "search github for swift ui": keep the request's words as the search.
@@ -221,7 +296,7 @@ extension LauncherModel {
             return Self.appRow(app, running: running, score: 0)
         }
         if let action = WindowAction.allCases.first(where: { "window:" + $0.rawValue == id }) {
-            return windowRow(action, target: namedTarget(in: query), score: 0)
+            return windowRow(action, target: jevWindowTarget ?? namedTarget(in: query), score: 0)
         }
         if id.hasPrefix("quicklink:"), let link = preferences.quicklinks.first(where: { "quicklink:" + $0.id == id }), let url = link.url(for: "") {
             return LauncherResult(id: id, title: "Search " + link.name, detail: Self.hostDetail(url), symbol: "link", action: .url(url), score: 0)

@@ -1,4 +1,5 @@
 import AppKit
+import UserNotifications
 import SwiftUI
 import Carbon
 import LauncherCore
@@ -35,7 +36,7 @@ final class LauncherStatus: ObservableObject {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppCommands {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppCommands, UNUserNotificationCenterDelegate {
     private let preferences = Preferences()
     private lazy var updates = UpdateChecker(preferences: preferences)
     private var welcome: WelcomeWindow?
@@ -50,6 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     private var panel: LauncherPanel!
     private var settings: SettingsWindow?
     private var mail: MailWindow?
+    private var resultWindow: LunaResultWindow?
     private var statusMenu: StatusMenu?
     private var keyMonitor: Any?
     private var wasVisible = false
@@ -67,6 +69,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         model.onClose = { [weak self] restore in self?.hide(restoreFocus: restore) }
         model.openLunaSettings = { [weak self] in self?.showSettings(tab: .luna) }
         model.openMail = { [weak self] rowID in self?.showMail(select: rowID) }
+        model.openTaskRun = { [weak self] run in self?.showRun(run) }
+        UNUserNotificationCenter.current().delegate = self
+        // Snapshot runs never run tasks.
+        if UISnapshots.directory == nil { model.lunaTasks.start() }
         model.composeMail = { [weak self] address in self?.showMail(compose: address) }
         model.onFailure = { [weak self] text in
             guard let self else { return }
@@ -321,6 +327,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     func applicationDidChangeScreenParameters(_ notification: Notification) {
         // Never leave a stale click catcher after a display is disconnected.
         hide()
+    }
+    /// A scheduled task's result.
+    func showRun(_ run: LunaTaskRun) {
+        hide(restoreFocus: false)
+        resultWindow = LunaResultWindow(run: run)
+        resultWindow?.show()
+    }
+    /// Shows task results while Jevcast is in front too.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner, .list, .sound]
+    }
+    /// A click on a task's notification opens its result.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        guard let id = response.notification.request.content.userInfo["lunaRun"] as? String else { return }
+        await MainActor.run {
+            if let run = self.model.lunaTasks.runs.first(where: { $0.id == id }) { self.showRun(run) }
+        }
     }
     /// The Jevcast mail window, made on first use.
     func showMail(select rowID: Int64? = nil, compose address: String? = nil) {

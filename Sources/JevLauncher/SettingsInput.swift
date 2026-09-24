@@ -55,6 +55,9 @@ struct InputSettings: View {
                      ? "Jev reads each request after a short pause, typed or spoken. It gets the text and candidate names, never file paths, command text, or audio."
                      : "Add a key to turn this on.")
                     .font(.caption).foregroundStyle(.secondary)
+                Toggle("Check the kind of request first", isOn: $preferences.jevLayered).disabled(!keys.hasKey || !preferences.jevEnabled)
+                Text("Jev also names the kind of request, such as “open an app” or “move a window”. When that disagrees with its first pick, it chooses again among every item of that kind. Most requests cost two small calls at once; a disagreement adds a third.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

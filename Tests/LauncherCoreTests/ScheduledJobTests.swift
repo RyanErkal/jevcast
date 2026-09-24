@@ -123,3 +123,15 @@ final class ScheduledJobTests: XCTestCase {
         XCTAssertEqual(ShellQuote.join(["/bin/echo", "it's here", "plain"]), "/bin/echo 'it'\\''s here' plain")
     }
 }
+
+final class DiscoveryQueryTests: XCTestCase {
+    func testDiscoveryWords() {
+        XCTAssertEqual(SourceQuery.parse("show automations")?.kind, .scheduled)
+        XCTAssertEqual(SourceQuery.parse("schedule")?.kind, .scheduled)
+        XCTAssertEqual(SourceQuery.parse("help")?.kind, .help)
+        XCTAssertEqual(SourceQuery.parse("what can you do")?.kind, .help)
+        XCTAssertEqual(SourceQuery.parse("show mail")?.explicit, true)
+        XCTAssertEqual(SourceQuery.parse("mail")?.explicit, false)
+        XCTAssertEqual(SourceQuery.parse("check my inbox")?.explicit, true)
+    }
+}

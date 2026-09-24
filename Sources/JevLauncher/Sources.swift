@@ -31,6 +31,7 @@ extension LauncherModel {
         let made: ThingSource?
         switch kind {
         case .scheduled: made = ScheduledSource(timers: timers, catalogue: catalogue, tasks: lunaTasks, openRun: { [weak self] in self?.openTaskRun?($0) })
+        case .help: made = HelpSource()
         case .taskRuns: made = TaskRunsSource(tasks: lunaTasks, openRun: { [weak self] in self?.openTaskRun?($0) })
         case .calendar: made = CalendarSource()
         case .reminders: made = RemindersSource()
@@ -58,6 +59,7 @@ extension LauncherModel {
         sourceProblem = nil
         sourceTask?.cancel()
         let filter = sourceQuery.filter
+        (source as? MailSource)?.explicit = sourceQuery.explicit
         sourceTask = Task { @MainActor [weak self] in
             if delay > 0 { try? await Task.sleep(nanoseconds: delay) }
             guard !Task.isCancelled, let self, self.visible, self.revision == current else { return }

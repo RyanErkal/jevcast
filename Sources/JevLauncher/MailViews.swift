@@ -48,12 +48,25 @@ struct MailSetupView: View {
         VStack(spacing: 14) {
             Image(systemName: needsAccess ? "lock.shield" : "envelope").font(.system(size: 40)).foregroundStyle(.secondary)
             Text(needsAccess ? "Allow Jevcast to read Mail" : "Set up Apple Mail first").font(.title2.weight(.semibold))
-            Text(needsAccess
-                 ? "Jevcast reads Apple Mail's messages on this Mac. macOS protects them, so turn on Jevcast in System Settings › Privacy & Security › Full Disk Access. Nothing leaves your Mac unless you use Luna on a message."
-                 : "Jevcast shows the accounts you add to Apple Mail. Add an account in Mail, then check again.")
-                .multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 440)
-            HStack {
-                if needsAccess { Button("Open Full Disk Access") { Permissions.open("Privacy_AllFiles") } }
+            if needsAccess {
+                Text("macOS protects Apple Mail's messages. Full Disk Access does not list apps by itself, so add Jevcast once:")
+                    .multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 460)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("1. Click Open Full Disk Access.")
+                    Text("2. Click + below the list, choose Jevcast in Applications, and click Open. Or drag Jevcast from the Finder window into the list.")
+                    Text("3. Make sure the Jevcast switch is on.")
+                    Text("4. Click Restart Jevcast. macOS applies the access only to a new start.")
+                }
+                .font(.callout).frame(maxWidth: 460, alignment: .leading)
+                Text("Nothing leaves your Mac unless you use Luna on a message.").font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Button("Open Full Disk Access") { Permissions.open("Privacy_AllFiles") }
+                    Button("Show Jevcast in Finder") { NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL]) }
+                    Button("Restart Jevcast") { Relaunch.now() }.keyboardShortcut(.defaultAction)
+                }
+            } else {
+                Text("Jevcast shows the accounts you add to Apple Mail. Add an account in Mail, then check again.")
+                    .multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 440)
                 Button("Check Again") { model.refreshStatus() }.keyboardShortcut(.defaultAction)
             }
         }

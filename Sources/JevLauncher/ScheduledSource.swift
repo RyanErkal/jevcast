@@ -126,8 +126,9 @@ final class ScheduledSource: ThingSource {
         parts += warnings
         if name != job.label { parts.append(job.label) }
         let symbol = !warnings.isEmpty ? "exclamationmark.triangle" : off ? "pause.circle" : (status?.lastExit ?? 0) != 0 ? "xmark.octagon" : "clock.arrow.circlepath"
-        // Failing and unusual jobs first, then the rest by name.
-        let score = 2000 + (warnings.isEmpty ? 0 : 200) + ((status?.lastExit ?? 0) != 0 ? 100 : 0)
+        // Your own agents first, then agents for all users, then daemons. Within each, failing and unusual first.
+        let domainScore: Int = job.domain == .userAgent ? 2600 : job.domain == .globalAgent ? 2300 : 2000
+        let score = domainScore + (warnings.isEmpty ? 0 : 20) + ((status?.lastExit ?? 0) != 0 ? 50 : 0)
         return LauncherResult(id: job.id, title: name, detail: parts.joined(separator: " · "), symbol: symbol,
                               action: .thing(Thing(verbs: verbs(job, off: off, loaded: status != nil), path: job.plistPath)), score: Double(score))
     }

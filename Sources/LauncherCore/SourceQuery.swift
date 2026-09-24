@@ -5,17 +5,23 @@ import Foundation
 /// these rows to a normal search, so "calendar" still lists the Calendar app.
 public struct SourceQuery: Equatable, Sendable {
     public enum Kind: String, CaseIterable, Sendable {
-        case scheduled, calendar, reminders, contacts, tabs, history, mail, taskRuns
+        case scheduled, calendar, reminders, contacts, tabs, history, mail, taskRuns, help
     }
     public let kind: Kind
     /// Words after the keyword, such as "slack" in "tabs slack". Empty lists everything.
     public let filter: String
-    public init(kind: Kind, filter: String) { self.kind = kind; self.filter = filter }
+    /// True when the words clearly ask for the list, such as "show mail" rather than "mail",
+    /// so its main row may rank above an app with the same name.
+    public let explicit: Bool
+    public init(kind: Kind, filter: String, explicit: Bool = false) { self.kind = kind; self.filter = filter; self.explicit = explicit }
+    public static func == (lhs: SourceQuery, rhs: SourceQuery) -> Bool { lhs.kind == rhs.kind && lhs.filter == rhs.filter }
 
     /// Longest keywords first, so "scheduled tasks" wins over "tasks".
     private static let keywords: [(phrase: String, kind: Kind, takesFilter: Bool)] = [
         ("task results", .taskRuns, true), ("luna results", .taskRuns, true), ("task log", .taskRuns, true), ("task runs", .taskRuns, true),
-        ("luna tasks", .scheduled, true), ("scheduled tasks", .scheduled, true), ("scheduled jobs", .scheduled, true), ("background tasks", .scheduled, true),
+        ("what can you do", .help, false), ("what can jevcast do", .help, false), ("help", .help, true), ("jevcast", .help, true),
+        ("my automations", .scheduled, true), ("automations", .scheduled, true), ("automation", .scheduled, true),
+        ("luna tasks", .scheduled, true), ("scheduled tasks", .scheduled, true), ("schedule", .scheduled, true), ("scheduled jobs", .scheduled, true), ("background tasks", .scheduled, true),
         ("background items", .scheduled, true), ("launch agents", .scheduled, true), ("launch daemons", .scheduled, true),
         ("login items", .scheduled, true), ("cron jobs", .scheduled, true), ("what runs at login", .scheduled, false),
         ("what runs on my mac", .scheduled, false), ("scheduled", .scheduled, true), ("schedules", .scheduled, true),
@@ -37,13 +43,14 @@ public struct SourceQuery: Equatable, Sendable {
         guard !words.isEmpty else { return nil }
         let full = words.joined(separator: " ")
         // Whole-phrase keywords that read as a question keep their lead-in words.
-        for entry in keywords where !entry.takesFilter && full == entry.phrase { return SourceQuery(kind: entry.kind, filter: "") }
+        for entry in keywords where !entry.takesFilter && full == entry.phrase { return SourceQuery(kind: entry.kind, filter: "", explicit: true) }
+        let hadLeadIn = words.count > 1 && leadIns.contains(words[0])
         while words.count > 1, leadIns.contains(words[0]) { words.removeFirst() }
         let phrase = words.joined(separator: " ")
         for entry in keywords {
-            if phrase == entry.phrase { return SourceQuery(kind: entry.kind, filter: "") }
+            if phrase == entry.phrase { return SourceQuery(kind: entry.kind, filter: "", explicit: hadLeadIn || entry.phrase.contains(" ")) }
             guard entry.takesFilter, phrase.hasPrefix(entry.phrase + " ") else { continue }
-            return SourceQuery(kind: entry.kind, filter: String(phrase.dropFirst(entry.phrase.count + 1)).trimmingCharacters(in: .whitespaces))
+            return SourceQuery(kind: entry.kind, filter: String(phrase.dropFirst(entry.phrase.count + 1)).trimmingCharacters(in: .whitespaces), explicit: true)
         }
         // "history slack" searches browser history. Bare "history" stays the calculator history.
         if words.count >= 2, words[0] == "history" {

@@ -153,13 +153,13 @@ final class ScheduledSource: ThingSource {
                 return nil
             })
         }
-        verbs.append(Verb(title: "Copy Label", after: .stay) { copy(job.label); return "Label copied." })
+        verbs.append(Verb(title: "Copy Label", after: .stay) { copyText(job.label); return "Label copied." })
         if !job.program.isEmpty {
-            verbs.append(Verb(title: "Copy Command", after: .stay) { copy(ShellQuote.join(job.program)); return "Command copied." })
+            verbs.append(Verb(title: "Copy Command", after: .stay) { copyText(ShellQuote.join(job.program)); return "Command copied." })
         }
         if job.domain == .daemon {
             verbs.append(Verb(title: "Copy sudo Command to Turn Off", after: .stay) {
-                copy("sudo launchctl bootout system " + ShellQuote.quote(plist)); return "Command copied. Paste it in Terminal."
+                copyText("sudo launchctl bootout system " + ShellQuote.quote(plist)); return "Command copied. Paste it in Terminal."
             })
         }
         verbs.append(Verb(title: "Open Login Items Settings") {
@@ -174,14 +174,10 @@ final class ScheduledSource: ThingSource {
         if let next = job.nextRun(after: now) { parts.append("next " + next.formatted(.relative(presentation: .named))) }
         parts.append("crontab")
         let verbs = [
-            Verb(title: "Copy Command", after: .stay) { copy(job.command); return "Command copied." },
-            Verb(title: "Copy Line", after: .stay) { copy(job.line); return "Line copied." }
+            Verb(title: "Copy Command", after: .stay) { copyText(job.command); return "Command copied." },
+            Verb(title: "Copy Line", after: .stay) { copyText(job.line); return "Line copied." }
         ]
         return LauncherResult(id: job.id, title: job.command, detail: parts.joined(separator: " · "), symbol: "calendar.badge.clock",
                               action: .thing(Thing(verbs: verbs)), score: 1900)
     }
-}
-
-@MainActor private func copy(_ text: String) {
-    NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
 }

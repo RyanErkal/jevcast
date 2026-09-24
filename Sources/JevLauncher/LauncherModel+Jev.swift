@@ -17,7 +17,9 @@ extension LauncherModel {
         ("route:recent", "Recent files", "List the files changed most recently", { _ in "recent files" }),
         ("route:clip", "Clipboard history", "Show text the user copied earlier", { _ in "clip" }),
         ("route:timers", "Running timers", "Show and cancel timers", { _ in "timers" }),
-        ("route:scheduled", "Scheduled tasks", "Show what runs on a schedule or in the background: launch agents, daemons, cron jobs, login items, and timers", { _ in "scheduled tasks" })
+        ("route:scheduled", "Scheduled tasks", "Show what runs on a schedule or in the background: launch agents, daemons, cron jobs, login items, and timers", { _ in "scheduled tasks" }),
+        ("route:calendar", "Calendar events", "Show upcoming events and meetings, and join video calls", { _ in "calendar" }),
+        ("route:reminders", "Reminders", "Show open reminders and to-dos, and complete them", { _ in "reminders" })
     ]
 
     /// Called after every change to the query. Waits for a pause, then answers from

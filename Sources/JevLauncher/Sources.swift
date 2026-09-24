@@ -25,6 +25,9 @@ extension LauncherModel {
         let made: ThingSource?
         switch kind {
         case .scheduled: made = ScheduledSource(timers: timers, catalogue: catalogue)
+        case .calendar: made = CalendarSource()
+        case .reminders: made = RemindersSource()
+        case .contacts: made = ContactsSource()
         default: made = nil
         }
         sources[kind] = made

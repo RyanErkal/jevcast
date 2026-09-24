@@ -22,18 +22,21 @@ extension LauncherModel {
     /// Asks Jev for the source and target places at once, then converts locally.
     /// Nil when Jev finds no target or both sides are the same place.
     func clockRow(for text: String, key: String) async throws -> LauncherResult? {
-        guard let clock = TimeZoneQuery.clock(in: text) else { return nil }
+        // "the time in cork if it's 6pm here": the typed time wins over "time".
+        guard let clock = TimeZoneQuery.clock(in: text, explicitOnly: true) ?? TimeZoneQuery.clock(in: text) else { return nil }
         let here = (id: Self.clockLocalChoice, title: "Here", detail: "The user's own time zone: me, here, local, my time, or no place named")
         let (candidates, ids) = Self.opaque([here] + TimeZonePlaces.choices(for: text))
         async let fromReply = jev.choose(query: "The place the time is in, in this request: " + text, candidates: candidates, apiKey: key)
         async let toReply = jev.choose(query: "The place to give the time in, in this request: " + text, candidates: candidates, apiKey: key)
         var fromID = try await fromReply.flatMap { ids[$0] }
-        let toID = try await toReply.flatMap { ids[$0] }
-        // "6pm for my mate in cork" names one place, and both questions may pick it. The source is then the user's own zone.
-        if fromID == toID { fromID = nil }
+        var toID = try await toReply.flatMap { ids[$0] }
+        // One named place, picked twice. "…for me" makes the user's zone the target; otherwise it is the source.
+        if fromID == toID {
+            if TimeZoneQuery.mentionsLocal(text) { toID = Self.clockLocalChoice } else { fromID = nil }
+        }
         // Only IDs from the list resolve. A missing source is the user's own zone; a missing target is no answer.
         func place(_ id: String?) -> TimeZonePlace? { id.flatMap(TimeZonePlaces.place(forChoice:)) }
-        guard let toID else { return nil }
+        guard let toID, toID != fromID else { return nil }
         guard let answer = TimeZoneQuery.convert(clock, from: place(fromID), to: place(toID)) else { return nil }
         return Self.clockRow(answer, score: 0)
     }

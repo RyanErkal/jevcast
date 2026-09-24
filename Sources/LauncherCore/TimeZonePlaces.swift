@@ -47,7 +47,9 @@ public enum TimeZonePlaces {
         ("Europe/Lisbon", "Portugal", ["portugal", "lisbon", "porto"], nil),
         ("Europe/Paris", "France", ["france", "paris", "lyon", "marseille", "nice"], nil),
         ("Europe/Madrid", "Spain", ["spain", "madrid", "barcelona", "valencia", "seville"], nil),
-        ("Europe/Berlin", "Germany", ["germany", "berlin", "munich", "hamburg", "frankfurt", "cologne", "cet", "cest", "central european time"], nil),
+        ("Europe/Berlin", "Germany", ["germany", "berlin", "munich", "hamburg", "frankfurt", "cologne"], nil),
+        ("Europe/Berlin", "Central European Time", ["cet", "cest", "central european time"], nil),
+        ("Europe/Athens", "Eastern European Time", ["eet", "eest", "eastern european time"], nil),
         ("Europe/Amsterdam", "Netherlands", ["netherlands", "holland", "amsterdam", "rotterdam"], nil),
         ("Europe/Brussels", "Belgium", ["belgium", "brussels"], nil),
         ("Europe/Zurich", "Switzerland", ["switzerland", "zurich", "geneva"], nil),
@@ -59,7 +61,7 @@ public enum TimeZonePlaces {
         ("Europe/Warsaw", "Poland", ["poland", "warsaw", "krakow"], nil),
         ("Europe/Prague", "Czechia", ["czechia", "czech republic", "prague"], nil),
         ("Europe/Helsinki", "Finland", ["finland", "helsinki"], nil),
-        ("Europe/Athens", "Greece", ["greece", "athens", "eet", "eest"], nil),
+        ("Europe/Athens", "Greece", ["greece", "athens"], nil),
         ("Europe/Istanbul", "Turkey", ["turkey", "istanbul", "ankara"], nil),
         ("Europe/Kyiv", "Ukraine", ["ukraine", "kyiv", "kiev"], nil),
         ("Europe/Moscow", "Moscow", ["russia", "moscow", "msk"], "Moscow time assumed"),
@@ -71,8 +73,8 @@ public enum TimeZonePlaces {
         ("Asia/Riyadh", "Saudi Arabia", ["saudi arabia", "riyadh"], nil),
         ("Asia/Jerusalem", "Israel", ["israel", "tel aviv", "jerusalem"], nil),
         ("Asia/Karachi", "Pakistan", ["pakistan", "karachi", "lahore"], nil),
-        ("Asia/Kolkata", "IST", ["ist"], "IST read as India Standard Time"),
         ("Asia/Kolkata", "India", ["india", "mumbai", "delhi", "new delhi", "bangalore", "bengaluru", "chennai", "hyderabad", "kolkata", "pune"], nil),
+        ("Asia/Kolkata", "India", ["ist"], "IST read as India Standard Time"),
         ("Asia/Dhaka", "Bangladesh", ["bangladesh", "dhaka"], nil),
         ("Asia/Bangkok", "Thailand", ["thailand", "bangkok"], nil),
         ("Asia/Ho_Chi_Minh", "Vietnam", ["vietnam", "hanoi", "ho chi minh city", "saigon"], nil),
@@ -92,8 +94,8 @@ public enum TimeZonePlaces {
         ("Australia/Adelaide", "Adelaide", ["adelaide", "south australia"], nil),
         ("Australia/Perth", "Perth", ["perth", "western australia", "awst"], nil),
         ("Pacific/Auckland", "New Zealand", ["new zealand", "nz", "auckland", "wellington", "nzst", "nzdt"], nil),
-        ("UTC", "UTC", ["utc", "zulu"], nil),
-        ("GMT", "GMT", ["gmt", "greenwich mean time"], nil)
+        ("UTC", "Coordinated Universal Time", ["utc", "zulu"], nil),
+        ("GMT", "Greenwich Mean Time", ["gmt", "greenwich mean time"], nil)
     ]
 
     private static let byAlias: [String: TimeZonePlace] = {
@@ -102,7 +104,8 @@ public enum TimeZonePlaces {
             for alias in row.aliases where map[alias] == nil {
                 let fixed = abbreviations[alias].map { (text: alias.uppercased(), offset: $0 * 3600) }
                 // A city the user typed keeps its own name: "atlanta" shows as Atlanta, not New York.
-                let typed = alias.count > 3 && alias == alias.lowercased() && fixed == nil && !row.name.lowercased().contains(alias)
+                let typed = alias.count > 3 && !alias.contains(".") && !alias.split(separator: " ").contains { $0.count <= 2 }
+                    && fixed == nil && !row.name.lowercased().contains(alias)
                     ? alias.split(separator: " ").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ") : row.name
                 map[alias] = TimeZonePlace(name: row.note == nil ? typed : row.name, zone: row.zone, note: row.note, abbreviation: fixed)
             }
@@ -125,7 +128,13 @@ public enum TimeZonePlaces {
         "christmas", "easter", "wake", "center", "jersey", "casey", "davis", "palmer", "troll", "vostok", "macquarie",
         "guernsey", "man", "midway", "chatham", "eucla", "mawson", "syowa", "rothera", "mcmurdo", "dumontdurville",
         "creston", "louisville", "monticello", "marengo", "vevay", "winamac", "knox", "petersburg", "tell city", "vincennes",
-        "beulah", "new salem", "chagos", "reunion", "mayotte", "barbados", "guam", "fiji", "samoa", "tahiti", "nauru"
+        "beulah", "new salem", "norfolk", "san juan", "stanley", "chagos", "reunion", "mayotte", "barbados", "guam", "fiji", "samoa", "tahiti", "nauru"
+    ]
+
+    /// Single words that are places but usually mean something else in loose text.
+    private static let ordinaryWords: Set<String> = [
+        "nice", "central", "eastern", "pacific", "mountain", "turkey", "charlotte", "victoria", "georgia", "austin",
+        "phoenix", "portland", "orlando", "ohio", "rio", "china", "america", "washington", "jordan", "chad", "lima"
     ]
 
     /// The fixed UTC offset each abbreviation names, in hours.
@@ -137,13 +146,13 @@ public enum TimeZonePlaces {
 
     /// Every known place named in the text, longest names first, for Jev's candidate list.
     public static func mentioned(in text: String) -> [(key: String, place: TimeZonePlace)] {
-        let words = text.lowercased().split { !$0.isLetter && $0 != "." }.map(String.init)
+        let words = text.lowercased().split { !$0.isLetter }.map(String.init)
         var found: [(key: String, place: TimeZonePlace)] = []
         for length in stride(from: 3, through: 1, by: -1) where words.count >= length {
             for start in 0...(words.count - length) {
                 let key = words[start..<start + length].joined(separator: " ")
                 // Short keys such as "la" or "ct" are too easily ordinary words in loose text.
-                guard key.count > 2 || length > 1, let place = byAlias[key], !found.contains(where: { $0.key.contains(key) }) else { continue }
+                guard key.count > 2 || length > 1, length > 1 || !ordinaryWords.contains(key), let place = byAlias[key], !found.contains(where: { $0.key.contains(key) }) else { continue }
                 found.append((key, place))
             }
         }
@@ -156,6 +165,8 @@ public enum TimeZonePlaces {
             .replacingOccurrences(of: "?", with: " ")
             .split(whereSeparator: \.isWhitespace).map(String.init)
         if words.first == "the" { words.removeFirst() }
+        // "british time" is a name of its own; try it whole before "time" is dropped.
+        if let whole = byAlias[words.joined(separator: " ")] { return whole }
         if words.suffix(2) == ["time", "zone"] { words.removeLast(2) }
         while let last = words.last, ["time", "timezone", "zone"].contains(last) { words.removeLast() }
         guard !words.isEmpty else { return nil }

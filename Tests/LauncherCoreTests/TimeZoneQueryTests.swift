@@ -59,6 +59,21 @@ final class TimeZoneQueryTests: XCTestCase {
         XCTAssertNil(TimeZoneQuery.clock(in: "screen time", explicitOnly: true))
     }
 
+    func testSecondReviewFixes() {
+        XCTAssertEqual(title("what's 8pm tonight in new york"), "3:00 PM EDT")
+        XCTAssertEqual(title("3pm british time in pst"), "7:00 AM PDT")
+        XCTAssertEqual(title("3pm greenwich mean time in pst"), "8:00 AM PDT")
+        XCTAssertEqual(title("6pm my time in tokyo"), "2:00 AM JST")
+        XCTAssertEqual(TimeZoneQuery.evaluate("noon ist in dublin", now: september, local: london)?.detail.hasPrefix("12:00 PM IST India →"), true)
+        XCTAssertEqual(TimeZoneQuery.evaluate("3pm washington dc in uk", now: september, local: london)?.detail.contains("New York →"), true)
+        XCTAssertNil(title("6pm in norfolk"))
+        XCTAssertTrue(TimeZonePlaces.mentioned(in: "screen time for charlotte").isEmpty)
+        XCTAssertEqual(TimeZonePlaces.mentioned(in: "6pm in cork.").first?.place.name, "Cork")
+        XCTAssertEqual(TimeZoneQuery.clock(in: "whats the time in cork if its 6pm in georgia", explicitOnly: true)?.hour, 18)
+        XCTAssertTrue(TimeZoneQuery.mentionsLocal("when is that for me"))
+        XCTAssertFalse(TimeZoneQuery.mentionsLocal("6pm for my mate in cork"))
+    }
+
     func testClockChangeDays() {
         let skipped = TimeZoneQuery.evaluate("1:30am london in new york", now: ISO8601DateFormatter().date(from: "2026-03-29T12:00:00Z")!, local: london)
         XCTAssertTrue(skipped?.detail.contains("time moved forward") ?? false)

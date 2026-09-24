@@ -25,7 +25,7 @@ public enum TimeZoneQuery {
     /// Targets that mean the Mac's own time zone.
     private static let localNames: Set<String> = ["me", "here", "local", "local time", "my time", "mine", "my timezone", "my time zone", "our time"]
     /// Words that say a different day or a later moment. The answer would need a date, so there is none.
-    private static let relativeWords: Set<String> = ["tomorrow", "yesterday", "tonight", "later", "ago", "hours", "hour", "minutes", "mins", "hrs",
+    private static let relativeWords: Set<String> = ["tomorrow", "yesterday", "later", "ago", "hours", "hour", "minutes", "mins", "hrs",
                                                      "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "next", "last"]
 
     /// The local answer, or nil when the text is not a clear time conversion.
@@ -48,7 +48,7 @@ public enum TimeZoneQuery {
                     target = named
                 }
                 let source: TimeZonePlace?
-                if sourceText.isEmpty { source = nil } else {
+                if sourceText.isEmpty || localNames.contains(sourceText) { source = nil } else {
                     guard let named = TimeZonePlaces.place(sourceText) else { continue }
                     source = named
                 }
@@ -56,6 +56,15 @@ public enum TimeZoneQuery {
             }
         }
         return nil
+    }
+
+    /// True when the text names the user's own zone: "for me", "here", "my time", "local".
+    public static func mentionsLocal(_ text: String) -> Bool {
+        let words = normalized(text).split(separator: " ").map(String.init)
+        return localNames.contains { name in
+            let parts = name.split(separator: " ").map(String.init)
+            return words.count >= parts.count && (0...(words.count - parts.count)).contains { Array(words[$0..<$0 + parts.count]) == parts }
+        }
     }
 
     /// A clock time anywhere in the text, for Jev to work with. `now` and `time` count only when
@@ -129,7 +138,7 @@ public enum TimeZoneQuery {
     }
 
     /// Words around a place that carry no meaning: "6pm from london", "3pm in london in tokyo".
-    private static let fillers: Set<String> = ["now", "right", "current", "from", "in", "at", "the"]
+    private static let fillers: Set<String> = ["now", "right", "current", "from", "in", "at", "the", "tonight", "today"]
 
     /// "6pm atlanta time" → (6 PM, "atlanta time"). Also "atlanta 6pm". The rest may be empty.
     private static func leadingClock(_ text: String) -> (Clock, String)? {

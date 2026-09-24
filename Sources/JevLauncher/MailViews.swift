@@ -197,12 +197,12 @@ struct MailReader: View {
 
     @ViewBuilder private func body(_ message: MailSummary) -> some View {
         if let detail = model.detail {
-            // Plain text first: it is lighter and quicker to read. HTML only when there is no text part.
-            if let html = detail.html, (detail.plainText ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                MailHTMLView(html: html).padding(.horizontal, 10)
+            // The message as the sender styled it, with its images. Plain text only when there is no HTML.
+            if let html = detail.html {
+                MailHTMLView(html: html, inlineImages: detail.inlineImages, loadsRemote: model.loadsImages)
             } else {
                 ScrollView {
-                    Text(detail.readableText).font(.system(size: 13)).textSelection(.enabled)
+                    Text(MailText.linked(detail.readableText)).font(.system(size: 13)).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading).padding(14)
                 }
             }
@@ -229,6 +229,7 @@ struct MailReader: View {
             Menu {
                 Button("Delete All from \(model.selected?.sender ?? "Sender")", role: .destructive) { model.deleteAllFromSender() }
                 if model.canUseLuna { Button("Summarise with Luna") { model.summarise() }.disabled(model.detail == nil || model.lunaBusy) }
+                Toggle("Load Images from the Web", isOn: $model.loadsImages)
                 Button("Open in Mail (Return)") { model.openInMail() }
             } label: { Image(systemName: "ellipsis.circle") }
             .menuIndicator(.hidden).fixedSize()

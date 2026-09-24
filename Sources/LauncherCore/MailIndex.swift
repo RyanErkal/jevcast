@@ -91,10 +91,12 @@ public enum MailFiles {
 /// message ID, and any text. Nothing the user typed or a message contains becomes script text.
 public enum MailScripts {
     /// The message `m`, found by account ID, mailbox path, and Mail's message ID (the index row ID).
-    static let findMessage = """
+    public static let findMessage = """
           set acct to first account whose id is (item 1 of argv)
           set mb to mailbox (item 2 of argv) of acct
-          set m to message id ((item 3 of argv) as integer) of mb
+          -- In Mail's dictionary "message id" is the Message-ID header, so the message is found by its number.
+          set mid to (item 3 of argv) as integer
+          set m to first message of mb whose id is mid
     """
 
     static func onMessage(_ body: String) -> String {

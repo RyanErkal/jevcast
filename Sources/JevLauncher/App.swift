@@ -12,6 +12,9 @@ struct JevLauncherApp {
         if let index = CommandLine.arguments.firstIndex(of: "--diagnose-jev"), CommandLine.arguments.indices.contains(index + 1) {
             Diagnostics.jev(Array(CommandLine.arguments[(index + 1)...])); return
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--diagnose-mail-actions"), CommandLine.arguments.indices.contains(index + 1) {
+            Diagnostics.mailActions(to: CommandLine.arguments[index + 1]); return
+        }
         if CommandLine.arguments.contains("--diagnose-mail") { Diagnostics.mail(); return }
         if let index = CommandLine.arguments.firstIndex(of: "--diagnose-source"), CommandLine.arguments.indices.contains(index + 1) {
             Diagnostics.source(CommandLine.arguments[index + 1]); return

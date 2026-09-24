@@ -80,7 +80,7 @@ final class MIMEMessageTests: XCTestCase {
     func testMailScriptsTakeValuesAsArguments() {
         for script in [MailScripts.setRead, MailScripts.setFlagged, MailScripts.delete, MailScripts.move, MailScripts.reply, MailScripts.forward, MailScripts.open] {
             XCTAssertTrue(script.contains("first account whose id is (item 1 of argv)"))
-            XCTAssertTrue(script.contains("message id ((item 3 of argv) as integer)"))
+            XCTAssertTrue(script.contains("set m to first message of mb whose id is mid"))
             XCTAssertTrue(script.contains("tell application id \"com.apple.mail\""))
         }
         XCTAssertTrue(MailScripts.send.contains("subject:(item 3 of argv), content:(item 4 of argv)"))
@@ -116,5 +116,14 @@ final class MIMEHostileTests: XCTestCase {
         let top = MailMailbox(rowID: 6, url: "imap://A/Archive", unread: 0, total: 0)
         XCTAssertEqual(MailMailbox.archive(for: "A", in: [nested, top]), top)
         XCTAssertEqual(MailMailbox(rowID: 7, url: "imap://A/Old/Inbox", unread: 0, total: 0).role, .other)
+    }
+}
+
+final class InlineImageTests: XCTestCase {
+    func testContentIDImagesAreInlineNotAttachments() throws {
+        let raw = "Subject: x\nContent-Type: multipart/related; boundary=b\n\n--b\nContent-Type: text/html\n\n<img src=\"cid:logo\">\n--b\nContent-Type: image/png\nContent-ID: <logo>\nContent-Transfer-Encoding: base64\n\nAQID\n--b--\n"
+        let message = try XCTUnwrap(MIMEMessage.parse(Data(raw.utf8)))
+        XCTAssertEqual(message.inlineImages["logo"]?.data, Data([1, 2, 3]))
+        XCTAssertTrue(message.attachments.isEmpty)
     }
 }

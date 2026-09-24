@@ -74,8 +74,13 @@ final class MailStoreTests: XCTestCase {
         XCTAssertEqual(try MailActions.addresses(""), [])
     }
 
-    func testHTMLDocumentBlocksRemoteLoads() {
-        let document = MailHTMLView.document("<img src=\"https://tracker.example/p.gif\">")
-        XCTAssertTrue(document.hasPrefix("<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'"))
+    func testHTMLDocumentImages() {
+        let image = MIMEMessage.InlineImage(mimeType: "image/png", data: Data([1, 2, 3]))
+        let on = MailHTMLView.document("<img src=\"cid:logo@x\"><img src=\"https://cdn.example/p.gif\">", inlineImages: ["logo@x": image], remote: true)
+        XCTAssertTrue(on.contains("data:image/png;base64,AQID"), "Images inside the message are inlined.")
+        XCTAssertTrue(on.contains("img-src data: http: https:"), "Web images load by default.")
+        XCTAssertFalse(on.contains("script-src"), "Scripts stay blocked by default-src 'none'.")
+        let off = MailHTMLView.document("<img src=\"https://cdn.example/p.gif\">", remote: false)
+        XCTAssertTrue(off.contains("img-src data:;"), "With images off, only images inside the message show.")
     }
 }

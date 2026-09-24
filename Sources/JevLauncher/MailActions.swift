@@ -5,6 +5,8 @@ import LauncherCore
 /// Mail starts hidden when it is not running. Values reach the fixed scripts only as arguments.
 enum MailActions {
     static let bundleID = "com.apple.mail"
+    /// Set when you open a message in Mail itself, so Jevcast does not quit Mail after.
+    static var openedByUser = false
 
     /// Starts Mail hidden, without taking focus, and waits until it answers.
     static func ensureRunning() async throws {

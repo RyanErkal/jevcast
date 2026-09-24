@@ -2,8 +2,8 @@ import Foundation
 
 /// A browser Jevcast can read tabs from with Apple Events.
 public struct Browser: Equatable, Sendable {
-    /// Script dialects. Chromium browsers and Dia give tabs a stable ID; Safari tabs have only an index.
-    public enum Family: Sendable { case chromium, dia, safari }
+    /// Script dialects. Chromium browsers give tabs a stable ID; Safari tabs have only an index.
+    public enum Family: Sendable { case chromium, safari }
     public let bundleID: String
     public let name: String
     public let family: Family
@@ -16,8 +16,7 @@ public struct Browser: Equatable, Sendable {
         Browser(bundleID: "company.thebrowser.Browser", name: "Arc", family: .chromium, profileRoots: ["Arc/User Data"]),
         Browser(bundleID: "com.brave.Browser", name: "Brave", family: .chromium, profileRoots: ["BraveSoftware/Brave-Browser"]),
         Browser(bundleID: "com.microsoft.edgemac", name: "Microsoft Edge", family: .chromium, profileRoots: ["Microsoft Edge"]),
-        Browser(bundleID: "com.vivaldi.Vivaldi", name: "Vivaldi", family: .chromium, profileRoots: ["Vivaldi"]),
-        Browser(bundleID: "company.thebrowser.dia", name: "Dia", family: .dia, profileRoots: ["Dia/User Data"])
+        Browser(bundleID: "com.vivaldi.Vivaldi", name: "Vivaldi", family: .chromium, profileRoots: ["Vivaldi"])
     ]
     public static func named(_ bundleID: String) -> Browser? { all.first { $0.bundleID == bundleID } }
 }
@@ -25,7 +24,7 @@ public struct Browser: Equatable, Sendable {
 /// One open tab.
 public struct BrowserTab: Equatable, Sendable {
     public let browser: String
-    /// The window's ID as text. Chrome and Dia use text IDs; Safari's are numbers.
+    /// The window's ID as text. Chrome uses text IDs; Safari's are numbers.
     public let windowID: String
     /// The tab's own ID, or its 1-based index in Safari, which has no tab IDs.
     public let key: String
@@ -71,7 +70,7 @@ public enum TabScripts {
                     set out to out & (id of w as text) & fs & i & fs & (i = ci) & fs & (name of t) & fs & (URL of t) & rs
                   end repeat
             """
-        case .chromium, .dia:
+        case .chromium:
             body = """
                   set aid to (id of active tab of w) as text
                   repeat with t in tabs of w
@@ -108,7 +107,7 @@ public enum TabScripts {
             find = """
                 set t to tab ((item 2 of argv) as integer) of w
             """
-        case .chromium, .dia:
+        case .chromium:
             find = """
                 set t to missing value
                 set i to 0
@@ -148,7 +147,6 @@ public enum TabScripts {
         switch browser.family {
         case .safari: return onTab(browser, "      set current tab of w to t\n      set index of w to 1\n      activate")
         case .chromium: return onTab(browser, "      set active tab index of w to i\n      set index of w to 1\n      activate")
-        case .dia: return onTab(browser, "      focus t\n      activate")
         }
     }
 

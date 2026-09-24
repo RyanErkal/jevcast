@@ -52,7 +52,7 @@ final class TabsSource: ThingSource {
 
     static func readTabs() async throws -> [BrowserTab] {
         let running = Browser.all.filter { AppleScript.isRunning($0.bundleID) }
-        guard !running.isEmpty else { throw SourceProblem(text: "No supported browser is open. Jevcast reads tabs from Safari, Chrome, Arc, Brave, Edge, Vivaldi, and Dia.") }
+        guard !running.isEmpty else { throw SourceProblem(text: "No supported browser is open. Jevcast reads tabs from Safari, Chrome, Arc, Brave, Edge, and Vivaldi.") }
         var tabs: [BrowserTab] = [], problems: [Error] = []
         await withTaskGroup(of: Result<[BrowserTab], Error>.self) { group in
             for browser in running {

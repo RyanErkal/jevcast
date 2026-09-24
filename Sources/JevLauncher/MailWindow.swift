@@ -47,6 +47,7 @@ final class MailWindow: NSWindowController, NSWindowDelegate {
 
     private var keyMonitor: Any?
     func windowDidBecomeKey(_ notification: Notification) {
+        model.windowIsKey = true
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, event.window === self.window else { return event }
@@ -54,6 +55,7 @@ final class MailWindow: NSWindowController, NSWindowDelegate {
         }
     }
     func windowDidResignKey(_ notification: Notification) {
+        model.windowIsKey = false
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         keyMonitor = nil
     }

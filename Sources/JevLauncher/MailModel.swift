@@ -27,6 +27,15 @@ final class MailModel: ObservableObject {
     @Published var search = "" { didSet { if oldValue != search { reloadSoon() } } }
     /// The search field shows only while searching.
     @Published var searching = false
+    /// Web images in HTML mail. On by default; the ⋯ menu turns them off.
+    @Published var loadsImages = UserDefaults.standard.object(forKey: "mailLoadsImages") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(loadsImages, forKey: "mailLoadsImages") }
+    }
+    /// True while the mail window has the keyboard, so a message counts as read only when seen.
+    var windowIsKey = false
+    /// True when Jevcast started Apple Mail for this session, so it can quit it again after.
+    private var startedMail = false
+    private var readTimer: Task<Void, Never>?
     @Published private(set) var messages: [MailSummary] = []
     /// Setting this from the list or the keyboard marks the message read. The model's own
     /// selections, after a reload, use `select(_:byUser:)` with false and change nothing.
@@ -76,6 +85,7 @@ final class MailModel: ObservableObject {
     /// Checks access, loads mailboxes, and starts watching Mail's index while the window is open.
     func start() {
         refreshStatus()
+        if root != nil { fetchNewMail() }
         poll?.cancel()
         poll = Task { @MainActor [weak self] in
             while !Task.isCancelled {
@@ -87,7 +97,32 @@ final class MailModel: ObservableObject {
         }
     }
 
-    func stop() { poll?.cancel(); poll = nil }
+    /// Closing the inbox quits Apple Mail when Jevcast started it, once pending changes are done,
+    /// so nothing extra runs between checks.
+    func stop() {
+        poll?.cancel(); poll = nil; readTimer?.cancel()
+        guard startedMail else { return }
+        startedMail = false
+        let pending = actionChain
+        Task { @MainActor in
+            await pending?.value
+            // An action that started after closing, or Mail opened by you, keeps it running.
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard let mail = NSRunningApplication.runningApplications(withBundleIdentifier: MailActions.bundleID).first,
+                  !MailActions.openedByUser else { return }
+            mail.terminate()
+        }
+    }
+
+    /// Starts Apple Mail hidden, if needed, and asks it to fetch new mail. New mail reaches the
+    /// index only while Mail runs.
+    private func fetchNewMail() {
+        let wasRunning = AppleScript.isRunning(MailActions.bundleID)
+        if !wasRunning { startedMail = true; MailActions.openedByUser = false }
+        Task { @MainActor [weak self] in
+            do { try await MailActions.checkForNewMail() } catch { self?.banner = "Could not check for new mail: " + error.localizedDescription }
+        }
+    }
 
     func refreshStatus() {
         status = MailStore.status()
@@ -171,8 +206,7 @@ final class MailModel: ObservableObject {
         guard let root, let message = selected, let box = mailbox(message.mailbox) else { detail = nil; detailMissing = false; return }
         let rowID = message.rowID
         loadingID = rowID
-        // Opening a message yourself marks it read, as Mail does.
-        if markRead, !message.read { perform("mark read") { try await MailActions.setRead(true, message, in: box) } update: { $0.read = true } }
+        markReadSoon(message, in: box)
         if let cached = bodies[rowID] {
             detail = cached; detailMissing = false
             prefetchNeighbours(of: rowID, root: root)
@@ -187,6 +221,19 @@ final class MailModel: ObservableObject {
             self.detail = parsed
             self.detailMissing = parsed == nil
             self.prefetchNeighbours(of: rowID, root: root)
+        }
+    }
+
+    /// A message on screen for a second, in the window you are using, counts as read, as in Mail.
+    /// Moving past it quickly with ↓ leaves it unread.
+    private func markReadSoon(_ message: MailSummary, in box: MailMailbox) {
+        readTimer?.cancel()
+        guard !message.read else { return }
+        readTimer = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            guard !Task.isCancelled, let self, self.windowIsKey, self.selectedID == message.rowID,
+                  self.selected?.read == false else { return }
+            self.perform("mark read") { try await MailActions.setRead(true, message, in: box) } update: { $0.read = true }
         }
     }
 
@@ -276,6 +323,8 @@ final class MailModel: ObservableObject {
     }
     func openInMail() {
         guard let message = selected, let box = mailbox(message.mailbox) else { return }
+        // You now use Mail itself, so closing the inbox leaves it running.
+        MailActions.openedByUser = true
         Task { @MainActor [weak self] in
             do { try await MailActions.openInMail(message, in: box) } catch { self?.banner = error.localizedDescription }
         }

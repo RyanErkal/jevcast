@@ -58,3 +58,61 @@ extension Diagnostics {
         exit(0)
     }
 }
+
+extension Diagnostics {
+    /// `--diagnose-mail-actions <file>`: checks, without changing anything, that Apple Mail can find
+    /// the newest inbox messages the way the Delete and Archive actions do. Writes account and
+    /// message IDs and any error text to `file`. Never subjects, names, or addresses.
+    static func mailActions(to file: String) {
+        var lines: [String] = []
+        func finish() -> Never {
+            try? lines.joined(separator: "\n").write(toFile: file, atomically: true, encoding: .utf8)
+            exit(0)
+        }
+        guard case .ready(let root) = MailStore.status() else { lines.append("Mail status: \(MailStore.status())"); finish() }
+        Task { @MainActor in
+            do {
+                let boxes = try MailStore.mailboxes(root: root)
+                let inboxes = boxes.filter { $0.role == .inbox }
+                lines.append("Inbox mailboxes: " + inboxes.map { "\($0.rowID) \($0.url.components(separatedBy: "://").first ?? "")://<account>/\($0.path)" }.joined(separator: ", "))
+                let recent = try MailStore.messages(root: root, .init(mailboxes: inboxes.map(\.rowID), limit: 3))
+                let listAccounts = """
+                on run argv
+                  tell application id "com.apple.mail"
+                    set out to ""
+                    repeat with a in accounts
+                      set out to out & (id of a) & " | " & (count of mailboxes of a) & linefeed
+                    end repeat
+                    return out
+                  end tell
+                end run
+                """
+                try await MailActions.ensureRunning()
+                let accounts = (try? await AppleScript.run(listAccounts, app: MailActions.bundleID, name: "Mail", timeout: 30)) ?? "(could not list accounts)"
+                lines.append("Mail account ids | mailboxes:\n" + accounts)
+                lines.append("Index account ids: " + Set(inboxes.map(\.accountID)).sorted().joined(separator: ", "))
+                let probe = """
+                on run argv
+                  with timeout of 20 seconds
+                    tell application id "com.apple.mail"
+                \(MailScripts.findMessage)
+                      return "found, id " & (id of m)
+                    end tell
+                  end timeout
+                end run
+                """
+                for message in recent {
+                    guard let box = boxes.first(where: { $0.rowID == message.mailbox }) else { continue }
+                    do {
+                        let result = try await AppleScript.run(probe, [box.accountID, box.path, String(message.rowID)], app: MailActions.bundleID, name: "Mail", timeout: 30)
+                        lines.append("Row \(message.rowID) in \(box.path): \(result.trimmingCharacters(in: .whitespacesAndNewlines))")
+                    } catch {
+                        lines.append("Row \(message.rowID) in \(box.path): ERROR \(error.localizedDescription)")
+                    }
+                }
+            } catch { lines.append("Problem: \(error.localizedDescription)") }
+            finish()
+        }
+        RunLoop.main.run()
+    }
+}

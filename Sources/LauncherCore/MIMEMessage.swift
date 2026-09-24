@@ -12,6 +12,13 @@ public struct MIMEMessage: Equatable, Sendable {
     public var plainText: String?
     public var html: String?
     public var attachments: [Attachment] = []
+    /// Images carried inside the message and shown in its HTML as `cid:` links, by Content-ID.
+    public var inlineImages: [String: InlineImage] = [:]
+    public struct InlineImage: Equatable, Sendable {
+        public let mimeType: String
+        public let data: Data
+        public init(mimeType: String, data: Data) { self.mimeType = mimeType; self.data = data }
+    }
 
     public static func == (lhs: MIMEMessage, rhs: MIMEMessage) -> Bool {
         lhs.headers.map { $0.name + ":" + $0.value } == rhs.headers.map { $0.name + ":" + $0.value }
@@ -84,6 +91,12 @@ public struct MIMEMessage: Equatable, Sendable {
             return
         }
         let decoded = decode(body, encoding)
+        // An image with a Content-ID belongs inside the HTML, not in the attachment list.
+        if type.hasPrefix("image/"), let cid = value(headers, "Content-ID")?.trimmingCharacters(in: CharacterSet(charactersIn: "<> ")), !cid.isEmpty,
+           decoded.count <= 5_000_000 {
+            message.inlineImages[cid] = InlineImage(mimeType: type, data: decoded)
+            return
+        }
         let isAttachment = disposition?.0 == "attachment" || (filename != nil && !type.hasPrefix("text/"))
         if isAttachment || !(type == "text/plain" || type == "text/html") {
             if let filename { message.attachments.append(Attachment(name: EncodedWords.decode(filename), mimeType: type, size: decoded.count)) }

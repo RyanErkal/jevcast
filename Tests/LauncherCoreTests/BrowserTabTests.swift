@@ -20,7 +20,6 @@ final class BrowserTabTests: XCTestCase {
             }
             XCTAssertTrue(TabScripts.close(browser).contains("(item 3 of argv)"), "Close checks the URL first.")
         }
-        XCTAssertTrue(TabScripts.focus(Browser.named("company.thebrowser.dia")!).contains("focus t"))
         XCTAssertTrue(TabScripts.focus(Browser.named("com.google.Chrome")!).contains("active tab index"))
     }
 

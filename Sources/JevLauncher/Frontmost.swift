@@ -66,6 +66,32 @@ enum Frontmost {
         return running
     }
 
+    /// True while Jevcast asks macOS to bring itself forward, so the reopen that causes is ignored.
+    static var selfActivating = false
+
+    /// Brings one of Jevcast's own windows in front and gives it the keyboard. The launcher panel
+    /// never activates the app, and macOS 14 ignores an app's own request to activate while
+    /// another app is in front, so Jevcast asks LaunchServices to open itself, as a Dock click does.
+    static func show(_ window: NSWindow) {
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+        guard !NSApp.isActive else { return }
+        // Deprecated and ignored in some cases, but still honoured for an agent app on current macOS.
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        guard !NSApp.isActive else { return }
+        selfActivating = true
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true; config.addsToRecentItems = false
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: config) { _, _ in
+            Task { @MainActor in
+                window.makeKeyAndOrderFront(nil)
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                selfActivating = false
+            }
+        }
+    }
+
     /// Shows files in Finder, in front.
     static func reveal(_ urls: [URL]) {
         yield(to: "com.apple.finder")

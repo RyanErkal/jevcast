@@ -195,6 +195,11 @@ final class MailModel: ObservableObject {
         }
         perform("archive", removes: true) { try await MailActions.move(message, from: box, to: archive) }
     }
+    /// Deletes a message from the list, such as the one under the pointer, not only the selected one.
+    func delete(_ rowID: Int64) {
+        if selectedID != rowID { select(rowID, byUser: false) }
+        delete()
+    }
     func delete() {
         guard let message = selected, let box = mailbox(message.mailbox) else { return }
         perform("delete", removes: true) { try await MailActions.delete(message, in: box) }

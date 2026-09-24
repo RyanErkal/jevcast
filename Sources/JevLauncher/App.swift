@@ -365,8 +365,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             settings = SettingsWindow(preferences: preferences, model: model, catalogue: catalogue, status: status, updates: updates,
                                       changed: { [weak self] in self?.configureHotkeys() })
         }
-        NSApp.activate()
         settings?.showWindow(nil)
+        if let window = settings?.window { Frontmost.show(window) }
     }
     @objc func showWelcome() {
         hide(restoreFocus: false)
@@ -384,7 +384,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     @objc func openWebsite() { Frontmost.open(AppIdentity.website) }
     @objc func openSourceCode() { Frontmost.open(AppIdentity.repository) }
     @objc func reportIssue() { Frontmost.open(AppIdentity.issues) }
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { show(); return true }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // Jevcast opening itself to bring a window forward is not a request for the launcher.
+        if Frontmost.selfActivating { return false }
+        show(); return true
+    }
     func applicationWillTerminate(_ notification: Notification) {
         backdrop.close(); resultActions.dismiss(); preview.close()
         model.end(); model.windows.stopEdgeSnapping(); hotkeys.clear()

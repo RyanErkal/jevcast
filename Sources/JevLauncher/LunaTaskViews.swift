@@ -15,7 +15,7 @@ final class LunaResultWindow: NSWindowController {
         super.init(window: window)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    func show() { NSApp.activate(); showWindow(nil); window?.makeKeyAndOrderFront(nil) }
+    func show() { showWindow(nil); if let window { Frontmost.show(window) } }
 }
 
 struct LunaResultView: View {

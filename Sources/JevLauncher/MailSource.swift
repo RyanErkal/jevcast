@@ -48,7 +48,7 @@ final class MailSource: ThingSource {
                 try await MailActions.setFlagged(!message.flagged, message, in: mailbox); return message.flagged ? "Unflagged." : "Flagged."
             })
         }
-        let detail = [message.sender, MailRow.date(message.date), message.snippet].filter { !$0.isEmpty }.joined(separator: " · ")
+        let detail = [message.sender, MailRow.date(message.date)].filter { !$0.isEmpty }.joined(separator: " · ")
         return LauncherResult(id: "mail:\(message.rowID)", title: message.subject.isEmpty ? "No subject" : message.subject, detail: detail,
                               symbol: message.read ? "envelope.open" : "envelope.badge", action: .thing(Thing(verbs: verbs)), score: score)
     }

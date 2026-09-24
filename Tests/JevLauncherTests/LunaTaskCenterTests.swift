@@ -9,7 +9,9 @@ final class LunaTaskCenterTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         let sent = LockedBox<[LunaRequest]>([])
         var allowed: Set<LunaContext> = [.typedText]
-        let center = LunaTaskCenter(defaults: defaults, send: { request in
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("lunatasks-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let center = LunaTaskCenter(defaults: defaults, folder: folder, send: { request in
             sent.mutate { $0.append(request) }
             return LunaReply(text: "Nothing urgent today.\nTwo meetings.", inputTokens: 1, outputTokens: 1, cost: nil)
         }, allowed: { allowed })
@@ -21,7 +23,7 @@ final class LunaTaskCenterTests: XCTestCase {
         XCTAssertEqual(center.runs[0].preview, "Nothing urgent today. · Two meetings.")
         let file = try XCTUnwrap(center.runs[0].file)
         XCTAssertTrue(try String(contentsOfFile: file, encoding: .utf8).contains("Two meetings."))
-        try? FileManager.default.removeItem(atPath: file)
+        XCTAssertTrue(file.hasPrefix(folder.path), "Results go to the injected folder.")
 
         let mail = LunaTask(name: "Mail", prompt: "check my unread mail", schedule: .everyHours(1), contexts: [.unreadMail])
         center.run(mail)
@@ -29,6 +31,8 @@ final class LunaTaskCenterTests: XCTestCase {
         XCTAssertFalse(center.runs[0].succeeded)
         XCTAssertEqual(sent.value.count, 1, "A task that reads mail sends nothing until mail is allowed.")
         allowed.insert(.mailMessage)
+        XCTAssertEqual(center.refused(mail), [.unreadMail], "The single-message switch does not allow the unread list.")
+        allowed.insert(.unreadMail)
         XCTAssertEqual(center.refused(mail), [])
 
         // Persisted across a new center on the same store.

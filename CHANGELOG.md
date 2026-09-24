@@ -2,6 +2,23 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.4.0] - 2026-09-24
+
+### Added
+
+- **Scheduled Luna tasks.** Type a schedule and a request, such as "every weekday at 8am brief me on my meetings and unread email", "summarise my reminders every evening at 7", or "every 2 hours check my unread mail". Tasks run on this Mac while Jevcast is open, read only the data they name and you allow, and post a notification with the result. Click it to read the whole result. Each result is saved as Markdown in `~/Library/Application Support/Jevcast/Luna Tasks`. "task results" lists past runs; "scheduled tasks" lists tasks with Run Now, Pause, and Delete. A run missed by more than three hours is skipped and noted.
+- **Calendar and reminders** and **Unread mail list** switches in Settings › Luna, for tasks that read events, reminders, or unread mail. Both are off at first, and the single-message mail switch does not allow the unread list.
+- **Jev in two steps.** Jev also names the kind of request in a second small call at the same time. When the kind disagrees with the pick, Jev chooses again among every candidate of that kind. A window move that loosely names a running app asks which app. On by default; turn it off in Settings › Input.
+
+### Changed
+
+- One click runs a row, and the pointer highlights the row under it. Double-click is no longer needed.
+- With nothing typed, the launcher is the search bar alone. Favourites still rank higher in results.
+
+### Fixed
+
+- A square light edge could show around the launcher's rounded corners in Dark Mode.
+
 ## [1.3.0] - 2026-09-24
 
 ### Added

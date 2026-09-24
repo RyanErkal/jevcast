@@ -15,13 +15,14 @@ public enum LunaEffort: String, CaseIterable, Codable, Sendable {
 
 /// The kinds of context a Luna request can carry. Each needs its own switch in Settings.
 public enum LunaContext: String, Codable, Sendable, CaseIterable {
-    case typedText, selectedText, mailMessage, calendar
+    case typedText, selectedText, mailMessage, calendar, unreadMail
     public var title: String {
         switch self {
         case .typedText: return "What you typed"
         case .selectedText: return "Selected text"
         case .mailMessage: return "Mail message"
         case .calendar: return "Calendar and reminders"
+        case .unreadMail: return "Unread mail list"
         }
     }
 }

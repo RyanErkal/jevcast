@@ -65,6 +65,8 @@ Press **Option–Space** and type. If another app already uses that shortcut, ch
 | `this`, `copy link`                                        | Acts on the page, Finder selection, or selected text in front.           |
 | `mail`, `inbox`, `mail invoice`                            | Opens the Jevcast mail window, or searches your mail.                    |
 | `ask what is a p-value`                                    | Luna answers in the panel. Needs Luna on.                                |
+| `every weekday at 8am brief me on my meetings`             | Schedules a Luna task. Its result arrives as a notification.             |
+| `task results`                                             | Lists what scheduled tasks wrote.                                        |
 
 **Move a window** by typing a layout:
 
@@ -78,6 +80,8 @@ Press **Option–Space** and type. If another app already uses that shortcut, ch
 
 Jevcast finds apps, files, and actions locally. To match a loose request to one of those actions, add your own [TypeSafe AI](https://typesafe.ai) API key, or an [OpenRouter](https://openrouter.ai/typesafe/jev-1.13) key to run Jev through OpenRouter, in Settings › Input and turn on **Use Jev for natural-language matching**. Jevcast picks the service from the key: an `sk-or-` key goes to OpenRouter. The key is kept in your macOS Keychain. Local results never wait for Jev.
 
+**Two steps.** Jev also names the kind of request, such as "open an app", "move a window", or "calendar", in a second small call at the same time. When the kind and the pick agree, the pick stands. When they differ, Jev chooses again among every item of that kind, for example all your apps rather than the first 120 candidates. A window move that loosely names a running app, such as "put the chrom one on the left", then asks which app. Turn this off in Settings › Input.
+
 Jev reads each request after a short pause, typed or spoken. It receives that text and a short list of candidate names: apps, System Settings panes, window actions, built-in commands, your own commands, workflows, Shortcuts, and snippets by name, menu item names from the app you were using, sites, files, and folders. It can only choose from that list or return no match. It never writes a command. A whole-name match you typed stays first. Jevcast does not add file or folder paths, clipboard text, or audio to the request. Any path you type yourself is part of the text sent. See [Privacy](#privacy) for the full network details.
 
 ## Optional: Luna
@@ -88,7 +92,9 @@ Jev decides what a request means. Luna does the writing when a request needs it.
 - With text selected in any app, the launcher offers Fix Spelling and Grammar, Make Shorter, Make More Formal, Make Friendlier, Summarise, Explain, and Translate to English. Type your own instruction, such as `translate to turkish`, for anything else. Return replaces the selection with Luna's text. A question about the text is copied instead.
 - In the mail window, Luna summarises a message or drafts a reply from a short instruction, such as "yes, but next week".
 
-Luna reads only what you allow. What you type after `ask` is sent once Luna is on. Selected text and mail messages each have their own switch, and both are off at first. Jevcast checks every request against those switches before it sends it. Settings › Luna lists each request with what kind of context it carried and its cost, without the text. Luna never runs an action.
+**Scheduled tasks.** Type a schedule and a request, such as `every weekday at 8am brief me on my meetings and unread email`, `summarise my reminders every evening at 7`, or `every 2 hours check my unread mail`. Return schedules it. At that time, Jevcast reads only the data the request names and you allow: today's and tomorrow's events, reminders due soon, or unread inbox mail (senders, subjects, and previews). Luna writes the result, and a notification shows its first lines. Click the notification to read it all. Every result is also saved as a Markdown file in `~/Library/Application Support/Jevcast/Luna Tasks`. `scheduled tasks` lists your tasks with Run Now, Pause, and Delete, and `task results` lists past runs. Tasks run while Jevcast is open. A run missed by more than three hours, for example while the Mac slept, is skipped and noted.
+
+Luna reads only what you allow. What you type after `ask` is sent once Luna is on. Selected text, mail messages, calendar and reminders, and the unread mail list each have their own switch, and all are off at first. Jevcast checks every request against those switches before it sends it. Settings › Luna lists each request with what kind of context it carried and its cost, without the text. Luna never runs an action.
 
 ## Use
 
@@ -104,7 +110,7 @@ Keys in the launcher:
 | Command–R       | Show in Finder                       |
 | Command–Shift–C | Copy the path                        |
 
-Results learn from use. Things you pick often and recently move up. Right-click an app to add it to your favourites. With nothing typed, the launcher shows your favourites and recent picks.
+Results learn from use. Things you pick often and recently move up, and favourites rank higher. Right-click an app to add it to your favourites. With nothing typed, the launcher is the search bar alone. Click a row to run it, or move the pointer over the rows to pick one, then press Return.
 
 ### File search
 

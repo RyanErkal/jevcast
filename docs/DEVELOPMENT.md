@@ -30,6 +30,8 @@ The package has two targets.
   - `LunaService.swift`, `LauncherModel+Luna.swift`, `SettingsLuna.swift`: Luna through OpenRouter, the context switches, and the activity log. `LunaPrompt.swift` in LauncherCore builds each request.
   - `Mail*.swift`: the mail window. `MailStore.swift` reads Apple Mail's index and `.emlx` files; `MailActions.swift` changes mail through Apple Mail; `MIMEMessage.swift` and `MailIndex.swift` in LauncherCore parse messages and hold Mail's fixed AppleScript.
   - `SQLiteReader.swift`: a read-only SQLite reader with bound values.
+  - `LunaTaskCenter.swift`, `LunaTaskViews.swift`, `TaskRunsSource.swift`: scheduled Luna tasks, their results, and the result window. `LunaTasks.swift` in LauncherCore parses schedules and decides when a task is due.
+  - `JevLayers.swift` in LauncherCore: the kinds of request for layered Jev matching, and how the two first answers are combined.
 
 ## Rename the app
 

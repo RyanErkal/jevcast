@@ -19,12 +19,13 @@ final class JevLayerTests: XCTestCase {
     func testPlan() {
         XCTAssertEqual(JevLayerPlan.decide(pick: "app:x", pickKind: .openApp, kind: .openApp), .accept("app:x"))
         XCTAssertEqual(JevLayerPlan.decide(pick: "app:x", pickKind: .openApp, kind: .window), .narrow(.window))
-        XCTAssertEqual(JevLayerPlan.decide(pick: nil, pickKind: nil, kind: .organizer), .narrow(.organizer))
+        XCTAssertEqual(JevLayerPlan.decide(pick: nil, pickKind: nil, kind: .organizer), .noMatch, "The kind alone never picks.")
         XCTAssertEqual(JevLayerPlan.decide(pick: "app:x", pickKind: .openApp, kind: nil), .accept("app:x"))
         XCTAssertEqual(JevLayerPlan.decide(pick: nil, pickKind: nil, kind: nil), .noMatch)
         XCTAssertEqual(JevKind.of("window:left-half"), .window)
         XCTAssertEqual(JevKind.of("app:/A.app", isSettingsPane: true), .settingsPane)
         XCTAssertEqual(JevKind.of("this:luna:custom"), .luna)
+        XCTAssertEqual(JevKind.of("this:luna:shorter"), .luna)
         XCTAssertEqual(JevKind.of("route:calendar"), .organizer)
     }
 
@@ -44,10 +45,11 @@ final class JevLayerTests: XCTestCase {
             // The kind step says "window". The single list wrongly picks the first command.
             if let kind = candidates.first(where: { $0.title == JevKind.window.title }) { return kind.id }
             if candidates.contains(where: { $0.title == JevKind.openApp.title || $0.title == JevKind.command.title }) { return nil }
+            // The full list picks a command: the wrong kind, so Jev chooses again among window actions.
             if candidates.allSatisfy({ WindowAction.allCases.map(\.title).contains($0.title) }) {
                 return candidates.first { $0.title == rightHalf }?.id
             }
-            return candidates.first { $0.id.hasPrefix("c") && !WindowAction.allCases.map(\.title).contains($0.title) }?.id
+            return candidates.first { candidate in SystemCommands.all.contains { $0.title == candidate.title } }?.id
         }
         let (model, cleanup) = makeModel(jev, layered: true)
         defer { cleanup() }

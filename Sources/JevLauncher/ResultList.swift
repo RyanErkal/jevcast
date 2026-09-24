@@ -116,7 +116,9 @@ struct ResultList: NSViewRepresentable {
             model.select(result.id)
         }
         @objc func runRow() {
-            // A click on a section label or empty space does nothing.
+            // A click on a section label or empty space does nothing. The second click of a double-click
+            // is ignored, so a row that asks for confirmation always needs a separate click.
+            guard (NSApp.currentEvent?.clickCount ?? 1) <= 1 else { return }
             guard let table, table.clickedRow >= 0, let result = result(at: table.clickedRow), result.isCurrent else { return }
             model.select(result.id); model.execute()
         }

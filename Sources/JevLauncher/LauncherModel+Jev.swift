@@ -75,7 +75,8 @@ extension LauncherModel {
                 ? layeredChoice(text, candidates: candidates, ids: ids, key: key, revision: current)
                 : jev.choose(query: text, candidates: candidates, apiKey: key).flatMap { ids[$0] }
             guard !Task.isCancelled, visible, self.revision == current else { return }
-            replyCache[LearnedIntents.normalize(text)] = (chosen, Date())
+            // A pick that moves an app Jev chose is not cached: the ID alone would move the active window.
+            if jevWindowTarget == nil { replyCache[LearnedIntents.normalize(text)] = (chosen, Date()) }
             aiStatus = chosen == nil ? "No clear AI match" : "Jev matched"
             guard let chosen else { return }
             // A whole-name match the user typed stays first.
@@ -152,8 +153,8 @@ extension LauncherModel {
     /// Most candidates one step can send. TypeSafe allows 254 plus no_match.
     static let layerLimit = 250
 
-    func jevKind(of id: String) -> JevKind? {
-        JevKind.of(id, isSettingsPane: catalogue.entries.first { $0.id == id }?.launchURL != nil)
+    func jevKind(of id: String, settingsPanes: Set<String>? = nil) -> JevKind? {
+        JevKind.of(id, isSettingsPane: (settingsPanes ?? Set(catalogue.entries.filter { $0.launchURL != nil }.map(\.id))).contains(id))
     }
 
     /// Two quick questions at once: the single-list pick, and which kind of request this is. When
@@ -161,7 +162,11 @@ extension LauncherModel {
     /// every candidate of that kind. A window move that names an app asks which app, last.
     func layeredChoice(_ text: String, candidates: [JevCandidate], ids: [String: String], key: String, revision current: UUID) async throws -> String? {
         let everything = jevEntries(limit: .max)
-        let kinds = JevKind.allCases.filter { kind in everything.contains { jevKind(of: $0.id) == kind } }
+        // One lookup per candidate, not one per kind.
+        let panes = Set(catalogue.entries.filter { $0.launchURL != nil }.map(\.id))
+        let kindOf = Dictionary(everything.map { ($0.id, jevKind(of: $0.id, settingsPanes: panes)) }, uniquingKeysWith: { first, _ in first })
+        let present = Set(kindOf.values.compactMap { $0 })
+        let kinds = JevKind.allCases.filter(present.contains)
         var kindIDs: [String: JevKind] = [:]
         let kindCandidates = kinds.enumerated().map { index, kind -> JevCandidate in
             kindIDs["k\(index)"] = kind
@@ -174,19 +179,20 @@ extension LauncherModel {
         let kind = ((try? await layer) ?? nil).flatMap { kindIDs[$0] }
         guard !Task.isCancelled, visible, revision == current else { return nil }
         var chosen: String?
-        switch JevLayerPlan.decide(pick: pick, pickKind: pick.flatMap(jevKind), kind: kind) {
+        switch JevLayerPlan.decide(pick: pick, pickKind: pick.flatMap { kindOf[$0] ?? jevKind(of: $0, settingsPanes: panes) }, kind: kind) {
         case .accept(let id): chosen = id
         case .noMatch: chosen = nil
         case .narrow(let kind):
-            let narrowed = Array(everything.filter { jevKind(of: $0.id) == kind }.prefix(Self.layerLimit))
-            if narrowed.count == 1 { chosen = narrowed[0].id }
-            else if !narrowed.isEmpty {
+            // Jev always makes the second choice, even from one candidate, so it can still say no match.
+            let narrowed = Array(everything.filter { kindOf[$0.id] == kind }.prefix(Self.layerLimit))
+            if !narrowed.isEmpty {
                 let (second, secondIDs) = Self.opaque(narrowed)
                 chosen = try await jev.choose(query: text, candidates: second, apiKey: key).flatMap { secondIDs[$0] }
             }
         }
         if let id = chosen, id.hasPrefix("window:"), let action = WindowAction(rawValue: String(id.dropFirst(7))),
-           let target = try await windowTarget(text, action: action, key: key) {
+           let target = try await windowTarget(text, action: action, key: key),
+           !Task.isCancelled, visible, revision == current {
             jevWindowTarget = target
         }
         return chosen
@@ -328,7 +334,8 @@ extension LauncherModel {
     /// chose something other than the first row. A later identical request then skips Jev.
     func learnFromExecution(_ result: LauncherResult) {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty, Self.isLearnable(result) else { return }
+        // A Jev-chosen window target is not remembered: the ID alone would move the active window.
+        guard !q.isEmpty, Self.isLearnable(result), jevWindowTarget == nil else { return }
         let firstRow = results.first(where: \.isCurrent)?.id
         let exact = (results.first(where: \.isCurrent)?.score ?? 0) >= Self.exactScore && firstRow == result.id
         guard !exact, jevPick != nil || result.id != firstRow || aiStatus == "No clear AI match" else { return }

@@ -70,3 +70,6 @@ Unit tests cannot prove these. Do them on a Mac with a real keyboard, and record
 - [ ] With Luna on and an OpenRouter key: `ask what is 2+2` answers. With Selected text on, Fix Spelling replaces a selection in TextEdit. With it off, no selected-text request is sent, and Settings › Luna logs each request.
 - [ ] `mail` without Full Disk Access shows the setup view. With it, the Inbox lists messages. Archive, Delete, Flag, Reply, and a new message act on the right message in Apple Mail.
 - [ ] An HTML newsletter shows without remote images, and a link opens in the browser.
+- [ ] One click on a row runs it. Moving the pointer highlights rows; a still pointer does not change the selection while ↑↓ move it. The empty launcher shows only the bar, and no square edge shows at its corners in Dark Mode.
+- [ ] `every day at <two minutes from now> give me a quote` schedules a task. A notification arrives on time, a click opens the result, and `task results` lists it. With Mail off in Settings › Luna, a mail task reports that it needs the switch and sends nothing.
+- [ ] With layered matching on, `put the chrom one on the left` moves Chrome, and Settings › Usage counts the extra calls.

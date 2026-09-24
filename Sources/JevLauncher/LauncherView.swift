@@ -8,7 +8,7 @@ struct LauncherView: View {
     let actions: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// An empty query with no favourites or recent items shows the search bar alone.
+    /// An empty query shows the search bar alone.
     var body: some View {
         VStack(spacing: 0) {
             searchBar

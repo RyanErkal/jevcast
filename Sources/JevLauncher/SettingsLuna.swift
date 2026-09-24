@@ -49,8 +49,11 @@ struct LunaSettings: View {
                 Text("What you type after “ask” is always sent when Luna is on. Everything else is off until you turn it on.")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("Selected text, for rewrites and explanations", isOn: $preferences.lunaSendsSelection)
-                Toggle("Mail messages, for summaries, reply drafts, and scheduled tasks", isOn: $preferences.lunaSendsMail)
+                Toggle("Mail messages, for summaries and reply drafts", isOn: $preferences.lunaSendsMail)
                 Toggle("Calendar and reminders, for scheduled tasks", isOn: $preferences.lunaSendsCalendar)
+                Toggle("Unread mail list (senders, subjects, previews), for scheduled tasks", isOn: $preferences.lunaSendsUnreadMail)
+                Text("Task results show in notifications, which can appear on the lock screen. Change that in System Settings › Notifications.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Text("File paths, clipboard history, and audio are never sent.").font(.caption).foregroundStyle(.secondary)
             }
             Section("Scheduled tasks") {

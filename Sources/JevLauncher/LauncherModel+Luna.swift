@@ -87,6 +87,7 @@ extension LauncherModel {
         if preferences.lunaSendsSelection { allowed.insert(.selectedText) }
         if preferences.lunaSendsMail { allowed.insert(.mailMessage) }
         if preferences.lunaSendsCalendar { allowed.insert(.calendar) }
+        if preferences.lunaSendsUnreadMail { allowed.insert(.unreadMail) }
         return allowed
     }
 
@@ -162,14 +163,10 @@ extension LauncherModel {
 extension LauncherModel {
     /// "every weekday at 8am brief me on my meetings": a row that schedules a Luna task.
     func taskRows(_ q: String) -> [LauncherResult] {
-        guard let task = LunaTaskQuery.parse(q) else { return [] }
+        // Only with Luna on, and below whole-name matches, so "daily standup notes" stays a search.
+        guard lunaReady, let task = LunaTaskQuery.parse(q) else { return [] }
         var parts = [task.schedule.summary]
         if !task.contexts.isEmpty { parts.append("reads " + task.contexts.map(\.title).joined(separator: ", ").lowercased()) }
-        guard lunaReady else {
-            let verb = Verb(title: "Open Luna Settings") { [weak self] in self?.openLunaSettings?(); return nil }
-            return [LauncherResult(id: "lunatask:new", title: "Schedule with Luna: " + task.prompt, detail: "Turn on Luna in Settings › Luna first",
-                                   symbol: "sparkles", action: .thing(Thing(verbs: [verb], twoLine: false)), score: 1850)]
-        }
         let refused = lunaTasks.refused(task)
         if !refused.isEmpty { parts.append("turn on " + refused.map(\.title).joined(separator: " and ").lowercased() + " in Settings › Luna") }
         let verb = Verb(title: "Schedule Task") { [weak self] in
@@ -180,6 +177,6 @@ extension LauncherModel {
             return nil
         }
         return [LauncherResult(id: "lunatask:new", title: "Schedule with Luna: " + task.prompt, detail: parts.joined(separator: " · "),
-                               symbol: "calendar.badge.clock", action: .thing(Thing(verbs: [verb], twoLine: false)), score: 1850)]
+                               symbol: "calendar.badge.clock", action: .thing(Thing(verbs: [verb], twoLine: false)), score: 95)]
     }
 }

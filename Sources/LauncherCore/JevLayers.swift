@@ -66,7 +66,7 @@ public enum JevKind: String, CaseIterable, Sendable {
         if id == "route:mail" { return .mail }
         if id == "route:tabs" { return .browser }
         if id == "route:contacts" { return .people }
-        if id == "luna:ask" || id == "this:luna:custom" { return .luna }
+        if id == "luna:ask" || id.hasPrefix("this:luna:") { return .luna }
         if id.hasPrefix("this:") { return .context }
         return nil
     }
@@ -85,8 +85,8 @@ public enum JevLayerPlan: Equatable, Sendable {
         switch (pick, kind) {
         case let (pick?, kind?): return pickKind == kind ? .accept(pick) : .narrow(kind)
         case let (pick?, nil): return .accept(pick)
-        case let (nil, kind?): return .narrow(kind)
-        case (nil, nil): return .noMatch
+        // The kind alone never makes a pick: with no answer from the full list, nothing is chosen.
+        case (nil, _): return .noMatch
         }
     }
 }

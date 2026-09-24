@@ -17,6 +17,7 @@ final class Preferences: ObservableObject {
     @Published var lunaSendsSelection: Bool { didSet { defaults.set(lunaSendsSelection, forKey: "lunaSendsSelection") } }
     @Published var lunaSendsMail: Bool { didSet { defaults.set(lunaSendsMail, forKey: "lunaSendsMail") } }
     @Published var lunaSendsCalendar: Bool { didSet { defaults.set(lunaSendsCalendar, forKey: "lunaSendsCalendar") } }
+    @Published var lunaSendsUnreadMail: Bool { didSet { defaults.set(lunaSendsUnreadMail, forKey: "lunaSendsUnreadMail") } }
     @Published var edgeSnapping: Bool { didSet { defaults.set(edgeSnapping, forKey: "edgeSnapping") } }
     @Published var windowShortcuts: Bool { didSet { defaults.set(windowShortcuts, forKey: "windowShortcuts") } }
     @Published var gap: Double { didSet { defaults.set(gap, forKey: "gap") } }
@@ -65,6 +66,7 @@ final class Preferences: ObservableObject {
         lunaSendsSelection = d.bool(forKey: "lunaSendsSelection")
         lunaSendsMail = d.bool(forKey: "lunaSendsMail")
         lunaSendsCalendar = d.bool(forKey: "lunaSendsCalendar")
+        lunaSendsUnreadMail = d.bool(forKey: "lunaSendsUnreadMail")
         edgeSnapping = d.bool(forKey: "edgeSnapping")
         windowShortcuts = d.bool(forKey: "windowShortcuts")
         gap = d.object(forKey: "gap") as? Double ?? 8

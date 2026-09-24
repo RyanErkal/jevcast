@@ -30,10 +30,13 @@ final class LunaTaskCenter: ObservableObject {
     private var wakeObserver: NSObjectProtocol?
     static let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent(AppIdentity.name + "/Luna Tasks", isDirectory: true)
+    /// Where results go. Tests use a temporary folder.
+    let resultsFolder: URL
     static let runLimit = 200
 
-    init(defaults: UserDefaults = .standard, send: @escaping (LunaRequest) async throws -> LunaReply, allowed: @escaping () -> Set<LunaContext>) {
-        self.defaults = defaults; self.send = send; self.allowed = allowed
+    init(defaults: UserDefaults = .standard, folder: URL = LunaTaskCenter.folder,
+         send: @escaping (LunaRequest) async throws -> LunaReply, allowed: @escaping () -> Set<LunaContext>) {
+        self.defaults = defaults; self.send = send; self.allowed = allowed; self.resultsFolder = folder
         tasks = defaults.data(forKey: "lunaTasks").flatMap { try? JSONDecoder().decode([LunaTask].self, from: $0) } ?? []
         runs = defaults.data(forKey: "lunaTaskRuns").flatMap { try? JSONDecoder().decode([LunaTaskRun].self, from: $0) } ?? []
     }
@@ -72,8 +75,14 @@ final class LunaTaskCenter: ObservableObject {
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
             }
         }
+        // After waking, the network needs a moment, so the check waits 20 seconds.
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.runDue() }
+            MainActor.assumeIsolated {
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: 20_000_000_000)
+                    self?.runDue()
+                }
+            }
         }
     }
 
@@ -117,7 +126,7 @@ final class LunaTaskCenter: ObservableObject {
                 let sections = await Self.gather(task.contexts)
                 let sent = Array(Set(task.contexts.map(\.lunaContext))).sorted { $0.rawValue < $1.rawValue }
                 let reply = try await self.send(.task(task, sections: sections, sent: sent, now: date))
-                let file = Self.write(task, text: reply.text, date: date)
+                let file = Self.write(task, text: reply.text, date: date, in: self.resultsFolder)
                 let run = LunaTaskRun(taskID: task.id, taskName: task.name, date: date, succeeded: true, preview: Self.preview(reply.text), file: file)
                 self.record(run)
                 await Self.notify(run, body: run.preview)
@@ -139,12 +148,22 @@ final class LunaTaskCenter: ObservableObject {
         return String(lines.prefix(3).joined(separator: " · ").prefix(240))
     }
 
-    /// Saves the result as `<task name>/<date>.md`, and returns its path.
-    static func write(_ task: LunaTask, text: String, date: Date) -> String? {
+    static let stampFormat: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd HHmmss"
+        return formatter
+    }()
+
+    /// Saves the result as `<task name>/<local date and time>.md`, and returns its path. A name that
+    /// is already taken gets a number, so no result replaces another.
+    static func write(_ task: LunaTask, text: String, date: Date, in root: URL = folder) -> String? {
         let safe = task.name.map { "/:\\".contains($0) ? "-" : $0 }.prefix(60)
-        let folder = self.folder.appendingPathComponent(String(safe), isDirectory: true)
-        let stamp = date.formatted(.iso8601.year().month().day().dateSeparator(.dash)) + " " + date.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
-        let file = folder.appendingPathComponent(stamp.replacingOccurrences(of: ":", with: "") + ".md")
+        let folder = root.appendingPathComponent(String(safe), isDirectory: true)
+        let stamp = stampFormat.string(from: date)
+        var file = folder.appendingPathComponent(stamp + ".md"), number = 2
+        while FileManager.default.fileExists(atPath: file.path) { file = folder.appendingPathComponent("\(stamp) \(number).md"); number += 1 }
         let body = "# \(task.name)\n\n_\(date.formatted(date: .complete, time: .shortened)) · \(task.schedule.summary)_\n\n> \(task.prompt)\n\n\(text)\n"
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

@@ -68,9 +68,11 @@ final class ResultActions {
             callbacks.append { model.select(result.id); action() }; menu.addItem(item)
         }
         add(model.primaryActionTitle ?? "Open", key: "\r") { model.execute() }
+        var verbTitles = Set<String>()
+        if case .thing(let thing) = result.action { verbTitles = Set(thing.verbs.map(\.title)) }
         if result.path != nil {
             add("Quick Look", key: "y", action: preview)
-            add("Reveal in Finder", key: "r") { model.revealSelected() }
+            if !verbTitles.contains("Reveal in Finder") { add("Reveal in Finder", key: "r") { model.revealSelected() } }
             add("Copy Path") { model.copyPath() }
         }
         switch result.action {
@@ -103,6 +105,9 @@ final class ResultActions {
             if let arguments = details?.arguments, !arguments.isEmpty {
                 add("Copy Command Line") { model.copy(arguments); model.message = "Command line copied" }
             }
+        case .thing(let thing):
+            if thing.verbs.count > 1 { menu.addItem(.separator()) }
+            for verb in thing.verbs.dropFirst() { add(verb.title, key: verb.key) { model.run(verb, on: result) } }
         default: break
         }
         if case .app = result.action {

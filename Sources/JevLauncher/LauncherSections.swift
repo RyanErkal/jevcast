@@ -3,8 +3,11 @@ import CoreGraphics
 /// Result groups, in the words the list shows above each group.
 enum LauncherGroup: Hashable {
     case favourites, recent, applications, commands, files, clipboard
+    /// A source's own group, such as "Scheduled Tasks".
+    case named(String)
     var title: String {
         switch self {
+        case .named(let title): return title
         case .favourites: return "Favourites"
         case .recent: return "Recent"
         case .applications: return "Applications"

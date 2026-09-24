@@ -23,6 +23,8 @@ struct LauncherResult: Identifiable {
         case menu(MenuCommand)
         /// Replace the query with this text, for a Jev pick such as Find Files.
         case route(String)
+        /// A row from a source, with its own verbs.
+        case thing(Thing)
     }
     let id: String
     let title: String
@@ -41,27 +43,37 @@ struct LauncherResult: Identifiable {
         case .file: return .files
         case .clipboard: return .clipboard
         case .window, .url, .copy, .command, .custom, .stopProcess, .appThenWindow, .shortcut, .workflow,
-             .snippet, .timer, .cancelTimer, .menu, .route: return .commands
+             .snippet, .timer, .cancelTimer, .menu, .route, .thing: return .commands
         }
     }
     /// Calculator answers and clipboard entries keep a second line; other rows are single-line.
     var isTwoLine: Bool {
-        switch action { case .copy, .clipboard, .stopProcess: return true; default: return false }
+        switch action {
+        case .copy, .clipboard, .stopProcess: return true
+        case .thing(let thing): return thing.twoLine
+        default: return false
+        }
     }
     var path: String? {
-        switch action { case .app(let app): return app.path; case .file(let file): return file.path; default: return nil }
+        switch action {
+        case .app(let app): return app.path
+        case .file(let file): return file.path
+        case .thing(let thing): return thing.path
+        default: return nil
+        }
     }
     /// Disruptive actions run only after a second Return.
     var needsConfirmation: Bool {
         switch action {
         case .command(let command): return command.confirm
+        case .thing(let thing): return thing.primary?.confirm ?? false
         default: return false
         }
     }
     /// Calculator answers, typed URLs, web searches, and clipboard text are not remembered for ranking.
     var learnsFromUse: Bool {
         switch action {
-        case .copy, .clipboard, .stopProcess, .timer, .cancelTimer, .route, .menu: return false
+        case .copy, .clipboard, .stopProcess, .timer, .cancelTimer, .route, .menu, .thing: return false
         case .custom(_, let input): return input == nil
         case .url: return id.hasPrefix("quicklink:")
         default: return true
@@ -124,6 +136,7 @@ final class LauncherModel: ObservableObject {
             }
             return Notice(symbol: "exclamationmark.circle", text: "Press Return again to " + confirmPhrase(pending) + ".", tone: .warning)
         }
+        if let sourceNotice { return sourceNotice }
         if let portNotice { return Notice(symbol: "network", text: portNotice, tone: .info) }
         if let jevNotice { return Notice(symbol: "sparkles", text: jevNotice, tone: .info) }
         if let aiError { return Notice(symbol: "sparkles", text: aiError, tone: .info) }
@@ -156,11 +169,13 @@ final class LauncherModel: ObservableObject {
         case .cancelTimer: return "Cancel Timer"
         case .menu: return "Choose Menu Item"
         case .route: return "Show"
+        case .thing(let thing): return selected.id == pendingConfirmID ? "Confirm" : thing.primary?.title
         }
     }
     func perform(_ action: Notice.Action) {
         switch action {
         case .allowAccessibility: windows.requestPermission()
+        case .grant(let access): grant(access)
         }
     }
     let preferences: Preferences
@@ -205,6 +220,14 @@ final class LauncherModel: ObservableObject {
     /// "Stopped node on :3000.", shown until the query changes.
     var stoppedNotice: String?
     var isLoadingPorts = false
+    /// The source named in the search field, such as "scheduled tasks", and its rows.
+    var sourceQuery: SourceQuery?
+    var sourceRows: [LauncherResult] = []
+    var sourceProblem: SourceProblem?
+    /// A verb's result, such as "Turned off com.example.sync.", shown until the query or selection changes.
+    var sourceNote: String?
+    var isLoadingSource = false
+    var sources: [SourceQuery.Kind: ThingSource] = [:]
     /// The row that is waiting for a second Return.
     @Published var pendingConfirmID: String?
     private var subscriptions = Set<AnyCancellable>()
@@ -239,6 +262,7 @@ final class LauncherModel: ObservableObject {
         parsedFileQuery = FileSearchQuery(text: ""); fileStatus = ""
         previousFileResults = []; fileResults = []; promotedID = nil; semanticResult = nil; revision = UUID()
         portQuery = nil; listeners = []; portDetails = [:]; stoppedNotice = nil; isLoadingPorts = false; pendingConfirmID = nil
+        sourceQuery = nil; sourceRows = []; sourceProblem = nil; sourceNote = nil; isLoadingSource = false
         jevPick = nil; menuCommands = []
         rebuild()
         ShortcutsCatalogue.shared.refreshIfStale()
@@ -281,6 +305,7 @@ final class LauncherModel: ObservableObject {
         } else { previousFileResults = [] }
         query = text; message = nil; manualSelection = false; fileResults = []; promotedID = nil; semanticResult = nil
         pendingConfirmID = nil; portQuery = PortQuery.parse(text); listeners = []; portDetails = [:]; stoppedNotice = nil; jevPick = nil
+        sourceQuery = isFileSearch || portQuery != nil ? nil : SourceQuery.parse(text); sourceRows = []; sourceProblem = nil; sourceNote = nil
         revision = UUID(); let current = revision
         work?.cancel(); aiWork?.cancel(); files.stop(); aiStatus = ""; aiError = nil
         if typed { voiceError = nil }
@@ -290,6 +315,7 @@ final class LauncherModel: ObservableObject {
         // Clipboard filters and keyword searches with text stay local and skip file search.
         guard !trimmed.isEmpty, !isClipboardSearch, Quicklink.match(trimmed, in: preferences.quicklinks)?.query.isEmpty ?? true else { return }
         if let portQuery { loadPorts(portQuery, revision: current, promoteFirst: false) }
+        if sourceQuery != nil { loadSource(revision: current); return }
         if portQuery == nil && (isFileSearch || trimmed.count >= 3) {
             work = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 120_000_000)
@@ -346,7 +372,7 @@ final class LauncherModel: ObservableObject {
             rows.append(Self.fileRow(file, score: score, isCurrent: filesAreCurrent))
         }
         if !isFileSearch {
-            rows += quicklinkRows(q) + commandRows(q) + portRows() + extraRows(q)
+            rows += quicklinkRows(q) + commandRows(q) + portRows() + extraRows(q) + sourceRows
             rows += compoundRows(q, among: rows)
         }
         let answer = isFileSearch ? nil : (Calculator.evaluate(q) ?? QueryText.substitutingAnswer(q, last: answers.first).flatMap(Calculator.evaluate))
@@ -550,7 +576,7 @@ final class LauncherModel: ObservableObject {
         guard !available.isEmpty else { return }
         let index = available.firstIndex(where: { $0.id == selectedID }) ?? 0
         selectedID = available[min(max(index + delta, 0), available.count - 1)].id
-        manualSelection = true; pendingConfirmID = nil; stoppedNotice = nil
+        manualSelection = true; pendingConfirmID = nil; stoppedNotice = nil; sourceNote = nil
     }
     func select(_ id: String) {
         guard results.contains(where: { $0.id == id && $0.isCurrent }) else { selectedID = nil; return }
@@ -597,6 +623,10 @@ final class LauncherModel: ObservableObject {
             case .menu(let command): pressLater(command)
             case .route(let text):
                 updateQuery(text, typed: false)
+                return
+            case .thing(let thing):
+                guard let verb = thing.primary else { return }
+                run(verb, on: result)
                 return
             }
             if result.id == "calculator", case .copy(let text) = result.action { answers = [text] + answers.filter { $0 != text }.prefix(9) }

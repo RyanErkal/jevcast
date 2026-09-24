@@ -54,8 +54,10 @@ extension LauncherModel {
                     self.message = nil; self.sourceNote = note
                     self.reloadSource()
                 } catch {
-                    guard let self, self.visible else { return }
+                    guard let self, self.visible, self.revision == current else { return }
                     self.message = error.localizedDescription
+                    // The rows were marked stale for the verb, so read the list again.
+                    self.reloadSource()
                 }
             }
         }

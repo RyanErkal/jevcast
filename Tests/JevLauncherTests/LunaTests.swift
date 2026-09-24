@@ -59,7 +59,7 @@ final class LunaTests: XCTestCase {
         XCTAssertEqual(model.primaryActionTitle, "Copy Answer")
         XCTAssertEqual(luna.requests.first?.user.contains("what is swift"), true)
         let entry = try XCTUnwrap(model.lunaLog.entries.first)
-        XCTAssertEqual(entry.action, "Ask")
+        XCTAssertEqual(entry.action, "Question")
         XCTAssertEqual(entry.sent, [.typedText])
         var closed: Bool?
         model.onClose = { closed = $0 }

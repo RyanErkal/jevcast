@@ -3,6 +3,7 @@ import LauncherCore
 
 /// Luna's answer in the panel. Return copies it, or replaces the selection it came from.
 struct LunaAnswer: Equatable {
+    let id = UUID()
     let title: String
     var text = ""
     var isLoading = true
@@ -22,7 +23,8 @@ extension LauncherModel {
     /// "ask …", "? …", or "luna …" in the search field.
     func askRows(_ q: String) -> [LauncherResult] {
         guard lunaReady, let question = LunaPresets.question(in: q) else { return [] }
-        return [askRow(question, score: 1750)]
+        // Below a whole-name match (100), so "luna display" still opens the Luna Display app.
+        return [askRow(question, score: 95)]
     }
 
     func askRow(_ question: String, score: Double) -> LauncherResult {
@@ -42,9 +44,12 @@ extension LauncherModel {
             return [LauncherResult(id: "this:luna:off", title: "Use Luna on Selected Text", detail: "Turn on “Selected text” in Settings › Luna",
                                    symbol: "sparkles", action: .thing(Thing(verbs: [verb], twoLine: false)), score: 0)]
         }
+        // Luna sees at most `maxText` characters, so a longer selection is copied, never replaced.
+        let fits = text.count <= LunaRequest.maxText
         return LunaPresets.selection.map { preset in
             let verb = Verb(title: preset.title, after: .stay) { [weak self] in
-                self?.startLuna(.transform(preset.instruction, text: text), title: preset.title, replacesSelection: preset.id != "summary" && preset.id != "explain")
+                self?.startLuna(.transform(preset.instruction, text: text, label: preset.title), title: preset.title,
+                                replacesSelection: fits && preset.id != "summary" && preset.id != "explain")
                 return nil
             }
             return LauncherResult(id: "this:luna:" + preset.id, title: preset.title, detail: "Luna · " + (FrontContext.text(text, app: "").summary),
@@ -58,8 +63,10 @@ extension LauncherModel {
         guard lunaReady, preferences.lunaSendsSelection, case .text(let text, _) = frontContext else { return nil }
         let instruction = q.trimmingCharacters(in: .whitespaces)
         guard instruction.split(separator: " ").count >= 2, LunaPresets.question(in: instruction) == nil else { return nil }
+        // A question about the text is answered and copied; only a change replaces the selection.
+        let replaces = text.count <= LunaRequest.maxText && !LunaPresets.isQuestion(instruction)
         let verb = Verb(title: "Apply with Luna", after: .stay) { [weak self] in
-            self?.startLuna(.transform(instruction, text: text), title: instruction, replacesSelection: true); return nil
+            self?.startLuna(.transform(instruction, text: text), title: instruction, replacesSelection: replaces); return nil
         }
         return LauncherResult(id: Self.customSelectionID, title: "Luna: " + instruction, detail: "On " + FrontContext.text(text, app: "").summary,
                               symbol: "sparkles", action: .thing(Thing(verbs: [verb], twoLine: false,
@@ -87,18 +94,19 @@ extension LauncherModel {
     func startLuna(_ request: LunaRequest, title: String, replacesSelection: Bool) {
         lunaWork?.cancel()
         pauseListening()
-        lunaAnswer = LunaAnswer(title: title, replacesSelection: replacesSelection)
-        let session = visibleSession
+        let answer = LunaAnswer(title: title, replacesSelection: replacesSelection)
+        lunaAnswer = answer
         lunaWork = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 let reply = try await self.sendLuna(request)
-                guard self.visible, self.visibleSession == session else { return }
+                // A reply for an answer that was dismissed or replaced is dropped.
+                guard !Task.isCancelled, self.lunaAnswer?.id == answer.id else { return }
                 self.lunaAnswer?.text = reply.text
                 self.lunaAnswer?.isLoading = false
             } catch is CancellationError {
             } catch {
-                guard self.visible, self.visibleSession == session else { return }
+                guard self.lunaAnswer?.id == answer.id else { return }
                 self.lunaAnswer?.isLoading = false
                 self.lunaAnswer?.error = error.localizedDescription
             }
@@ -120,6 +128,9 @@ extension LauncherModel {
                                  inputTokens: reply.inputTokens, outputTokens: reply.outputTokens, cost: reply.cost, succeeded: true))
             return reply
         } catch is CancellationError {
+            // The request may already have reached OpenRouter, so it is logged too.
+            lunaLog.record(.init(date: Date(), action: request.action + " (cancelled)", sent: request.sent, effort: effort,
+                                 inputTokens: 0, outputTokens: 0, cost: nil, succeeded: false))
             throw CancellationError()
         } catch {
             lunaLog.record(.init(date: Date(), action: request.action, sent: request.sent, effort: effort,

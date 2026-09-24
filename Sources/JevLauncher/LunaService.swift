@@ -46,6 +46,9 @@ struct LunaService: LunaWriting {
         guard let http = response as? HTTPURLResponse else { throw Failure(text: "Luna sent a response Jevcast could not read.") }
         switch http.statusCode {
         case 200..<300: break
+        case 400:
+            let detail = (try? JSONDecoder().decode(ErrorBody.self, from: data))?.error.message.prefix(200)
+            throw Failure(text: "Luna refused the request" + (detail.map { ": " + $0 } ?? "."))
         case 401, 403: throw Failure(text: "OpenRouter rejected the key. Check it in Settings › Luna.")
         case 402: throw Failure(text: "The OpenRouter account needs credits.")
         case 429: throw Failure(text: "Luna is rate limited. Try again in a moment.")
@@ -56,6 +59,10 @@ struct LunaService: LunaWriting {
             throw Failure(text: "Luna sent a response Jevcast could not read.")
         }
         guard !text.isEmpty else { throw Failure(text: "Luna returned no text. Try again, or choose High effort.") }
+        // A reply cut off at the token limit is not used, so it can never replace a whole selection.
+        if decoded.choices.first?.finish_reason == "length" {
+            throw Failure(text: "Luna ran out of room before it finished. Try a shorter text, or Fast effort.")
+        }
         return LunaReply(text: text, inputTokens: decoded.usage?.prompt_tokens ?? 0, outputTokens: decoded.usage?.completion_tokens ?? 0,
                          cost: decoded.usage?.cost)
     }
@@ -70,16 +77,17 @@ struct LunaService: LunaWriting {
         let max_tokens: Int
         let usage: Usage
     }
+    private struct ErrorBody: Decodable { struct Detail: Decodable { let message: String }; let error: Detail }
     private struct Reply: Decodable {
-        struct Choice: Decodable { struct Message: Decodable { let content: String? }; let message: Message }
+        struct Choice: Decodable { struct Message: Decodable { let content: String? }; let message: Message; let finish_reason: String? }
         struct Usage: Decodable { let prompt_tokens: Int?; let completion_tokens: Int?; let cost: Double? }
         let choices: [Choice]
         let usage: Usage?
     }
 }
 
-/// A record of each Luna request: when, what for, which kinds of context went, and the cost.
-/// Never the text itself. Stored on this Mac.
+/// A record of each Luna request: when, which kind of action, which kinds of context went, and
+/// the cost. Never the text, the question, or the instruction. Stored on this Mac.
 @MainActor
 final class LunaActivityLog: ObservableObject {
     struct Entry: Codable, Identifiable, Equatable {

@@ -236,6 +236,7 @@ final class LauncherModel: ObservableObject {
     var contextApp: NSRunningApplication?
     enum ContextState { case none, withoutAsking, asked }
     var contextState = ContextState.none
+    var contextRead: UUID?
     /// Changes each time the launcher opens, so late work from an earlier opening is dropped.
     var visibleSession = UUID()
     var sourceTask: Task<Void, Never>?

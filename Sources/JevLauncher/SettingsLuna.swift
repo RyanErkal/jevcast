@@ -5,8 +5,8 @@ import LauncherCore
 struct LunaSettings: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var log: LunaActivityLog
-    @ObservedObject private var jevKeys = JevKeyCache.shared
-    @ObservedObject private var lunaKeys = JevKeyCache.luna
+    @ObservedObject var jevKeys: JevKeyCache
+    @ObservedObject var lunaKeys: JevKeyCache
     @State private var key = ""
     @State private var keyMessage = ""
 

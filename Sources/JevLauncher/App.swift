@@ -84,6 +84,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             guard let self, self.wasVisible, event.window === self.panel else { return event }
             // An input method composing text owns Return, arrows, and Escape until it commits.
             if let editor = self.panel.firstResponder as? NSTextView, editor.hasMarkedText() { return event }
+            // With Luna's answer showing, Escape goes back to the rows and row keys do nothing.
+            if self.model.lunaAnswer != nil {
+                switch event.keyCode {
+                case 53: self.model.dismissLuna(); return nil
+                case 36, 76: self.model.execute(paste: event.modifierFlags.contains(.shift)); return nil
+                case 125, 126, 51: return event.keyCode == 51 ? event : nil
+                default: if event.modifierFlags.contains(.command) { return event.charactersIgnoringModifiers == "c" ? event : nil }
+                }
+            }
             switch event.keyCode {
             case 53:
                 self.hide()

@@ -34,6 +34,8 @@ public struct LunaRequest: Equatable, Sendable {
     public let maxOutputTokens: Int
 
     public static let model = "openai/gpt-6-luna"
+    /// The most text one rewrite sends. A longer selection is sent in part, and is never replaced.
+    public static let maxText = 40_000
 
     static func system(_ task: String, now: Date) -> String {
         let day = ISO8601DateFormatter.string(from: now, timeZone: .current, formatOptions: [.withFullDate])
@@ -47,15 +49,16 @@ public struct LunaRequest: Equatable, Sendable {
 
     /// A question typed in the launcher.
     public static func ask(_ question: String, now: Date = Date()) -> LunaRequest {
-        LunaRequest(action: "Ask", system: system("Answer the question clearly and briefly. Use short paragraphs or a short list.", now: now),
+        LunaRequest(action: "Question", system: system("Answer the question clearly and briefly. Use short paragraphs or a short list.", now: now),
                     user: "<question>\n\(question)\n</question>", sent: [.typedText], maxOutputTokens: 4000)
     }
 
     /// An instruction applied to selected text: "make it shorter", "translate to Turkish".
-    public static func transform(_ instruction: String, text: String, now: Date = Date()) -> LunaRequest {
-        LunaRequest(action: "Rewrite: " + instruction,
+    /// `label` names it in the activity log, so a typed instruction is not stored there.
+    public static func transform(_ instruction: String, text: String, label: String = "Custom instruction", now: Date = Date()) -> LunaRequest {
+        LunaRequest(action: "Selected text: " + label,
                     system: system("Apply the user's instruction to the text. Keep its meaning, its language unless told otherwise, and its formatting.", now: now),
-                    user: "Instruction: \(instruction)\n<text>\n\(String(text.prefix(40_000)))\n</text>", sent: [.typedText, .selectedText],
+                    user: "Instruction: \(instruction)\n<text>\n\(String(text.prefix(maxText)))\n</text>", sent: [.typedText, .selectedText],
                     maxOutputTokens: 8000)
     }
 
@@ -86,6 +89,14 @@ public enum LunaPresets {
         ("explain", "Explain", "Explain what it means in plain words."),
         ("english", "Translate to English", "Translate it to English.")
     ]
+
+    /// True when a typed instruction asks about the text rather than asking to change it.
+    public static func isQuestion(_ instruction: String) -> Bool {
+        let lower = instruction.lowercased().trimmingCharacters(in: .whitespaces)
+        if lower.hasSuffix("?") { return true }
+        let starts = ["what", "why", "how", "who", "when", "where", "which", "is ", "are ", "does ", "do ", "can ", "explain", "summar", "tell me", "list "]
+        return starts.contains { lower.hasPrefix($0) }
+    }
 
     /// "ask what is a p-value", "? what is a p-value", or "luna …": the question after the keyword.
     public static func question(in text: String) -> String? {

@@ -23,8 +23,10 @@ enum FrontContext: Equatable {
             case .denied, .notRunning: allowed = false
             }
         }
+        // A first Automation prompt waits for the user, so it gets a long time limit.
+        let limit: TimeInterval = mayAsk ? 90 : 8
         if allowed, let browser = Browser.named(bundleID) {
-            let output = (try? await AppleScript.run(TabScripts.frontTab(browser), app: browser.bundleID, name: browser.name)) ?? ""
+            let output = (try? await AppleScript.run(TabScripts.frontTab(browser), app: browser.bundleID, name: browser.name, timeout: limit)) ?? ""
             let parts = output.trimmingCharacters(in: .newlines).components(separatedBy: TabScripts.field)
             if parts.count == 2, !parts[1].isEmpty { return .page(title: parts[0], url: parts[1], browser: bundleID) }
         }
@@ -40,7 +42,7 @@ enum FrontContext: Equatable {
               end tell
             end timeout
             """
-            let output = (try? await AppleScript.run(script, app: bundleID, name: "Finder")) ?? ""
+            let output = (try? await AppleScript.run(script, app: bundleID, name: "Finder", timeout: limit)) ?? ""
             let paths = output.components(separatedBy: TabScripts.record).map { $0.trimmingCharacters(in: .newlines) }.filter { !$0.isEmpty }
             if !paths.isEmpty { return .files(paths) }
         }
@@ -63,7 +65,8 @@ enum FrontContext: Equatable {
         AXUIElementSetMessagingTimeout(element, 0.25)
         var selected: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &selected) == .success else { return nil }
-        return (selected as? String).map { String($0.prefix(20_000)) }
+        // The whole selection is kept, so a rewrite never replaces more than Luna saw.
+        return (selected as? String).map { String($0.prefix(1_000_000)) }
     }
 
     /// What the rows show as "this": the page title, the file names, or the start of the text.
@@ -200,10 +203,12 @@ extension LauncherModel {
         let asks = Self.thisWords.contains(q.lowercased())
         guard contextState == .none || (contextState == .withoutAsking && asks) else { return }
         contextState = asks ? .asked : .withoutAsking
-        let current = visibleSession
+        let current = visibleSession, read = UUID()
+        contextRead = read
         Task { @MainActor [weak self] in
             let context = await FrontContext.capture(from: app, mayAsk: asks)
-            guard let self, self.visible, self.visibleSession == current else { return }
+            // Only the newest read counts, so a slow earlier one cannot overwrite it.
+            guard let self, self.visible, self.visibleSession == current, self.contextRead == read else { return }
             if context != nil || self.frontContext == nil { self.frontContext = context }
             if !self.query.isEmpty { self.rebuild() }
         }

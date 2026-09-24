@@ -58,7 +58,9 @@ final class TabsSource: ThingSource {
             for browser in running {
                 group.addTask {
                     do {
-                        let output = try await AppleScript.run(TabScripts.list(browser), app: browser.bundleID, name: browser.name)
+                        // A first Automation prompt waits for the user, so it gets a long time limit.
+                        let asks = await AppleScript.permission(for: browser.bundleID) == .notAsked
+                        let output = try await AppleScript.run(TabScripts.list(browser), app: browser.bundleID, name: browser.name, timeout: asks ? 90 : 8)
                         return .success(TabScripts.parse(output, browser: browser.bundleID))
                     } catch { return .failure(error) }
                 }

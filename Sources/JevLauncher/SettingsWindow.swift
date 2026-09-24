@@ -95,7 +95,7 @@ final class SettingsWindow: NSWindowController, NSToolbarDelegate {
         case .windows: WindowSettings(preferences: preferences, model: model, changed: changed)
         case .commands: CommandSettings(preferences: preferences, catalogue: catalogue)
         case .input: InputSettings(preferences: preferences, speech: model.speech)
-        case .luna: LunaSettings(preferences: preferences, log: model.lunaLog)
+        case .luna: LunaSettings(preferences: preferences, log: model.lunaLog, jevKeys: model.keys, lunaKeys: model.lunaKeys)
         case .usage: UsageSettings(preferences: preferences, usage: JevUsageLog.shared)
         }
     }

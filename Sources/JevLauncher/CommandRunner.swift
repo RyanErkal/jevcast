@@ -100,6 +100,8 @@ enum CommandRunner {
                         continuation.resume(throwing: Failure(text: "\(name) could not start."))
                         return
                     }
+                    // A cancel that came between start and run found nothing running yet.
+                    if box.cancelled { process.terminate() }
                     if let timeout {
                         DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { [weak process] in
                             guard let process, process.isRunning else { return }

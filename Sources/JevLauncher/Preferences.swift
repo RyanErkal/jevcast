@@ -8,6 +8,12 @@ final class Preferences: ObservableObject {
     @Published var hotkey: Hotkey { didSet { defaults.set(hotkey.rawValue, forKey: "hotkey") } }
     @Published var voiceEnabled: Bool { didSet { defaults.set(voiceEnabled, forKey: "voiceEnabled") } }
     @Published var jevEnabled: Bool { didSet { defaults.set(jevEnabled, forKey: "jevEnabled") } }
+    /// Luna writes and reads text when a request needs it. Off until the user turns it on.
+    @Published var lunaEnabled: Bool { didSet { defaults.set(lunaEnabled, forKey: "lunaEnabled") } }
+    @Published var lunaEffort: LunaEffort { didSet { defaults.set(lunaEffort.rawValue, forKey: "lunaEffort") } }
+    /// Each kind of context Luna may receive. What the user types is always allowed once Luna is on.
+    @Published var lunaSendsSelection: Bool { didSet { defaults.set(lunaSendsSelection, forKey: "lunaSendsSelection") } }
+    @Published var lunaSendsMail: Bool { didSet { defaults.set(lunaSendsMail, forKey: "lunaSendsMail") } }
     @Published var edgeSnapping: Bool { didSet { defaults.set(edgeSnapping, forKey: "edgeSnapping") } }
     @Published var windowShortcuts: Bool { didSet { defaults.set(windowShortcuts, forKey: "windowShortcuts") } }
     @Published var gap: Double { didSet { defaults.set(gap, forKey: "gap") } }
@@ -48,6 +54,10 @@ final class Preferences: ObservableObject {
         checksForUpdates = d.object(forKey: "checksForUpdates") as? Bool ?? true
         welcomeShown = d.object(forKey: "welcomeShown") as? Bool ?? existingInstall
         jevEnabled = d.bool(forKey: "jevEnabled")
+        lunaEnabled = d.bool(forKey: "lunaEnabled")
+        lunaEffort = d.string(forKey: "lunaEffort").flatMap(LunaEffort.init(rawValue:)) ?? .fast
+        lunaSendsSelection = d.bool(forKey: "lunaSendsSelection")
+        lunaSendsMail = d.bool(forKey: "lunaSendsMail")
         edgeSnapping = d.bool(forKey: "edgeSnapping")
         windowShortcuts = d.bool(forKey: "windowShortcuts")
         gap = d.object(forKey: "gap") as? Double ?? 8

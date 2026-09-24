@@ -96,9 +96,9 @@ final class ScheduledJobTests: XCTestCase {
         let quarter = CronJob.parse("*/15 * * * * poll")[0]
         XCTAssertEqual(quarter.nextRun(after: date("2026-09-23T10:07:00Z"), calendar: calendar), date("2026-09-23T10:15:00Z"))
         // Day of month OR day of week when both are set.
-        // "*/2" counts as unrestricted, as in Vixie cron, so only Mondays match.
+        // A day field that starts with "*" makes both fields required: a Monday on an odd day.
         let stepped = CronJob.parse("0 9 */2 * 1 weekly")[0]
-        XCTAssertEqual(stepped.nextRun(after: date("2026-09-23T12:00:00Z"), calendar: calendar), date("2026-09-28T08:00:00Z"))
+        XCTAssertEqual(stepped.nextRun(after: date("2026-09-23T12:00:00Z"), calendar: calendar), date("2026-10-05T08:00:00Z"))
         let either = CronJob.parse("0 0 13 * 5 spooky")[0]
         XCTAssertEqual(either.nextRun(after: date("2026-09-23T12:00:00Z"), calendar: calendar), date("2026-09-24T23:00:00Z"), "Friday 25th matches the weekday.")
     }

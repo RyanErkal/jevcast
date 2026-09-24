@@ -44,6 +44,9 @@ extension LauncherModel {
             }
         case .stay:
             let current = revision
+            // The list may change, so its rows cannot run again until it reloads.
+            sourceRows = sourceRows.map { var row = $0; row.isCurrent = false; return row }
+            rebuild()
             Task { @MainActor [weak self] in
                 do {
                     let note = try await verb.run()

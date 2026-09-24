@@ -1,5 +1,6 @@
 import XCTest
 import LauncherCore
+import SQLite3
 @testable import JevLauncher
 
 @MainActor final class FakeSource: ThingSource {
@@ -78,5 +79,37 @@ final class SourceFlowTests: XCTestCase {
     while !condition() {
         guard Date() < deadline else { return XCTFail("Condition not met in time") }
         try await Task.sleep(nanoseconds: 10_000_000)
+    }
+}
+
+final class BrowserHelperTests: XCTestCase {
+    func testLikePatternEscapesWildcards() {
+        XCTAssertEqual(SQLiteReader.likePattern("50%_off\\x"), "%50\\%\\_off\\\\x%")
+    }
+
+    @MainActor func testDuplicateTabsKeepTheFirst() {
+        let a = BrowserTab(browser: "b", windowID: "1", key: "1", title: "A", url: "https://a", active: true)
+        let b = BrowserTab(browser: "b", windowID: "1", key: "2", title: "A again", url: "https://a", active: false)
+        let c = BrowserTab(browser: "b", windowID: "2", key: "3", title: "C", url: "https://c", active: true)
+        XCTAssertEqual(TabsSource.duplicates([a, b, c]), [b])
+    }
+
+    func testContextSummary() {
+        XCTAssertEqual(FrontContext.files(["/a/one.txt", "/a/two.txt", "/a/three.txt", "/a/four.txt"]).summary, "one.txt, two.txt, three.txt and 1 more")
+        XCTAssertEqual(FrontContext.page(title: "", url: "https://x", browser: "b").summary, "https://x")
+        XCTAssertEqual(FrontContext.text("hello\nworld", app: "Notes").summary, "“hello”")
+    }
+
+    func testSQLiteReaderBindsValues() throws {
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".db").path
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(path, &db), SQLITE_OK)
+        sqlite3_exec(db, "CREATE TABLE t (a TEXT, b INTEGER); INSERT INTO t VALUES ('x''y', 1), ('z', 2);", nil, nil, nil)
+        sqlite3_close(db)
+        let reader = try SQLiteReader(path: path)
+        XCTAssertEqual(try reader.rows("SELECT b FROM t WHERE a = ?1", [.text("x'y")]).first?.first?.int, 1)
+        XCTAssertEqual(reader.columns("t"), ["a", "b"])
+        XCTAssertEqual(reader.columns("t; DROP TABLE t"), [])
     }
 }

@@ -77,37 +77,83 @@ enum CommandRunner {
 
     /// Runs one step and returns its standard output. Both pipes are read while the
     /// process runs, so a command with a lot of output cannot fill a pipe and stall.
-    static func capture(_ step: [String], currentDirectory: String? = nil, allowFailure: Bool = false) async throws -> String {
-        try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: step[0])
-                process.arguments = Array(step.dropFirst())
-                if let currentDirectory { process.currentDirectoryURL = URL(fileURLWithPath: currentDirectory) }
-                let out = Pipe(), err = Pipe()
-                process.standardOutput = out
-                process.standardError = err
-                process.standardInput = FileHandle.nullDevice
-                let name = (step[0] as NSString).lastPathComponent
-                do { try process.run() } catch {
-                    continuation.resume(throwing: Failure(text: "\(name) could not start."))
-                    return
-                }
-                let errors = DispatchGroup()
-                nonisolated(unsafe) var errorData = Data()
-                errors.enter()
-                DispatchQueue.global(qos: .utility).async { errorData = err.fileHandleForReading.readDataToEndOfFile(); errors.leave() }
-                let outputData = out.fileHandleForReading.readDataToEndOfFile()
-                errors.wait()
-                process.waitUntilExit()
-                let stdout = String(decoding: outputData, as: UTF8.self)
-                if process.terminationStatus == 0 || allowFailure {
-                    continuation.resume(returning: stdout)
-                } else {
-                    let line = String(decoding: errorData, as: UTF8.self).split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
-                    continuation.resume(throwing: Failure(text: line.isEmpty ? "\(name) failed with code \(process.terminationStatus)." : line))
+    /// Cancelling the task, or passing `timeout`, ends the process.
+    static func capture(_ step: [String], currentDirectory: String? = nil, allowFailure: Bool = false, timeout: TimeInterval? = nil) async throws -> String {
+        let box = ProcessBox()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let process = Process()
+                    process.executableURL = URL(fileURLWithPath: step[0])
+                    process.arguments = Array(step.dropFirst())
+                    if let currentDirectory { process.currentDirectoryURL = URL(fileURLWithPath: currentDirectory) }
+                    let out = Pipe(), err = Pipe()
+                    process.standardOutput = out
+                    process.standardError = err
+                    process.standardInput = FileHandle.nullDevice
+                    let name = (step[0] as NSString).lastPathComponent
+                    guard box.start(process) else {
+                        continuation.resume(throwing: CancellationError())
+                        return
+                    }
+                    do { try process.run() } catch {
+                        continuation.resume(throwing: Failure(text: "\(name) could not start."))
+                        return
+                    }
+                    if let timeout {
+                        DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { [weak process] in
+                            guard let process, process.isRunning else { return }
+                            box.timedOut = true
+                            process.terminate()
+                        }
+                    }
+                    let errors = DispatchGroup()
+                    nonisolated(unsafe) var errorData = Data()
+                    errors.enter()
+                    DispatchQueue.global(qos: .utility).async { errorData = err.fileHandleForReading.readDataToEndOfFile(); errors.leave() }
+                    let outputData = out.fileHandleForReading.readDataToEndOfFile()
+                    errors.wait()
+                    process.waitUntilExit()
+                    let stdout = String(decoding: outputData, as: UTF8.self)
+                    if box.cancelled {
+                        continuation.resume(throwing: CancellationError())
+                    } else if box.timedOut {
+                        continuation.resume(throwing: Failure(text: "\(name) took too long and was stopped."))
+                    } else if process.terminationStatus == 0 || allowFailure {
+                        continuation.resume(returning: stdout)
+                    } else {
+                        let line = String(decoding: errorData, as: UTF8.self).split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+                        continuation.resume(throwing: Failure(text: line.isEmpty ? "\(name) failed with code \(process.terminationStatus)." : line))
+                    }
                 }
             }
+        } onCancel: {
+            box.cancel()
         }
+    }
+}
+
+/// The running process of one `capture`, so cancelling the task can end it.
+private final class ProcessBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var process: Process?
+    private var _cancelled = false
+    private var _timedOut = false
+    var cancelled: Bool { lock.withLock { _cancelled } }
+    var timedOut: Bool {
+        get { lock.withLock { _timedOut } }
+        set { lock.withLock { _timedOut = newValue } }
+    }
+    /// Keeps the process, or returns false when the task was already cancelled.
+    func start(_ process: Process) -> Bool {
+        lock.withLock {
+            guard !_cancelled else { return false }
+            self.process = process
+            return true
+        }
+    }
+    func cancel() {
+        let running = lock.withLock { () -> Process? in _cancelled = true; return process }
+        if let running, running.isRunning { running.terminate() }
     }
 }

@@ -339,11 +339,8 @@ public struct CronJob: Equatable, Sendable, Identifiable {
             let parts = cal.dateComponents([.month, .day, .weekday], from: day)
             let monthOK = fields[3].contains(parts.month ?? 0)
             let domOK = fields[2].contains(parts.day ?? 0), dowOK = fields[4].contains((parts.weekday ?? 1) - 1)
-            let dayOK: Bool
-            if dayOfMonthAny && dayOfWeekAny { dayOK = true }
-            else if dayOfMonthAny { dayOK = dowOK }
-            else if dayOfWeekAny { dayOK = domOK }
-            else { dayOK = domOK || dowOK }
+            // Vixie cron: when either day field starts with "*", both must match; otherwise either may.
+            let dayOK = dayOfMonthAny || dayOfWeekAny ? domOK && dowOK : domOK || dowOK
             if monthOK && dayOK {
                 for hour in fields[1].sorted() {
                     for minute in fields[0].sorted() {

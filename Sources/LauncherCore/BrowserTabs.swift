@@ -2,7 +2,8 @@ import Foundation
 
 /// A browser Jevcast can read tabs from with Apple Events.
 public struct Browser: Equatable, Sendable {
-    public enum Family: Sendable { case chromium, safari }
+    /// Script dialects. Chromium browsers and Dia give tabs a stable ID; Safari tabs have only an index.
+    public enum Family: Sendable { case chromium, dia, safari }
     public let bundleID: String
     public let name: String
     public let family: Family
@@ -16,7 +17,7 @@ public struct Browser: Equatable, Sendable {
         Browser(bundleID: "com.brave.Browser", name: "Brave", family: .chromium, profileRoots: ["BraveSoftware/Brave-Browser"]),
         Browser(bundleID: "com.microsoft.edgemac", name: "Microsoft Edge", family: .chromium, profileRoots: ["Microsoft Edge"]),
         Browser(bundleID: "com.vivaldi.Vivaldi", name: "Vivaldi", family: .chromium, profileRoots: ["Vivaldi"]),
-        Browser(bundleID: "company.thebrowser.dia", name: "Dia", family: .chromium, profileRoots: ["Dia/User Data"])
+        Browser(bundleID: "company.thebrowser.dia", name: "Dia", family: .dia, profileRoots: ["Dia/User Data"])
     ]
     public static func named(_ bundleID: String) -> Browser? { all.first { $0.bundleID == bundleID } }
 }
@@ -24,21 +25,31 @@ public struct Browser: Equatable, Sendable {
 /// One open tab.
 public struct BrowserTab: Equatable, Sendable {
     public let browser: String
-    public let windowID: Int
-    /// 1-based, as AppleScript counts.
-    public let index: Int
+    /// The window's ID as text. Chrome and Dia use text IDs; Safari's are numbers.
+    public let windowID: String
+    /// The tab's own ID, or its 1-based index in Safari, which has no tab IDs.
+    public let key: String
     public let title: String
     public let url: String
     public let active: Bool
-    public init(browser: String, windowID: Int, index: Int, title: String, url: String, active: Bool) {
-        self.browser = browser; self.windowID = windowID; self.index = index; self.title = title; self.url = url; self.active = active
+    public init(browser: String, windowID: String, key: String, title: String, url: String, active: Bool) {
+        self.browser = browser; self.windowID = windowID; self.key = key; self.title = title; self.url = url; self.active = active
     }
-    public var id: String { "tab:\(browser):\(windowID):\(index)" }
+    public var id: String { "tab:\(browser):\(windowID):\(key)" }
     public var host: String {
         let host = URL(string: url)?.host ?? ""
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
-    public var markdown: String { "[\(title.replacingOccurrences(of: "]", with: "\\]"))](\(url))" }
+    public var markdown: String { Markdown.link(title, url) }
+}
+
+public enum Markdown {
+    /// `[title](url)` with brackets in the title and parentheses in the URL escaped.
+    public static func link(_ title: String, _ url: String) -> String {
+        let text = title.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "[", with: "\\[").replacingOccurrences(of: "]", with: "\\]")
+        let target = url.replacingOccurrences(of: "(", with: "%28").replacingOccurrences(of: ")", with: "%29")
+        return "[\(text.isEmpty ? url : text)](\(target))"
+    }
 }
 
 /// The AppleScript Jevcast runs, and the parser for what it prints. Scripts are fixed text per browser
@@ -47,11 +58,28 @@ public enum TabScripts {
     /// Field and record separators that page titles cannot contain.
     public static let field = "\u{1F}", record = "\u{1E}"
 
-    /// Prints one record per tab: window ID, tab index, active flag, title, URL.
+    /// Prints one record per tab: window ID, tab key, active flag, title, URL.
     public static func list(_ browser: Browser) -> String {
-        let (titleKey, activeTest) = browser.family == .safari
-            ? ("name", "(i = (index of current tab of w))")
-            : ("title", "(i = (active tab index of w))")
+        let body: String
+        switch browser.family {
+        case .safari:
+            body = """
+                  set ci to index of current tab of w
+                  set i to 0
+                  repeat with t in tabs of w
+                    set i to i + 1
+                    set out to out & (id of w as text) & fs & i & fs & (i = ci) & fs & (name of t) & fs & (URL of t) & rs
+                  end repeat
+            """
+        case .chromium, .dia:
+            body = """
+                  set aid to (id of active tab of w) as text
+                  repeat with t in tabs of w
+                    set tid to (id of t) as text
+                    set out to out & (id of w as text) & fs & tid & fs & (tid = aid) & fs & (title of t) & fs & (URL of t) & rs
+                  end repeat
+            """
+        }
         return """
         on run argv
           set out to ""
@@ -61,12 +89,7 @@ public enum TabScripts {
             tell application id "\(browser.bundleID)"
               repeat with w in windows
                 try
-                  set wid to id of w
-                  set i to 0
-                  repeat with t in tabs of w
-                    set i to i + 1
-                    set out to out & wid & fs & i & fs & \(activeTest) & fs & (\(titleKey) of t) & fs & (URL of t) & rs
-                  end repeat
+        \(body)
                 end try
               end repeat
             end tell
@@ -76,37 +99,60 @@ public enum TabScripts {
         """
     }
 
-    /// `argv`: window ID, tab index. Brings the tab and its window to the front.
-    public static func focus(_ browser: Browser) -> String {
-        let select = browser.family == .safari
-            ? "set current tab of w to tab (item 2 of argv as integer) of w"
-            : "set active tab index of w to (item 2 of argv as integer)"
+    /// `argv`: window ID, tab key, expected URL. Finds the window and tab, checks the tab still shows
+    /// that page, then runs `action` on `w` (the window) and `t` (the tab). Error 1001 means it changed.
+    static func onTab(_ browser: Browser, _ action: String) -> String {
+        let find: String
+        switch browser.family {
+        case .safari:
+            find = """
+                set t to tab ((item 2 of argv) as integer) of w
+            """
+        case .chromium, .dia:
+            find = """
+                set t to missing value
+                set i to 0
+                repeat with candidate in tabs of w
+                  set i to i + 1
+                  if ((id of candidate) as text) is (item 2 of argv) then
+                    set t to candidate
+                    exit repeat
+                  end if
+                end repeat
+                if t is missing value then error "The tab is closed." number 1001
+            """
+        }
         return """
         on run argv
           with timeout of 4 seconds
             tell application id "\(browser.bundleID)"
-              set w to window id (item 1 of argv as integer)
-              \(select)
-              set index of w to 1
-              activate
+              set w to missing value
+              repeat with candidate in windows
+                if ((id of candidate) as text) is (item 1 of argv) then
+                  set w to candidate
+                  exit repeat
+                end if
+              end repeat
+              if w is missing value then error "The window is closed." number 1001
+        \(find)
+              if (URL of t) is not (item 3 of argv) then error "The tab changed." number 1001
+        \(action)
             end tell
           end timeout
         end run
         """
     }
 
-    /// `argv`: window ID, tab index.
-    public static func close(_ browser: Browser) -> String {
-        """
-        on run argv
-          with timeout of 4 seconds
-            tell application id "\(browser.bundleID)"
-              close tab (item 2 of argv as integer) of window id (item 1 of argv as integer)
-            end tell
-          end timeout
-        end run
-        """
+    /// Brings the tab and its window to the front.
+    public static func focus(_ browser: Browser) -> String {
+        switch browser.family {
+        case .safari: return onTab(browser, "      set current tab of w to t\n      set index of w to 1\n      activate")
+        case .chromium: return onTab(browser, "      set active tab index of w to i\n      set index of w to 1\n      activate")
+        case .dia: return onTab(browser, "      focus t\n      activate")
+        }
     }
+
+    public static func close(_ browser: Browser) -> String { onTab(browser, "      close t") }
 
     /// Prints the front window's current tab: title, then URL.
     public static func frontTab(_ browser: Browser) -> String {
@@ -127,17 +173,21 @@ public enum TabScripts {
     public static func parse(_ output: String, browser: String) -> [BrowserTab] {
         output.components(separatedBy: record).compactMap { line in
             let parts = line.components(separatedBy: field)
-            guard parts.count == 5, let window = Int(parts[0].trimmingCharacters(in: .whitespacesAndNewlines)),
-                  let index = Int(parts[1]) else { return nil }
+            guard parts.count == 5 else { return nil }
+            let window = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !window.isEmpty, !parts[1].isEmpty else { return nil }
             let url = parts[4].trimmingCharacters(in: .whitespacesAndNewlines)
-            return BrowserTab(browser: browser, windowID: window, index: index, title: parts[3], url: url, active: parts[2] == "true")
+            return BrowserTab(browser: browser, windowID: window, key: parts[1], title: parts[3], url: url, active: parts[2] == "true")
         }
     }
 
-    /// True when osascript failed because the user has not allowed Apple Events to that app.
+    /// True when osascript failed because the user has not allowed Apple Events to that app (-1743).
     public static func isNotAuthorized(_ message: String) -> Bool {
-        message.contains("-1743") || message.localizedCaseInsensitiveContains("not authorized") || message.localizedCaseInsensitiveContains("not allowed")
+        message.contains("-1743") || message.localizedCaseInsensitiveContains("not authorized to send apple events")
     }
+
+    /// True for Jevcast's own "the tab changed" error.
+    public static func isStale(_ message: String) -> Bool { message.contains("(1001)") }
 }
 
 /// Visits from a Chromium `History` database, newest first.

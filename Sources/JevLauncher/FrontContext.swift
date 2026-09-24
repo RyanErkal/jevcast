@@ -10,14 +10,25 @@ enum FrontContext: Equatable {
     case text(String, app: String)
 
     /// Reads the front app's context. Returns nil quickly when there is nothing useful.
-    @MainActor static func capture(from app: NSRunningApplication) async -> FrontContext? {
+    /// Apple Events go only to an app Jevcast may already control, unless `mayAsk` is set
+    /// because the query itself asked for "this"; then macOS may ask the user once.
+    @MainActor static func capture(from app: NSRunningApplication, mayAsk: Bool) async -> FrontContext? {
         let bundleID = app.bundleIdentifier ?? ""
-        if let browser = Browser.named(bundleID) {
+        let scriptable = Browser.named(bundleID) != nil || bundleID == "com.apple.finder"
+        var allowed = false
+        if scriptable {
+            switch await AppleScript.permission(for: bundleID) {
+            case .granted: allowed = true
+            case .notAsked: allowed = mayAsk
+            case .denied, .notRunning: allowed = false
+            }
+        }
+        if allowed, let browser = Browser.named(bundleID) {
             let output = (try? await AppleScript.run(TabScripts.frontTab(browser), app: browser.bundleID, name: browser.name)) ?? ""
             let parts = output.trimmingCharacters(in: .newlines).components(separatedBy: TabScripts.field)
             if parts.count == 2, !parts[1].isEmpty { return .page(title: parts[0], url: parts[1], browser: bundleID) }
         }
-        if bundleID == "com.apple.finder" {
+        if allowed, bundleID == "com.apple.finder" {
             let script = """
             with timeout of 2 seconds
               tell application id "com.apple.finder"
@@ -46,9 +57,12 @@ enum FrontContext: Equatable {
         AXUIElementSetMessagingTimeout(app, 0.25)
         var focused: CFTypeRef?
         guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
-              let element = focused, CFGetTypeID(element) == AXUIElementGetTypeID() else { return nil }
+              let value = focused, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        let element = value as! AXUIElement
+        // Each element keeps its own timeout, so a slow app cannot hold the launcher.
+        AXUIElementSetMessagingTimeout(element, 0.25)
         var selected: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element as! AXUIElement, kAXSelectedTextAttribute as CFString, &selected) == .success else { return nil }
+        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &selected) == .success else { return nil }
         return (selected as? String).map { String($0.prefix(20_000)) }
     }
 
@@ -67,16 +81,19 @@ enum FrontContext: Equatable {
 }
 
 extension LauncherModel {
-    /// Rows that act on "this". A normal search matches their titles; the word "this" lists them all.
+    static let thisWords: Set<String> = ["this", "this page", "this file", "these files", "selection", "selected text", "context"]
+
+    /// Rows that act on "this". A normal search matches their titles, below apps and commands;
+    /// the word "this" lists them all.
     func contextRows(_ q: String) -> [LauncherResult] {
         guard let frontContext else { return [] }
         let lower = q.lowercased()
         let all = contextActions(frontContext)
-        let showAll = ["this", "this page", "this file", "these files", "selection", "selected text", "context"].contains(lower)
+        let showAll = Self.thisWords.contains(lower)
         return all.compactMap { row in
             if showAll { var row = row; row.score = 1600 - Double(all.firstIndex { $0.id == row.id } ?? 0); return row }
             guard lower.count >= 3, let score = SearchRanking.score(query: q, title: row.title) else { return nil }
-            var row = row; row.score = score * 100 + 1; return row
+            var row = row; row.score = score * 100 - 2; return row
         }
     }
 
@@ -95,7 +112,7 @@ extension LauncherModel {
             rows.append(row("copy-link", "Copy Link to This Page", "link", jev: "Copy the URL of the page open in the browser",
                             verb: Verb(title: "Copy Link", after: .close) { copyText(url); return nil }))
             rows.append(row("copy-markdown", "Copy This Page as a Markdown Link", "link", jev: "Copy the open page as a Markdown link",
-                            verb: Verb(title: "Copy Link", after: .close) { copyText("[\(title)](\(url))"); return nil }))
+                            verb: Verb(title: "Copy Link", after: .close) { copyText(Markdown.link(title, url)); return nil }))
             rows.append(row("remind-page", "Remind Me About This Page Tomorrow", "checklist", jev: "Make a reminder for tomorrow about the open web page",
                             verb: Verb(title: "Add Reminder", after: .close) {
                                 try await Self.addReminder(CreateQuery(kind: .reminder, title: title.isEmpty ? url : title,
@@ -152,6 +169,10 @@ extension LauncherModel {
     static func compress(_ paths: [String]) async throws {
         guard let first = paths.first else { return }
         let folder = (first as NSString).deletingLastPathComponent
+        // zip names each file relative to one folder, so every file must be in it.
+        guard paths.allSatisfy({ ($0 as NSString).deletingLastPathComponent == folder }) else {
+            throw LauncherError("Select files from one folder to compress them together.")
+        }
         if paths.count == 1 {
             let name = ((first as NSString).lastPathComponent as NSString).deletingPathExtension
             _ = try await CommandRunner.capture(["/usr/bin/ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", first,
@@ -172,14 +193,18 @@ extension LauncherModel {
 }
 
 extension LauncherModel {
-    /// Reads "this" after the panel opens. The rows appear when it arrives, if a query is typed.
-    func loadContext(for app: NSRunningApplication) {
-        guard app.processIdentifier != getpid() else { return }
+    /// Reads "this" once the user starts typing, not when the panel opens. A query that names
+    /// "this" may ask macOS for Automation access; other queries use only access already given.
+    func loadContextIfNeeded(_ q: String) {
+        guard let app = contextApp, app.processIdentifier != getpid(), !q.isEmpty else { return }
+        let asks = Self.thisWords.contains(q.lowercased())
+        guard contextState == .none || (contextState == .withoutAsking && asks) else { return }
+        contextState = asks ? .asked : .withoutAsking
         let current = visibleSession
         Task { @MainActor [weak self] in
-            let context = await FrontContext.capture(from: app)
+            let context = await FrontContext.capture(from: app, mayAsk: asks)
             guard let self, self.visible, self.visibleSession == current else { return }
-            self.frontContext = context
+            if context != nil || self.frontContext == nil { self.frontContext = context }
             if !self.query.isEmpty { self.rebuild() }
         }
     }

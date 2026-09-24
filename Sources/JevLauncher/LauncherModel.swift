@@ -117,6 +117,7 @@ final class LauncherModel: ObservableObject {
     var loadingStatus: String? {
         if isSearchingFiles { return "Searching files…" }
         if aiStatus == Self.interpreting { return "Thinking…" }
+        if lunaAnswer?.isLoading == true { return "Luna is writing…" }
         if catalogue.scanning && catalogue.entries.isEmpty && !isFileSearch && !isClipboardSearch { return "Finding apps…" }
         return nil
     }
@@ -147,6 +148,7 @@ final class LauncherModel: ObservableObject {
     }
     /// What Return does with the selected result, for the footer.
     var primaryActionTitle: String? {
+        if lunaAnswer != nil { return lunaPrimaryTitle }
         guard let selected else { return nil }
         switch selected.action {
         case .app(let app): return app.launchURL != nil ? "Open Settings" : "Open Application"
@@ -230,16 +232,30 @@ final class LauncherModel: ObservableObject {
     var sources: [SourceQuery.Kind: ThingSource] = [:]
     /// The page, files, or selected text in front when the launcher opened.
     var frontContext: FrontContext?
+    /// The app in front when the launcher opened, and how far reading its context has gone.
+    var contextApp: NSRunningApplication?
+    enum ContextState { case none, withoutAsking, asked }
+    var contextState = ContextState.none
     /// Changes each time the launcher opens, so late work from an earlier opening is dropped.
     var visibleSession = UUID()
     var sourceTask: Task<Void, Never>?
+    /// Luna's answer in the panel, while it is written and after.
+    @Published var lunaAnswer: LunaAnswer?
+    var lunaWork: Task<Void, Never>?
+    let luna: LunaWriting
+    let lunaKeys: JevKeyCache
+    let lunaLog: LunaActivityLog
+    /// Opens Settings › Luna, set by the app.
+    var openLunaSettings: (() -> Void)?
     /// The row that is waiting for a second Return.
     @Published var pendingConfirmID: String?
     private var subscriptions = Set<AnyCancellable>()
 
     init(preferences: Preferences, catalogue: AppCatalogue, files: FileSearching? = nil,
-         jev: JevChoosing = JevService(), keys: JevKeyCache? = nil, clipboard: ClipboardHistory? = nil, usage: JevUsageLog? = nil) {
+         jev: JevChoosing = JevService(), keys: JevKeyCache? = nil, clipboard: ClipboardHistory? = nil, usage: JevUsageLog? = nil,
+         luna: LunaWriting = LunaService(), lunaKeys: JevKeyCache? = nil, lunaLog: LunaActivityLog? = nil) {
         self.preferences = preferences; self.catalogue = catalogue
+        self.luna = luna; self.lunaKeys = lunaKeys ?? .luna; self.lunaLog = lunaLog ?? .shared
         self.files = files ?? FileSearch()
         self.jev = jev
         self.usage = usage
@@ -268,7 +284,8 @@ final class LauncherModel: ObservableObject {
         previousFileResults = []; fileResults = []; promotedID = nil; semanticResult = nil; revision = UUID()
         portQuery = nil; listeners = []; portDetails = [:]; stoppedNotice = nil; isLoadingPorts = false; pendingConfirmID = nil
         sourceQuery = nil; sourceRows = []; sourceProblem = nil; sourceNote = nil; isLoadingSource = false
-        jevPick = nil; menuCommands = []; frontContext = nil; visibleSession = UUID()
+        jevPick = nil; menuCommands = []; frontContext = nil; visibleSession = UUID(); dismissLuna()
+        contextApp = targetApp; contextState = .none
         rebuild()
         ShortcutsCatalogue.shared.refreshIfStale()
         startWork?.cancel()
@@ -278,7 +295,6 @@ final class LauncherModel: ObservableObject {
             if let targetApp {
                 self.windows.captureTarget(appPID: targetApp.processIdentifier)
                 self.loadMenuCommands(for: targetApp)
-                self.loadContext(for: targetApp)
             }
             if self.preferences.voiceEnabled && self.acceptsSpeech && self.speech.permissionsGranted { self.speech.start() }
         }
@@ -296,7 +312,7 @@ final class LauncherModel: ObservableObject {
         if !speech.isStarting && !speech.isListening { voiceError = speech.status }
     }
     func end() {
-        visible = false; revision = UUID(); sourceTask?.cancel()
+        visible = false; revision = UUID(); sourceTask?.cancel(); dismissLuna()
         startWork?.cancel(); speech.stop(); work?.cancel(); aiWork?.cancel(); files.stop()
         aiStatus = ""; aiError = nil
     }
@@ -304,6 +320,7 @@ final class LauncherModel: ObservableObject {
         guard visible else { return }
         if typed { acceptsSpeech = false; speech.stop() }
         guard text != query else { return }
+        dismissLuna()
         let wasFileSearch = isFileSearch
         parsedFileQuery = FileSearchQuery(text: text); fileStatus = ""
         if isFileSearch && wasFileSearch && parsedFileQuery.isValid {
@@ -320,6 +337,7 @@ final class LauncherModel: ObservableObject {
         revision = UUID(); let current = revision
         work?.cancel(); aiWork?.cancel(); files.stop(); aiStatus = ""; aiError = nil
         if typed { voiceError = nil }
+        loadContextIfNeeded(text.trimmingCharacters(in: .whitespaces))
         if isFileSearch { fileStatus = parsedFileQuery.validationError ?? "Searching files…" }
         rebuild()
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -596,6 +614,7 @@ final class LauncherModel: ObservableObject {
     }
     var selected: LauncherResult? { results.first { $0.id == selectedID && $0.isCurrent } }
     func execute(paste: Bool = false) {
+        if lunaAnswer != nil { finishLunaAnswer(paste: paste); return }
         guard let result = selected else { message = "Choose an action first."; return }
         if result.needsConfirmation && pendingConfirmID != result.id { pendingConfirmID = result.id; return }
         pendingConfirmID = nil

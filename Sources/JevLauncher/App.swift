@@ -63,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         panel.host(content)
         panel.delegate = self
         model.onClose = { [weak self] restore in self?.hide(restoreFocus: restore) }
+        model.openLunaSettings = { [weak self] in self?.showSettings(tab: .luna) }
         model.onFailure = { [weak self] text in
             guard let self else { return }
             self.show(); self.model.message = text
@@ -307,6 +308,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     func applicationDidChangeScreenParameters(_ notification: Notification) {
         // Never leave a stale click catcher after a display is disconnected.
         hide()
+    }
+    func showSettings(tab: SettingsWindow.Tab) {
+        showSettings()
+        settings?.select(tab)
     }
     @objc func showSettings() {
         hide(restoreFocus: false)

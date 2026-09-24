@@ -4,15 +4,34 @@ import LauncherCore
 /// Runs Jevcast's fixed AppleScript with `osascript`. Values go in as arguments. A refusal
 /// becomes a `SourceProblem` whose button opens the Automation settings.
 enum AppleScript {
-    static func run(_ script: String, _ arguments: [String] = [], app bundleID: String, name: String) async throws -> String {
-        do { return try await CommandRunner.capture(["/usr/bin/osascript", "-e", script] + arguments) }
+    static func run(_ script: String, _ arguments: [String] = [], app bundleID: String, name: String, timeout: TimeInterval = 8) async throws -> String {
+        do { return try await CommandRunner.capture(["/usr/bin/osascript", "-e", script] + arguments, timeout: timeout) }
         catch let failure as CommandRunner.Failure where TabScripts.isNotAuthorized(failure.text) {
             throw SourceProblem(text: "Allow Jevcast to control \(name) in Privacy & Security › Automation.", access: .automation(bundleID))
+        } catch let failure as CommandRunner.Failure where TabScripts.isStale(failure.text) {
+            throw LauncherError("That tab changed or closed. The list is up to date now.")
         }
     }
 
     static func isRunning(_ bundleID: String) -> Bool {
         !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty
+    }
+
+    enum Permission { case granted, notAsked, denied, notRunning }
+
+    /// Whether Jevcast may already send Apple Events to a running app, without asking.
+    /// Runs off the main thread, because the check can wait on the target app.
+    static func permission(for bundleID: String) async -> Permission {
+        await Task.detached(priority: .userInitiated) { () -> Permission in
+            let target = NSAppleEventDescriptor(bundleIdentifier: bundleID)
+            guard let desc = target.aeDesc else { return .denied }
+            switch AEDeterminePermissionToAutomateTarget(desc, typeWildCard, typeWildCard, false) {
+            case noErr: return .granted
+            case OSStatus(errAEEventWouldRequireUserConsent): return .notAsked
+            case OSStatus(procNotFound): return .notRunning
+            default: return .denied
+            }
+        }.value
     }
 }
 
@@ -20,8 +39,18 @@ enum AppleScript {
 @MainActor
 final class TabsSource: ThingSource {
     let section = "Open Tabs"
+    /// The last tab list, reused for a few seconds while the user types a filter.
+    private var cache: (at: Date, tabs: [BrowserTab])?
+    func invalidate() { cache = nil }
 
     func load(_ filter: String) async throws -> [LauncherResult] {
+        let tabs: [BrowserTab]
+        if let cache, Date().timeIntervalSince(cache.at) < 3 { tabs = cache.tabs }
+        else { tabs = try await Self.readTabs(); cache = (Date(), tabs) }
+        return rows(tabs, filter: filter)
+    }
+
+    static func readTabs() async throws -> [BrowserTab] {
         let running = Browser.all.filter { AppleScript.isRunning($0.bundleID) }
         guard !running.isEmpty else { throw SourceProblem(text: "No supported browser is open. Jevcast reads tabs from Safari, Chrome, Arc, Brave, Edge, Vivaldi, and Dia.") }
         var tabs: [BrowserTab] = [], problems: [Error] = []
@@ -39,6 +68,10 @@ final class TabsSource: ThingSource {
             }
         }
         if tabs.isEmpty, let problem = problems.first { throw problem }
+        return tabs
+    }
+
+    private func rows(_ tabs: [BrowserTab], filter: String) -> [LauncherResult] {
         let matching = filter.isEmpty ? tabs : tabs.filter { SearchRanking.score(query: filter, title: $0.title, aliases: [$0.host, $0.url]) != nil }
         var rows: [LauncherResult] = []
         let duplicates = Self.duplicates(tabs)
@@ -59,7 +92,9 @@ final class TabsSource: ThingSource {
         let verbs = [
             Verb(title: "Switch to Tab") {
                 guard let browser else { return nil }
-                _ = try await AppleScript.run(TabScripts.focus(browser), [String(tab.windowID), String(tab.index)], app: browser.bundleID, name: name)
+                // A browser that quit since the list loaded must not start again.
+                guard AppleScript.isRunning(browser.bundleID) else { throw LauncherError("\(name) is not running any more.") }
+                _ = try await AppleScript.run(TabScripts.focus(browser), [tab.windowID, tab.key, tab.url], app: browser.bundleID, name: name)
                 return nil
             },
             Verb(title: "Close Tab", after: .stay) {
@@ -81,9 +116,13 @@ final class TabsSource: ThingSource {
 
     /// Closes tabs from the highest index down, so earlier indexes stay valid.
     static func close(_ tabs: [BrowserTab]) async throws {
-        for tab in tabs.sorted(by: { ($0.browser, $0.windowID, $1.index) < ($1.browser, $1.windowID, $0.index) }) {
-            guard let browser = Browser.named(tab.browser) else { continue }
-            _ = try await AppleScript.run(TabScripts.close(browser), [String(tab.windowID), String(tab.index)], app: browser.bundleID, name: browser.name)
+        // Safari finds tabs by index, so its highest indexes close first and the rest stay valid.
+        let ordered = tabs.sorted { lhs, rhs in
+            (lhs.browser, lhs.windowID, Int(rhs.key) ?? 0) < (rhs.browser, rhs.windowID, Int(lhs.key) ?? 0)
+        }
+        for tab in ordered {
+            guard let browser = Browser.named(tab.browser), AppleScript.isRunning(browser.bundleID) else { continue }
+            _ = try await AppleScript.run(TabScripts.close(browser), [tab.windowID, tab.key, tab.url], app: browser.bundleID, name: browser.name)
         }
     }
 }
@@ -97,7 +136,7 @@ final class HistorySource: ThingSource {
     func load(_ filter: String) async throws -> [LauncherResult] {
         let (visits, safariBlocked) = await Task.detached(priority: .userInitiated) { Self.search(filter) }.value
         if visits.isEmpty && safariBlocked {
-            throw SourceProblem(text: "Safari history needs Full Disk Access for Jevcast.", access: .fullDiskAccess)
+            throw SourceProblem(text: "Nothing found. To search Safari history too, give Jevcast Full Disk Access.", access: .fullDiskAccess)
         }
         return visits.prefix(60).enumerated().map { index, visit in row(visit, score: 3000 - Double(index)) }
     }
@@ -114,7 +153,7 @@ final class HistorySource: ThingSource {
                 return nil
             },
             Verb(title: "Copy URL", after: .stay) { copyText(visit.url); return "URL copied." },
-            Verb(title: "Copy as Markdown Link", after: .stay) { copyText("[\(visit.title)](\(visit.url))"); return "Link copied." }
+            Verb(title: "Copy as Markdown Link", after: .stay) { copyText(Markdown.link(visit.title, visit.url)); return "Link copied." }
         ]
         let detail = [host, visit.lastVisit.formatted(.relative(presentation: .named)), browser?.name ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
         return LauncherResult(id: "history:" + visit.url, title: visit.title.isEmpty ? visit.url : visit.title, detail: detail,

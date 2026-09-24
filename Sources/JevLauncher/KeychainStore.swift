@@ -20,7 +20,9 @@ enum KeychainStoreError: Error, LocalizedError, Equatable {
 
 enum KeychainStore {
     private static let service = AppIdentity.bundleID
-    private static let account = "typesafe-api-key"
+    static let jevAccount = "typesafe-api-key"
+    /// A separate OpenRouter key for Luna, used when the Jev key is a TypeSafe key.
+    static let lunaAccount = "openrouter-luna-key"
     /// Where builds before 1.0 kept the key. A read moves it to the current item once.
     private static let legacyQuery: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
@@ -29,8 +31,9 @@ enum KeychainStore {
     ]
 
     /// Never shows a Keychain prompt; a read that needs one fails instead.
-    static func read() throws -> String? {
-        if let value = try read(baseQuery) { return value }
+    static func read(account: String = jevAccount) throws -> String? {
+        if let value = try read(baseQuery(account)) { return value }
+        guard account == jevAccount else { return nil }
         guard let value = try read(legacyQuery) else { return nil }
         // The old item goes only after the new one is stored.
         if (try? save(value)) != nil { _ = SecItemDelete(silent(legacyQuery) as CFDictionary) }
@@ -68,7 +71,8 @@ enum KeychainStore {
         }
     }
 
-    static func save(_ value: String) throws {
+    static func save(_ value: String, account: String = jevAccount) throws {
+        let baseQuery = baseQuery(account)
         let data = Data(value.utf8)
         let attributes: [String: Any] = [
             kSecValueData as String: data,
@@ -95,16 +99,16 @@ enum KeychainStore {
         throw KeychainStoreError.unexpectedStatus(addStatus)
     }
 
-    static func delete() throws {
-        let status = SecItemDelete(baseQuery as CFDictionary)
+    static func delete(account: String = jevAccount) throws {
+        let status = SecItemDelete(baseQuery(account) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainStoreError.unexpectedStatus(status)
         }
         // Remove means removed: an unmigrated old item must not come back on the next read.
-        _ = SecItemDelete(silent(legacyQuery) as CFDictionary)
+        if account == jevAccount { _ = SecItemDelete(silent(legacyQuery) as CFDictionary) }
     }
 
-    private static var baseQuery: [String: Any] {
+    private static func baseQuery(_ account: String) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -123,13 +127,19 @@ final class JevKeyCache: ObservableObject {
         return nil
     }
     static let shared = JevKeyCache()
+    /// Luna's own OpenRouter key, when the Jev key is not one.
+    static let luna = JevKeyCache(account: KeychainStore.lunaAccount)
     @Published private(set) var state: State = .unknown
     private let reader: @Sendable () throws -> String?
     private var loading: Task<State, Never>?
 
-    init(reader: @escaping @Sendable () throws -> String? = { try KeychainStore.read() }) { self.reader = reader }
+    private let account: String
+    init(account: String = KeychainStore.jevAccount, reader: (@Sendable () throws -> String?)? = nil) {
+        self.account = account
+        self.reader = reader ?? { try KeychainStore.read(account: account) }
+    }
     convenience init(key: String?) {
-        self.init(reader: { key })
+        self.init(account: KeychainStore.jevAccount, reader: { key })
         state = key.map { $0.isEmpty ? .missing : .present($0) } ?? .missing
     }
 
@@ -152,12 +162,12 @@ final class JevKeyCache: ObservableObject {
     }
 
     func save(_ key: String) throws {
-        try KeychainStore.save(key)
+        try KeychainStore.save(key, account: account)
         state = .present(key)
     }
 
     func delete() throws {
-        try KeychainStore.delete()
+        try KeychainStore.delete(account: account)
         state = .missing
     }
 }

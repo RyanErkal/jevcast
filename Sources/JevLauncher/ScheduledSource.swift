@@ -41,7 +41,7 @@ final class ScheduledSource: ThingSource {
             if failingOnly, (status?.lastExit ?? 0) == 0 { continue }
             let name = displayName(job)
             if !text.isEmpty, SearchRanking.score(query: text, title: name, aliases: [job.label, job.executable ?? ""]) == nil { continue }
-            let off = scan.overrides[job.label] ?? job.disabledInPlist
+            let off = (job.domain == .daemon ? scan.systemOverrides[job.label] : scan.overrides[job.label]) ?? job.disabledInPlist
             let warnings = job.warnings(programExists: job.executable.map { FileManager.default.fileExists(atPath: $0) } ?? false)
             rows.append(row(job, name: name, status: status, off: off, warnings: warnings, now: now))
         }
@@ -59,6 +59,7 @@ final class ScheduledSource: ThingSource {
         var jobs: [LaunchJob] = []
         var status: [String: LaunchStatus] = [:]
         var overrides: [String: Bool] = [:]
+        var systemOverrides: [String: Bool] = [:]
         var cron: [CronJob] = []
     }
 
@@ -66,10 +67,12 @@ final class ScheduledSource: ThingSource {
     static func scan() async -> Scan {
         async let list = try? CommandRunner.capture(["/bin/launchctl", "list"], allowFailure: true)
         async let disabled = try? CommandRunner.capture(["/bin/launchctl", "print-disabled", "gui/\(getuid())"], allowFailure: true)
+        async let systemDisabled = try? CommandRunner.capture(["/bin/launchctl", "print-disabled", "system"], allowFailure: true)
         async let crontab = try? CommandRunner.capture(["/usr/bin/crontab", "-l"], allowFailure: true)
         let jobs = await Task.detached(priority: .userInitiated) { readJobs() }.value
         return Scan(jobs: jobs, status: LaunchStatus.parse(await list ?? ""),
-                    overrides: LaunchStatus.parseOverrides(await disabled ?? ""), cron: CronJob.parse(await crontab ?? ""))
+                    overrides: LaunchStatus.parseOverrides(await disabled ?? ""), systemOverrides: LaunchStatus.parseOverrides(await systemDisabled ?? ""),
+                    cron: CronJob.parse(await crontab ?? ""))
     }
 
     nonisolated static func readJobs() -> [LaunchJob] {

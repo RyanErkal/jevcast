@@ -12,7 +12,10 @@ struct LauncherView: View {
     var body: some View {
         VStack(spacing: 0) {
             searchBar
-            if !model.rows.isEmpty {
+            if let answer = model.lunaAnswer {
+                Divider()
+                LunaAnswerView(answer: answer)
+            } else if !model.rows.isEmpty {
                 Divider()
                 results
             } else if showsEmptyMessage {

@@ -28,3 +28,33 @@ extension Diagnostics {
         RunLoop.main.run()
     }
 }
+
+extension Diagnostics {
+    /// `--diagnose-mail`: checks that Jevcast can read Apple Mail. Prints counts and column names only,
+    /// never subjects, names, or addresses.
+    static func mail() {
+        let status = MailStore.status()
+        print("Mail status: \(status)")
+        guard case .ready(let root) = status else { exit(status == .noMail ? 1 : 2) }
+        do {
+            let db = try MailStore.open(root)
+            print("messages columns: " + db.columns("messages").sorted().joined(separator: ", "))
+            let boxes = try MailStore.mailboxes(root: root)
+            let roles = Dictionary(grouping: boxes, by: { "\($0.role)" }).mapValues(\.count)
+            print("Mailboxes: \(boxes.count) \(roles.sorted { $0.key < $1.key })")
+            let inbox = boxes.filter { $0.role == .inbox }
+            let start = CFAbsoluteTimeGetCurrent()
+            let recent = try MailStore.messages(root: root, .init(mailboxes: inbox.map(\.rowID), limit: 50))
+            print("Inbox list: \(recent.count) rows in \(Int((CFAbsoluteTimeGetCurrent() - start) * 1000)) ms, unread \(recent.filter { !$0.read }.count)")
+            var found = 0
+            for message in recent.prefix(20) {
+                if let box = boxes.first(where: { $0.rowID == message.mailbox }), MailStore.messageFile(root: root, mailbox: box, rowID: message.rowID) != nil { found += 1 }
+            }
+            print("Message files found for \(found) of \(min(20, recent.count)) recent messages")
+        } catch {
+            print("Problem: \(error.localizedDescription)")
+            exit(3)
+        }
+        exit(0)
+    }
+}

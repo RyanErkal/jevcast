@@ -247,6 +247,9 @@ final class LauncherModel: ObservableObject {
     let lunaLog: LunaActivityLog
     /// Opens Settings › Luna, set by the app.
     var openLunaSettings: (() -> Void)?
+    /// Opens the mail window, on a message when given; opens a new message to an address.
+    var openMail: ((Int64?) -> Void)?
+    var composeMail: ((String) -> Void)?
     /// The row that is waiting for a second Return.
     @Published var pendingConfirmID: String?
     private var subscriptions = Set<AnyCancellable>()

@@ -11,6 +11,7 @@ struct JevLauncherApp {
         if let index = CommandLine.arguments.firstIndex(of: "--diagnose-jev"), CommandLine.arguments.indices.contains(index + 1) {
             Diagnostics.jev(Array(CommandLine.arguments[(index + 1)...])); return
         }
+        if CommandLine.arguments.contains("--diagnose-mail") { Diagnostics.mail(); return }
         if let index = CommandLine.arguments.firstIndex(of: "--diagnose-source"), CommandLine.arguments.indices.contains(index + 1) {
             Diagnostics.source(CommandLine.arguments[index + 1]); return
         }
@@ -48,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     private let status = LauncherStatus()
     private var panel: LauncherPanel!
     private var settings: SettingsWindow?
+    private var mail: MailWindow?
     private var statusMenu: StatusMenu?
     private var keyMonitor: Any?
     private var wasVisible = false
@@ -64,6 +66,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         panel.delegate = self
         model.onClose = { [weak self] restore in self?.hide(restoreFocus: restore) }
         model.openLunaSettings = { [weak self] in self?.showSettings(tab: .luna) }
+        model.openMail = { [weak self] rowID in self?.showMail(select: rowID) }
+        model.composeMail = { [weak self] address in self?.showMail(compose: address) }
         model.onFailure = { [weak self] text in
             guard let self else { return }
             self.show(); self.model.message = text
@@ -308,6 +312,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     func applicationDidChangeScreenParameters(_ notification: Notification) {
         // Never leave a stale click catcher after a display is disconnected.
         hide()
+    }
+    /// The Jevcast mail window, made on first use.
+    func showMail(select rowID: Int64? = nil, compose address: String? = nil) {
+        hide(restoreFocus: false)
+        if mail == nil {
+            let model = self.model
+            mail = MailWindow(model: MailModel(luna: { try await model.sendLuna($0) },
+                                               lunaAllowed: { model.allowedLunaContext.contains(.mailMessage) }))
+        }
+        mail?.show(select: rowID, compose: address)
     }
     func showSettings(tab: SettingsWindow.Tab) {
         showSettings()

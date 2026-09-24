@@ -33,9 +33,10 @@ extension LauncherModel {
         case .scheduled: made = ScheduledSource(timers: timers, catalogue: catalogue)
         case .calendar: made = CalendarSource()
         case .reminders: made = RemindersSource()
-        case .contacts: made = ContactsSource()
+        case .contacts: made = ContactsSource(compose: { [weak self] address in self?.composeMail?(address) })
         case .tabs: made = TabsSource()
         case .history: made = HistorySource()
+        case .mail: made = MailSource(model: self)
         default: made = nil
         }
         sources[kind] = made

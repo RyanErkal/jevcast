@@ -183,6 +183,9 @@ final class RemindersSource: ThingSource {
 @MainActor
 final class ContactsSource: ThingSource {
     let section = "Contacts"
+    /// Opens the Jevcast compose window, or nil to use the default mail app.
+    private let compose: ((String) -> Void)?
+    init(compose: ((String) -> Void)? = nil) { self.compose = compose }
 
     struct Person: Sendable {
         let id: String, name: String, organization: String
@@ -224,8 +227,8 @@ final class ContactsSource: ThingSource {
     private func row(_ person: Person, score: Double) -> LauncherResult {
         var verbs: [Verb] = []
         for email in person.emails.prefix(3) {
-            verbs.append(Verb(title: "Email " + email) {
-                if let url = URL(string: "mailto:" + email) { NSWorkspace.shared.open(url) }
+            verbs.append(Verb(title: "Email " + email) { [compose] in
+                if let compose { compose(email) } else if let url = URL(string: "mailto:" + email) { NSWorkspace.shared.open(url) }
                 return nil
             })
         }

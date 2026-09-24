@@ -1,6 +1,6 @@
 import Foundation
 
-/// A command the user writes in Settings › Commands. Jev sees only its name.
+/// A command the user writes in Settings › Library. Jev sees only its name.
 struct CustomCommand: Codable, Identifiable, Equatable, Hashable {
     enum Output: String, Codable, CaseIterable {
         case none, copy, notify

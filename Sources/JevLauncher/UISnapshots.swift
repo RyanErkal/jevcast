@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 
 /// `--snapshot-ui <dir>` renders the launcher and each Settings pane to PNG
 /// from the app's own view hierarchy, then quits. Layout only; window
@@ -70,7 +71,10 @@ final class LauncherSnapshotRig {
                               lunaLog: LunaActivityLog(defaults: defaults))
         panel.acceptsKey = false; panel.alphaValue = 0; panel.ignoresMouseEvents = true
         panel.host(LauncherView(model: model, speech: model.speech, catalogue: catalogue, actions: {}))
+        model.makePage = { [unowned model] id in LauncherPages.make(id, model: model, links: .init(), snapshot: true) }
+        viewSizeWatch = model.$page.map { $0 != nil }.removeDuplicates().sink { [panel] wide in panel.setViewSize(wide) }
     }
+    private var viewSizeWatch: AnyCancellable?
     func open() {
         model.begin(); model.pauseListening()
         // Window rows name the frontmost app; a demo names a neutral one.
@@ -94,7 +98,7 @@ final class LauncherSnapshotRig {
         }
     }
     func close() {
-        model.end(); panel.orderOut(nil)
+        model.closeAllViews(); model.end(); panel.orderOut(nil)
     }
     /// Demo Settings captures still read these preferences, so removal waits for the last capture.
     func removePreferences() {

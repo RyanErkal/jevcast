@@ -23,7 +23,8 @@ BIN_DIR="$(swift build "${BUILD_FLAGS[@]}" --show-bin-path)"
 # Assemble beside dist, then swap the finished bundle in. A running copy keeps
 # its old files, so a rebuild never changes a binary under a live process.
 mkdir -p dist
-STAGE="$(mktemp -d dist/.stage.XXXXXX)"
+# Absolute: actool runs in a shared helper that can resolve relative paths against another folder.
+STAGE="$(mktemp -d "$PWD/dist/.stage.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
 APP="$STAGE/$APP_NAME.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

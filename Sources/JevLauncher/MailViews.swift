@@ -244,12 +244,15 @@ struct MailReader: View {
 struct ComposeView: View {
     @ObservedObject var model: MailModel
     @Environment(\.dismiss) private var dismiss
+    /// A reply starts in its text, so typing goes there and not to a search or filter field.
+    @FocusState private var bodyFocused: Bool
+    @FocusState private var toFocused: Bool
     var body: some View {
         if let binding = Binding($model.draft) {
             VStack(alignment: .leading, spacing: 10) {
                 Text(title(binding.wrappedValue.mode)).font(.headline)
                 if binding.wrappedValue.mode == .new || binding.wrappedValue.mode == .forward {
-                    TextField("To", text: binding.to).textFieldStyle(.roundedBorder)
+                    TextField("To", text: binding.to).textFieldStyle(.roundedBorder).focused($toFocused)
                 }
                 if binding.wrappedValue.mode == .new {
                     TextField("Cc", text: binding.cc).textFieldStyle(.roundedBorder)
@@ -264,7 +267,7 @@ struct ComposeView: View {
                         Button(model.lunaBusy ? "Writing…" : "Draft with Luna") { model.draftWithLuna() }.disabled(model.lunaBusy)
                     }
                 }
-                TextEditor(text: binding.body).font(.system(size: 13)).frame(minHeight: 220)
+                TextEditor(text: binding.body).font(.system(size: 13)).frame(minHeight: 220).focused($bodyFocused)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
                 if binding.wrappedValue.mode != .new {
                     Text("Mail adds the original message below your text when it can.").font(.caption).foregroundStyle(.secondary)
@@ -278,6 +281,11 @@ struct ComposeView: View {
             }
             .padding(18)
             .frame(width: 560)
+            .onAppear {
+                // A reply starts in its text; a new message or a forward starts in To.
+                let reply = { if case .reply = binding.wrappedValue.mode { return true }; return false }()
+                DispatchQueue.main.async { if reply { bodyFocused = true } else { toFocused = true } }
+            }
         }
     }
     private func title(_ mode: MailModel.Draft.Mode) -> String {

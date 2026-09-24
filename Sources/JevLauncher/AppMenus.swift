@@ -9,6 +9,9 @@ import AppKit
     func openWebsite()
     func openSourceCode()
     func reportIssue()
+    func openMailWindow()
+    func showCleanup()
+    func showTaskResults()
 }
 
 /// Standard main menu so Command shortcuts (⌘, ⌘Q ⌘W and text editing) work

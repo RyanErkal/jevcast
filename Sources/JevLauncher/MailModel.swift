@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import LauncherCore
 
 /// The mail window's state. Lists come from Mail's index; changes go through Apple Mail;
@@ -36,6 +37,8 @@ final class MailModel: ObservableObject {
     /// True when Jevcast started Apple Mail for this session, so it can quit it again after.
     private var startedMail = false
     private var readTimer: Task<Void, Never>?
+    /// Quits Apple Mail a moment after closing, unless the inbox opens again first.
+    private var quit: Task<Void, Never>?
     @Published private(set) var messages: [MailSummary] = []
     /// Setting this from the list or the keyboard marks the message read. The model's own
     /// selections, after a reload, use `select(_:byUser:)` with false and change nothing.
@@ -71,7 +74,15 @@ final class MailModel: ObservableObject {
 
     init(luna: @escaping (LunaRequest) async throws -> LunaReply, lunaAllowed: @escaping () -> Bool) {
         self.luna = luna; self.lunaAllowed = lunaAllowed
+        // Settings › Mail writes the same default; follow it while this window exists.
+        defaultsObserver = NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                let stored = UserDefaults.standard.object(forKey: "mailLoadsImages") as? Bool ?? true
+                if let self, self.loadsImages != stored { self.loadsImages = stored }
+            }
     }
+    private var defaultsObserver: AnyCancellable?
 
     var selected: MailSummary? { messages.first { $0.rowID == selectedID } }
     func mailbox(_ id: Int64) -> MailMailbox? { mailboxes.first { $0.rowID == id } }
@@ -84,15 +95,24 @@ final class MailModel: ObservableObject {
 
     /// Checks access, loads mailboxes, and starts watching Mail's index while the window is open.
     func start() {
+        // Opening again soon after closing keeps Mail: the pending quit is dropped, and Mail is
+        // still the one Jevcast started.
+        if let quit { quit.cancel(); self.quit = nil; startedMail = true }
         refreshStatus()
         if root != nil { fetchNewMail() }
         poll?.cancel()
         poll = Task { @MainActor [weak self] in
+            var ticks = 0
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                // Quick index checks at first, while Mail starts and fetches, then every 2 seconds.
+                try? await Task.sleep(nanoseconds: ticks < 10 ? 1_000_000_000 : 2_000_000_000)
+                ticks += 1
                 guard let self, let root = self.root else { continue }
                 let current = await Task.detached { MailStore.fingerprint(root: root) }.value
                 if current != self.fingerprint { self.fingerprint = current; self.reload(keepSelection: true) }
+                // Mail fetches on its own timer, which can be minutes. Ask again soon after it
+                // starts, then every 30 seconds while the inbox is open.
+                if ticks == 5 || ticks % 15 == 0 { self.checkForNewMail() }
             }
         }
     }
@@ -104,10 +124,12 @@ final class MailModel: ObservableObject {
         guard startedMail else { return }
         startedMail = false
         let pending = actionChain
-        Task { @MainActor in
+        quit = Task { @MainActor [weak self] in
             await pending?.value
             // An action that started after closing, or Mail opened by you, keeps it running.
             try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard !Task.isCancelled else { return }
+            self?.quit = nil
             guard let mail = NSRunningApplication.runningApplications(withBundleIdentifier: MailActions.bundleID).first,
                   !MailActions.openedByUser else { return }
             mail.terminate()
@@ -119,8 +141,23 @@ final class MailModel: ObservableObject {
     private func fetchNewMail() {
         let wasRunning = AppleScript.isRunning(MailActions.bundleID)
         if !wasRunning { startedMail = true; MailActions.openedByUser = false }
+        checkForNewMail()
+    }
+    /// One "check for new mail" at a time. A failure shows once, not on every repeat.
+    private var checking = false
+    private var reportedCheckFailure = false
+    private func checkForNewMail() {
+        guard !checking else { return }
+        checking = true
         Task { @MainActor [weak self] in
-            do { try await MailActions.checkForNewMail() } catch { self?.banner = "Could not check for new mail: " + error.localizedDescription }
+            do {
+                try await MailActions.checkForNewMail()
+                self?.reportedCheckFailure = false
+            } catch {
+                if self?.reportedCheckFailure == false { self?.banner = "Could not check for new mail: " + error.localizedDescription }
+                self?.reportedCheckFailure = true
+            }
+            self?.checking = false
         }
     }
 
@@ -128,7 +165,7 @@ final class MailModel: ObservableObject {
         status = MailStore.status()
         guard let root else { mailboxes = []; messages = []; return }
         fingerprint = MailStore.fingerprint(root: root)
-        mailboxes = (try? MailStore.mailboxes(root: root)) ?? []
+        // The mailbox list and the messages load together off the main thread.
         reload()
     }
 
@@ -143,13 +180,14 @@ final class MailModel: ObservableObject {
 
     func reload(keepSelection: Bool = false) {
         guard let root else { return }
-        let query = self.query
+        let place = self.place, search = self.search
         let previous = selectedID
         loadWork?.cancel()
         loadWork = Task { @MainActor [weak self] in
             let result = await Task.detached(priority: .userInitiated) { () -> ([MailSummary], [MailMailbox])? in
-                guard let messages = try? MailStore.messages(root: root, query) else { return nil }
-                return (messages, (try? MailStore.mailboxes(root: root)) ?? [])
+                let boxes = (try? MailStore.mailboxes(root: root)) ?? []
+                guard let messages = try? MailStore.messages(root: root, Self.query(place, search, boxes)) else { return nil }
+                return (messages, boxes)
             }.value
             guard !Task.isCancelled, let self else { return }
             guard let (fetched, boxes) = result else { self.banner = "Mail's index could not be read. Try again in a moment."; return }
@@ -173,7 +211,8 @@ final class MailModel: ObservableObject {
         }
     }
 
-    private var query: MailStore.Query {
+    nonisolated private static func query(_ place: Place, _ search: String, _ boxes: [MailMailbox]) -> MailStore.Query {
+        let inboxes = boxes.filter { $0.role == .inbox }
         switch place {
         case .inbox: return .init(mailboxes: inboxes.map(\.rowID), text: search)
         case .unread: return .init(mailboxes: inboxes.map(\.rowID), text: search, unreadOnly: true)
@@ -192,11 +231,14 @@ final class MailModel: ObservableObject {
     }
 
     /// Opens one message from the launcher: its own mailbox, selected once the list loads.
-    func open(_ rowID: Int64) {
-        guard let root, let found = try? MailStore.messages(root: root, .init(mailboxes: [], rowIDs: [rowID])).first else { return }
+    /// False when Mail's index does not have it.
+    @discardableResult
+    func open(_ rowID: Int64) -> Bool {
+        guard let root, let found = try? MailStore.messages(root: root, .init(mailboxes: [], rowIDs: [rowID])).first else { return false }
         pending = rowID
         let target = Place.mailbox(found.mailbox)
         if place == target { reload() } else { place = target }
+        return true
     }
 
     private var loadingID: Int64?
@@ -206,7 +248,8 @@ final class MailModel: ObservableObject {
         guard let root, let message = selected, let box = mailbox(message.mailbox) else { detail = nil; detailMissing = false; return }
         let rowID = message.rowID
         loadingID = rowID
-        markReadSoon(message, in: box)
+        // A selection the model made, such as after a delete or a reload, never marks mail read.
+        if markRead { markReadSoon(message, in: box) } else { readTimer?.cancel() }
         if let cached = bodies[rowID] {
             detail = cached; detailMissing = false
             prefetchNeighbours(of: rowID, root: root)

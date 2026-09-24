@@ -9,6 +9,10 @@ import SwiftUI
 /// accessory app. The app is not activated when the panel opens.
 final class LauncherPanel: NSPanel {
     static let width: CGFloat = 680
+    /// A view such as Mail fills the panel at this size; search keeps `width`.
+    static let viewSize = NSSize(width: 860, height: 700)
+    /// The width the frame is heading to. Height changes keep it, so they never undo a widening.
+    private var targetWidth = LauncherPanel.width
     static let cornerRadius = LauncherMetrics.panelRadius
     static let resizeDuration: TimeInterval = 0.12
     private let surface: PanelSurface
@@ -54,7 +58,7 @@ final class LauncherPanel: NSPanel {
     /// Places the panel in the upper part of the screen holding the pointer.
     func place(on screen: NSScreen?) {
         guard let frame = screen?.visibleFrame else { return }
-        setFrameTopLeftPoint(NSPoint(x: frame.midX - Self.width / 2, y: frame.maxY - max(40, frame.height * 0.12)))
+        setFrameTopLeftPoint(NSPoint(x: frame.midX - targetWidth / 2, y: frame.maxY - max(40, frame.height * 0.12)))
     }
     private var pendingHeight: CGFloat = 0
     private var shownAt: CFTimeInterval = 0
@@ -86,24 +90,35 @@ final class LauncherPanel: NSPanel {
         DispatchQueue.main.async { [weak self] in
             // A newer height from the same layout burst replaces this one.
             guard let self, self.pendingHeight == rounded else { return }
-            var next = self.frame
-            next.origin.y = self.frame.maxY - rounded
-            next.size.height = rounded
-            // The first layout after opening applies at once; later changes animate.
-            let settled = CACurrentMediaTime() - self.shownAt > 0.2
-            if self.isVisible && settled && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-                NSAnimationContext.runAnimationGroup { context in
-                    context.duration = Self.resizeDuration
-                    context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                    self.animator().setFrame(next, display: true)
-                } completionHandler: { [weak self] in self?.refreshShadowSoon() }
-            } else {
-                self.setFrame(next, display: true, animate: false)
-                self.refreshShadowSoon()
-            }
-            if CommandLine.arguments.contains("--trace-interaction") {
-                print("[Jev interaction] resized size=\(Int(next.width))x\(Int(next.height))"); fflush(stdout)
-            }
+            self.applyTarget()
+        }
+    }
+    /// Widens the panel for a view, or narrows it back for search, around its centre.
+    func setViewSize(_ wide: Bool) {
+        let width = wide ? Self.viewSize.width : Self.width
+        guard width != targetWidth else { return }
+        targetWidth = width
+        applyTarget()
+    }
+    /// Sets width and height in one frame, so a height change never undoes a width change or the
+    /// reverse. Only a visible, settled panel animates; a hidden or just-opened one jumps.
+    private func applyTarget() {
+        let height = pendingHeight > 0 ? pendingHeight : frame.height
+        let next = NSRect(x: frame.midX - targetWidth / 2, y: frame.maxY - height, width: targetWidth, height: height)
+        guard next != frame else { return }
+        let settled = CACurrentMediaTime() - shownAt > 0.2
+        if isVisible && settled && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = next.width == frame.width ? Self.resizeDuration : 0.18
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                animator().setFrame(next, display: true)
+            } completionHandler: { [weak self] in self?.refreshShadowSoon() }
+        } else {
+            setFrame(next, display: true, animate: false)
+            refreshShadowSoon()
+        }
+        if CommandLine.arguments.contains("--trace-interaction") {
+            print("[Jev interaction] resized size=\(Int(next.width))x\(Int(next.height))"); fflush(stdout)
         }
     }
 }
@@ -126,7 +141,7 @@ private final class MeasuringHostingView<Content: View>: NSHostingView<Content> 
 /// the hairline at full strength. `content` holds the SwiftUI view.
 private final class PanelSurface: NSView {
     let content = NSView()
-    private let border = NSView()
+    private let border = PassThroughView()
     private var contrastObserver: NSObjectProtocol?
 
     init(glass: Bool) {
@@ -189,11 +204,6 @@ private final class PanelSurface: NSView {
             child.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
         ])
     }
-    /// The hairline never takes clicks meant for the content below it.
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        let hit = super.hitTest(point)
-        return hit === border ? nil : hit
-    }
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard contrastObserver == nil else { return }
@@ -212,4 +222,10 @@ private final class PanelSurface: NSView {
             border.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(alpha).cgColor
         }
     }
+}
+
+/// The hairline above the content. It takes no pointer events, so clicks and scrolling
+/// reach the views below it. Returning nil from the surface instead would drop them.
+private final class PassThroughView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

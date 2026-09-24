@@ -50,7 +50,7 @@ Press **Option–Space** and type. If another app already uses that shortcut, ch
 | `wi-fi settings`                                           | Opens that System Settings pane.                                         |
 | `port 3000`, `kill 5173`, `ports`                          | Lists what listens on a local port. ⌫ twice stops it.                    |
 | `dark mode`, `caffeinate`, `empty trash`, `my ip`          | Runs a built-in command. Disruptive ones ask for a second Return.        |
-| The name of your own command                               | Runs a command you added in Settings › Commands.                         |
+| The name of your own command                               | Runs a command you added in Settings › Library.                         |
 | `notes left half`                                          | Opens Notes, then arranges its window.                                   |
 | `search github for swift ui`                               | Searches that site with the rest of your words.                          |
 | `5m tea`, `timer 10 min`                                   | Starts a timer with a notification. `timers` lists them.                 |
@@ -68,6 +68,8 @@ Press **Option–Space** and type. If another app already uses that shortcut, ch
 | `every weekday at 8am brief me on my meetings`             | Schedules a Luna task. Its result arrives as a notification.             |
 | `task results`                                             | Lists what scheduled tasks wrote.                                        |
 | `cleanup`, `cool down`                                     | Lists idle servers, leftover processes, and simulators to stop.          |
+| `/`, `/cal`                                                | Lists only functions and your library, in groups. Tab completes the name.       |
+| `$`, `$deploy`                                             | Lists only your own commands, workflows, and snippets.                   |
 
 **Move a window** by typing a layout:
 
@@ -79,15 +81,15 @@ Press **Option–Space** and type. If another app already uses that shortcut, ch
 
 ## Optional: Jev by TypeSafe AI
 
-Jevcast finds apps, files, and actions locally. To match a loose request to one of those actions, add your own [TypeSafe AI](https://typesafe.ai) API key, or an [OpenRouter](https://openrouter.ai/typesafe/jev-1.13) key to run Jev through OpenRouter, in Settings › Input and turn on **Use Jev for natural-language matching**. Jevcast picks the service from the key: an `sk-or-` key goes to OpenRouter. The key is kept in your macOS Keychain. Local results never wait for Jev.
+Jevcast finds apps, files, and actions locally. To match a loose request to one of those actions, add your own [TypeSafe AI](https://typesafe.ai) API key, or an [OpenRouter](https://openrouter.ai/typesafe/jev-1.13) key to run Jev through OpenRouter, in Settings › AI › Jev and turn on **Use Jev for natural-language matching**. Jevcast picks the service from the key: an `sk-or-` key goes to OpenRouter. The key is kept in your macOS Keychain. Local results never wait for Jev.
 
-**Two steps.** Jev also names the kind of request, such as "open an app", "move a window", or "calendar", in a second small call at the same time. When the kind and the pick agree, the pick stands. When they differ, Jev chooses again among every item of that kind, for example all your apps rather than the first 120 candidates. A window move that loosely names a running app, such as "put the chrom one on the left", then asks which app. Turn this off in Settings › Input.
+**Two steps.** Jev also names the kind of request, such as "open an app", "move a window", or "calendar", in a second small call at the same time. When the kind and the pick agree, the pick stands. When they differ, Jev chooses again among every item of that kind, for example all your apps rather than the first 120 candidates. A window move that loosely names a running app, such as "put the chrom one on the left", then asks which app. Turn this off in Settings › AI › Jev.
 
 Jev reads each request after a short pause, typed or spoken. It receives that text and a short list of candidate names: apps, System Settings panes, window actions, built-in commands, your own commands, workflows, Shortcuts, and snippets by name, menu item names from the app you were using, sites, files, and folders. It can only choose from that list or return no match. It never writes a command. A whole-name match you typed stays first. Jevcast does not add file or folder paths, clipboard text, or audio to the request. Any path you type yourself is part of the text sent. See [Privacy](#privacy) for the full network details.
 
 ## Optional: Luna
 
-Jev decides what a request means. Luna does the writing when a request needs it. Luna is GPT-6 Luna, run through [OpenRouter](https://openrouter.ai) with your own OpenRouter key. Turn it on in Settings › Luna and choose Fast, High, or Max effort.
+Jev decides what a request means. Luna does the writing when a request needs it. Luna is GPT-6 Luna, run through [OpenRouter](https://openrouter.ai) with your own OpenRouter key. Turn it on in Settings › AI › Luna and choose Fast, High, or Max effort.
 
 - `ask …`, `? …`, or `luna …` answers in the panel. Return copies the answer, and Shift–Return pastes it.
 - With text selected in any app, the launcher offers Fix Spelling and Grammar, Make Shorter, Make More Formal, Make Friendlier, Summarise, Explain, and Translate to English. Type your own instruction, such as `translate to turkish`, for anything else. Return replaces the selection with Luna's text. A question about the text is copied instead.
@@ -95,7 +97,7 @@ Jev decides what a request means. Luna does the writing when a request needs it.
 
 **Scheduled tasks.** Type a schedule and a request, such as `every weekday at 8am brief me on my meetings and unread email`, `summarise my reminders every evening at 7`, or `every 2 hours check my unread mail`. Return schedules it. At that time, Jevcast reads only the data the request names and you allow: today's and tomorrow's events, reminders due soon, or unread inbox mail (senders, subjects, and previews). Luna writes the result, and a notification shows its first lines. Click the notification to read it all. Every result is also saved as a Markdown file in `~/Library/Application Support/Jevcast/Luna Tasks`. `scheduled tasks` lists your tasks with Run Now, Pause, and Delete, and `task results` lists past runs. Tasks run while Jevcast is open. A run missed by more than three hours, for example while the Mac slept, is skipped and noted.
 
-Luna reads only what you allow. What you type after `ask` is sent once Luna is on. Selected text, mail messages, calendar and reminders, and the unread mail list each have their own switch, and all are off at first. Jevcast checks every request against those switches before it sends it. Settings › Luna lists each request with what kind of context it carried and its cost, without the text. Luna never runs an action.
+Luna reads only what you allow. What you type after `ask` is sent once Luna is on. Selected text, mail messages, calendar and reminders, and the unread mail list each have their own switch, and all are off at first. Jevcast checks every request against those switches before it sends it. Settings › AI › Luna lists each request with what kind of context it carried and its cost, without the text. Luna never runs an action.
 
 ## Use
 
@@ -106,6 +108,7 @@ Keys in the launcher:
 | Return          | Run the selected result              |
 | Up, Down        | Select another result                |
 | Escape          | Close                                |
+| Tab             | After `/` or `$`, complete the name  |
 | Command–K       | More actions for the selected result |
 | Command–Y       | Quick Look                           |
 | Command–R       | Show in Finder                       |
@@ -140,11 +143,11 @@ Press a half again to cycle its size: 1/2, 2/3, then 1/3. The middle third cycle
 
 ### Voice
 
-Turn on **Listen when the launcher opens** in Settings › Input and allow Microphone and Speech Recognition. The launcher then listens each time it opens. Typing stops listening. While it listens, the MacBook's built-in speakers are muted so their sound is not transcribed, and they come back when listening stops. Headphones are not muted. Recognition runs on your Mac only, and audio is not saved. If on-device recognition is not available for your language, the app tells you and typing still works.
+Turn on **Listen when the launcher opens** in Settings › Voice and allow Microphone and Speech Recognition. The launcher then listens each time it opens. Typing stops listening. While it listens, the MacBook's built-in speakers are muted so their sound is not transcribed, and they come back when listening stops. Headphones are not muted. Recognition runs on your Mac only, and audio is not saved. If on-device recognition is not available for your language, the app tells you and typing still works.
 
 ### Commands
 
-Type `port 3000` to see what listens on that port. Pick a row and press ⌫ twice to stop it, and the launcher stays open. ⌘⌫ works without picking the row first. Return opens the port in your browser. `ports` lists every listener with its CPU, memory, uptime, project folder, and whether it is open to your network. Your own servers come first. macOS services and other users' processes are marked, because they restart or need an administrator. ⌘K opens the port in a browser, shows its folder, force stops it, or copies its PID or command line. Built-in commands, such as **Toggle Dark Mode**, **Keep Mac Awake for 1 Hour**, and **Copy Local IP Address**, run fixed programs with fixed arguments and no shell. Add your own in Settings › Commands. Those run with `zsh -lc` from your home folder. Put `{input}` in a command to pass text typed after its name, as a quoted argument. Settings › Commands also holds **workflows**, which run several steps from one name, and **snippets**. Jev can choose any of these by name, but it never sees or writes command text.
+Type `port 3000` to see what listens on that port. Pick a row and press ⌫ twice to stop it, and the launcher stays open. ⌘⌫ works without picking the row first. Return opens the port in your browser. `ports` lists every listener with its CPU, memory, uptime, project folder, and whether it is open to your network. Your own servers come first. macOS services and other users' processes are marked, because they restart or need an administrator. ⌘K opens the port in a browser, shows its folder, force stops it, or copies its PID or command line. Built-in commands, such as **Toggle Dark Mode**, **Keep Mac Awake for 1 Hour**, and **Copy Local IP Address**, run fixed programs with fixed arguments and no shell. Add your own in Settings › Library. Those run with `zsh -lc` from your home folder. Put `{input}` in a command to pass text typed after its name, as a quoted argument. Settings › Library also holds **workflows**, which run several steps from one name, and **snippets**. Jev can choose any of these by name, but it never sees or writes command text.
 
 ### Your Mac: tasks, calendar, contacts, tabs, and "this"
 
@@ -168,7 +171,7 @@ Jevcast needs Full Disk Access to read Apple Mail. The mail window tells you how
 
 ### Jev memory and usage
 
-When you choose a result for a request, Jevcast remembers it on this Mac, and the same request then needs no Jev call. Press ⌘Z on a Jev or remembered pick to undo it and forget it. A whole-name match, a sum, a URL, a timer, or a port lookup never asks Jev. Settings › Usage shows requests, tokens, and cost for 7 days, 30 days, and all time.
+When you choose a result for a request, Jevcast remembers it on this Mac, and the same request then needs no Jev call. Press ⌘Z on a Jev or remembered pick to undo it and forget it. A whole-name match, a sum, a URL, a timer, or a port lookup never asks Jev. Settings › AI › Usage shows requests, tokens, and cost for 7 days, 30 days, and all time.
 
 ## Privacy
 
@@ -178,7 +181,7 @@ The app has no account, no analytics, and no crash reporting. It connects to the
 | -------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Once a day, if **Check for updates automatically** is on (default: on)           | `api.github.com`                     | A request for the newest release, with the app version. GitHub sees your IP address, as with any web request. Nothing is downloaded.                                                                                  |
 | After each pause in typing or speech, if natural-language matching is on (default: off) | `api.typesafe.ai`, or `openrouter.ai` with an OpenRouter key | The text you typed or said and a short list of candidate names: apps, settings panes, window actions, commands, workflows, Shortcuts, snippet names, menu item names, search sites, files, and folders. Jevcast does not add file or folder paths, command text, snippet text, clipboard text, or audio. A path you type yourself is included in the query. Jev can only choose one of the supplied candidates. |
-| When you ask Luna, if Luna is on (default: off)                                  | `openrouter.ai`                      | What you typed after `ask`, or your instruction. Selected text and mail messages only when you turn on each one in Settings › Luna. Never file paths, clipboard history, or audio. |
+| When you ask Luna, if Luna is on (default: off)                                  | `openrouter.ai`                      | What you typed after `ask`, or your instruction. Selected text and mail messages only when you turn on each one in Settings › AI › Luna. Never file paths, clipboard history, or audio. |
 | When you open a web search or a URL                                              | Your default browser                 | Whatever you chose to open.                                                                                                                                                                                           |
 
 Everything else stays on your Mac. Clipboard history is kept in memory only, holds plain text only, and skips items that password managers mark as concealed. The app writes one file of its own: a cache of your app list in `~/Library/Caches/JevLauncher`. A browser history search copies each history database to a temporary folder and deletes it after the search. Mail, Calendar, Reminders, Contacts, tabs, and selected text are read on this Mac and are not stored by Jevcast.

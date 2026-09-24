@@ -44,7 +44,7 @@ public enum LunaTaskSchedule: Codable, Equatable, Sendable {
     }
 }
 
-/// Mac data a task may read. Each kind needs its own switch in Settings › Luna.
+/// Mac data a task may read. Each kind needs its own switch in Settings › AI › Luna.
 public enum LunaTaskContext: String, Codable, CaseIterable, Sendable {
     case calendar, reminders, unreadMail
     public var title: String {

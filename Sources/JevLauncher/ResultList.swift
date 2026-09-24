@@ -32,6 +32,7 @@ struct ResultList: NSViewRepresentable {
         table.hoverAction = { [weak coordinator = context.coordinator] row in
             guard let coordinator, let result = coordinator.result(at: row), result.isCurrent,
                   coordinator.model.selectedID != result.id else { return }
+            coordinator.selectedByPointer = true
             coordinator.model.select(result.id)
         }
         table.setAccessibilityLabel("Search Results")
@@ -66,12 +67,13 @@ struct ResultList: NSViewRepresentable {
         }
         let index = coordinator.index(of: model.selectedID)
         table.selectRowIndexes(index.map { IndexSet(integer: $0) } ?? [], byExtendingSelection: false)
-        if let index, coordinator.lastSelectedID != model.selectedID {
+        if let index, coordinator.lastSelectedID != model.selectedID, !coordinator.selectedByPointer {
             // Keep the section label in view above the first row of a group.
             if index > 0, case .section = coordinator.rows[index - 1] { table.scrollRowToVisible(index - 1) }
             table.scrollRowToVisible(index)
         }
         coordinator.lastSelectedID = model.selectedID
+        coordinator.selectedByPointer = false
         coordinator.updating = false
     }
 
@@ -83,6 +85,9 @@ struct ResultList: NSViewRepresentable {
         var signature: [String] = []
         var lastSelectedID: String?
         var updating = false
+        /// True when the pointer chose the selection. That row is already in view, so the
+        /// table does not scroll, and a scrolled list never snaps back.
+        var selectedByPointer = false
         init(model: LauncherModel, actions: @escaping () -> Void) { self.model = model; self.actions = actions }
         func result(at row: Int) -> LauncherResult? { rows.indices.contains(row) ? rows[row].result : nil }
         func index(of id: String?) -> Int? {
@@ -130,6 +135,11 @@ private final class ResultsTable: NSTableView {
     var hoverAction: ((Int) -> Void)?
     private var hoverArea: NSTrackingArea?
     override var acceptsFirstResponder: Bool { false }
+    /// The launcher panel never activates the app, so hover help must show while it is inactive.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        window?.allowsToolTipsWhenApplicationIsInactive = true
+    }
     /// The first click works even when the panel was not key.
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func updateTrackingAreas() {
@@ -279,6 +289,10 @@ private final class ResultCell: NSTableCellView {
         setAccessibilityElement(true)
         setAccessibilityLabel(result.detail.isEmpty ? result.title : result.title + ", " + result.detail)
         setAccessibilityIdentifier(result.id)
+        toolTip = result.help
+        setAccessibilityHelp(result.help)
+        // A Jev badge leads the accessory, so its end truncates and the badge stays whole.
+        detailLabel.lineBreakMode = twoLine || result.help != nil ? .byTruncatingTail : .byTruncatingMiddle
         if let path = result.path {
             IconCache.shared.load(path) { [weak self] image in
                 guard let self, self.representedID == result.id else { return }

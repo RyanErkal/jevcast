@@ -14,7 +14,7 @@ final class TaskRunsSource: ThingSource {
         guard !runs.isEmpty else { throw SourceProblem(text: tasks.tasks.isEmpty ? "No scheduled tasks yet. Try “every morning brief me on my meetings”." : "No results yet.") }
         let openRun = self.openRun
         return runs.prefix(60).enumerated().map { index, run in
-            var verbs = [Verb(title: "Open Result") { openRun(run); return nil }]
+            var verbs = [Verb(title: "Open Result", after: .keepOpen) { openRun(run); return nil }]
             let preview = run.preview
             verbs.append(Verb(title: "Copy Result", after: .stay) {
                 copyText(run.file.flatMap { try? String(contentsOfFile: $0, encoding: .utf8) } ?? preview); return "Result copied."

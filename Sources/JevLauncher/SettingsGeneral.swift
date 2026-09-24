@@ -4,6 +4,9 @@ struct GeneralSettings: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var status: LauncherStatus
     @ObservedObject var updates: UpdateChecker
+    @ObservedObject var speech: SpeechService
+    let windows: WindowManager
+    @ObservedObject var keys: JevKeyCache
     let changed: () -> Void
     var body: some View {
         Form {
@@ -17,22 +20,32 @@ struct GeneralSettings: View {
                     Text("Free the shortcut in Spotlight or other launchers first.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-            }
-            Section("Startup") {
                 LoginItemRows(preferences: preferences)
             }
-            Section("Clipboard") {
-                Toggle("Keep clipboard history", isOn: $preferences.clipboardHistory)
-                Text("Type “clip” to see the last 50 text items. Kept in memory only. Concealed and password-manager items are skipped.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Section("Web") {
+            Section("Launcher") {
                 Picker("Search the web with", selection: $preferences.webEngine) {
                     Text("Google").tag("Google"); Text("DuckDuckGo").tag("DuckDuckGo")
                 }
+                Toggle("Keep clipboard history", isOn: $preferences.clipboardHistory)
+                InfoCaption("Type “clip” to see recent text.",
+                            detail: "The last 50 text items, kept in memory only. Concealed and password-manager items are skipped.")
+                    .opacity(preferences.clipboardHistory ? 1 : 0.5)
             }
-            Section("Updates") {
-                Toggle("Check for updates automatically", isOn: $preferences.checksForUpdates)
+            Section {
+                PermissionRow(permission: .accessibility) { windows.requestPermission() }
+                PermissionRow(permission: .microphone, request: VoicePermissions.request(.microphone, speech: speech))
+                PermissionRow(permission: .speech, request: VoicePermissions.request(.speech, speech: speech))
+                ForEach(SourcePermissionRowKind.allCases) { SourcePermissionRow(kind: $0) }
+            } header: { Text("Permissions") } footer: {
+                Text("Each feature asks when you first use it. macOS does not tell apps about Full Disk Access or Automation.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                Toggle("Check for updates once a day", isOn: $preferences.checksForUpdates)
+                Toggle("Jev natural-language matching", isOn: Binding(
+                    get: { keys.hasKey && preferences.jevEnabled }, set: { preferences.jevEnabled = $0 }
+                )).disabled(!keys.hasKey)
+                Toggle("Luna answers and writing", isOn: $preferences.lunaEnabled)
                 HStack {
                     Text(updateStatus).font(.caption).foregroundStyle(.secondary)
                     Spacer()
@@ -42,17 +55,31 @@ struct GeneralSettings: View {
                         Button("Check Now") { updates.checkAndReport() }.controlSize(.small).disabled(updates.state == .checking)
                     }
                 }
+            } header: { Text("Network") } footer: {
+                InfoCaption("These, and web images in mail, are the only network use.",
+                            detail: "HTML mail loads web images, fonts, and styles unless you turn that off in Settings › Mail. The update check asks GitHub for the newest version and sends nothing else. Jev gets request text and candidate names. Luna gets only what Settings › AI › Luna allows. File paths, clipboard history, and audio are never sent.")
+            }
+            if !preferences.cleanupIgnored.isEmpty {
+                Section("Ignored by Clean Up") {
+                    ForEach(preferences.cleanupIgnored, id: \.self) { key in
+                        HStack {
+                            Text(key)
+                            Spacer()
+                            Button("Offer Again") { preferences.cleanupIgnored.removeAll { $0 == key } }.controlSize(.small)
+                        }
+                    }
+                }
             }
         }
         .formStyle(.grouped)
         .onChange(of: preferences.hotkey) { _, _ in changed() }
+        .task { await keys.load() }
     }
-    /// Says what the check sends, so the one network call is never a surprise.
     private var updateStatus: String {
         switch updates.state {
         case .available(let release): return "Version \(release.version) is available. You have \(AppIdentity.version)."
         case .checking: return "Checking…"
-        default: return "Version \(AppIdentity.version). Once a day, the app asks GitHub for the newest version. It sends nothing else."
+        default: return "Version \(AppIdentity.version)."
         }
     }
 }

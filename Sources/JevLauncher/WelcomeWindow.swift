@@ -82,7 +82,7 @@ struct WelcomeView: View {
         .onChange(of: preferences.hotkey) { _, _ in opened = false; changed() }
     }
 
-    /// Turning voice on asks for both permissions the first time; after a denial, Settings › Input has the buttons.
+    /// Turning voice on asks for both permissions the first time; after a denial, Settings › Voice has the buttons.
     private var voice: Binding<Bool> {
         Binding(get: { preferences.voiceEnabled }, set: { enabled in
             preferences.voiceEnabled = enabled

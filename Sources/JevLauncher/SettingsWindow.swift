@@ -7,19 +7,19 @@ import SwiftUI
 @MainActor
 final class SettingsWindow: NSWindowController, NSToolbarDelegate {
     enum Tab: String, CaseIterable {
-        case general, search, commands, windows, input, luna, usage
+        case general, search, library, windows, voice, ai, mail
         var title: String {
             switch self {
             case .general: return "General"; case .search: return "Search"
-            case .commands: return "Commands"; case .windows: return "Windows"
-            case .input: return "Input"; case .luna: return "Luna"; case .usage: return "Usage"
+            case .library: return "Library"; case .windows: return "Windows"
+            case .voice: return "Voice"; case .ai: return "AI"; case .mail: return "Mail"
             }
         }
         var symbol: String {
             switch self {
             case .general: return "gearshape"; case .search: return "magnifyingglass"
-            case .commands: return "terminal"; case .windows: return "macwindow"
-            case .input: return "waveform"; case .luna: return "sparkles"; case .usage: return "chart.bar"
+            case .library: return "books.vertical"; case .windows: return "macwindow"
+            case .voice: return "waveform"; case .ai: return "sparkles"; case .mail: return "envelope"
             }
         }
         var identifier: NSToolbarItem.Identifier { NSToolbarItem.Identifier(rawValue) }
@@ -34,11 +34,14 @@ final class SettingsWindow: NSWindowController, NSToolbarDelegate {
     private let status: LauncherStatus
     private let updates: UpdateChecker
     private let changed: () -> Void
+    private let openMail: () -> Void
     private let hosting = NSHostingView(rootView: AnyView(EmptyView()))
     private var current: Tab = .general
 
-    init(preferences: Preferences, model: LauncherModel, catalogue: AppCatalogue, status: LauncherStatus, updates: UpdateChecker, changed: @escaping () -> Void) {
-        self.preferences = preferences; self.model = model; self.catalogue = catalogue; self.status = status; self.updates = updates; self.changed = changed
+    init(preferences: Preferences, model: LauncherModel, catalogue: AppCatalogue, status: LauncherStatus, updates: UpdateChecker,
+         changed: @escaping () -> Void, openMail: @escaping () -> Void) {
+        self.preferences = preferences; self.model = model; self.catalogue = catalogue; self.status = status; self.updates = updates
+        self.changed = changed; self.openMail = openMail
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 400),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -90,15 +93,18 @@ final class SettingsWindow: NSWindowController, NSToolbarDelegate {
     }
     @ViewBuilder private func pane(for tab: Tab) -> some View {
         switch tab {
-        case .general: GeneralSettings(preferences: preferences, status: status, updates: updates, changed: changed)
+        case .general: GeneralSettings(preferences: preferences, status: status, updates: updates, speech: model.speech, windows: model.windows, keys: model.keys, changed: changed)
         case .search: SearchSettings(preferences: preferences, catalogue: catalogue)
         case .windows: WindowSettings(preferences: preferences, model: model, changed: changed)
-        case .commands: CommandSettings(preferences: preferences, catalogue: catalogue)
-        case .input: InputSettings(preferences: preferences, speech: model.speech)
-        case .luna: LunaSettings(preferences: preferences, log: model.lunaLog, jevKeys: model.keys, lunaKeys: model.lunaKeys, tasks: model.lunaTasks)
-        case .usage: UsageSettings(preferences: preferences, usage: JevUsageLog.shared)
+        case .library: CommandSettings(preferences: preferences, catalogue: catalogue, resized: resized)
+        case .voice: VoiceSettings(preferences: preferences, speech: model.speech)
+        case .ai: AISettings(preferences: preferences, model: model, resized: resized)
+        case .mail: MailSettings(preferences: preferences, openMail: openMail)
         }
     }
+
+    /// A pane that switches between parts asks for its new height here.
+    private var resized: () -> Void { { [weak self] in DispatchQueue.main.async { self?.fit(animate: true) } } }
 
     @objc private func selectTab(_ sender: NSToolbarItem) {
         guard let tab = Tab(rawValue: sender.itemIdentifier.rawValue), tab != current else { return }

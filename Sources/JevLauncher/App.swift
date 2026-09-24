@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import UserNotifications
 import SwiftUI
 import Carbon
@@ -55,6 +56,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     private var panel: LauncherPanel!
     private var settings: SettingsWindow?
     private var mail: MailWindow?
+    /// One mail model for the Mail view and the mail window, so ⌘O keeps your place.
+    private lazy var mailModel = MailModel(luna: { [unowned self] in try await self.model.sendLuna($0) },
+                                           lunaAllowed: { [unowned self] in self.model.allowedLunaContext.contains(.mailMessage) })
+    private var viewSizeWatch: AnyCancellable?
     private var resultWindow: LunaResultWindow?
     private var statusMenu: StatusMenu?
     private var keyMonitor: Any?
@@ -71,9 +76,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         panel.host(content)
         panel.delegate = self
         model.onClose = { [weak self] restore in self?.hide(restoreFocus: restore) }
-        model.openLunaSettings = { [weak self] in self?.showSettings(tab: .luna) }
-        model.openMail = { [weak self] rowID in self?.showMail(select: rowID) }
-        model.openTaskRun = { [weak self] run in self?.showRun(run) }
+        model.openLunaSettings = { [weak self] in self?.showSettings(tab: .ai, aiPart: .luna) }
+        model.openSettingsTab = { [weak self] name in
+            if let tab = SettingsWindow.Tab(rawValue: name) { self?.showSettings(tab: tab) }
+        }
+        model.openMail = { [weak self] rowID in self?.showMailView(select: rowID) }
+        model.openTaskRun = { [weak self] run in self?.showRunView(run) }
+        model.openView = { [weak self] id in if let view = ViewID(rawValue: id) { self?.showView(view) } }
+        model.makePage = { [weak self] id in
+            guard let self else { return nil }
+            // The view and the mail window share one inbox; an open window comes forward instead.
+            if id == .mail, self.mail?.isOpen == true { self.showMail(); return nil }
+            return LauncherPages.make(id, model: self.model, links: self.pageLinks, snapshot: false)
+        }
+        viewSizeWatch = model.$page.map { $0 != nil }.removeDuplicates().sink { [weak self] wide in self?.panel.setViewSize(wide) }
         UNUserNotificationCenter.current().delegate = self
         // Snapshot runs never run tasks.
         if UISnapshots.directory == nil { model.lunaTasks.start() }
@@ -83,8 +99,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             self.show(); self.model.message = text
         }
         AppMenus.install(commands: self)
-        statusMenu = StatusMenu(preferences: preferences, updates: updates, commands: self,
-                                isOpen: { [weak self] in self?.wasVisible ?? false }, toggle: { [weak self] in self?.toggle() })
+        statusMenu = StatusMenu(preferences: preferences, updates: updates, commands: self, tasks: model.lunaTasks,
+                                isOpen: { [weak self] in self?.wasVisible ?? false }, toggle: { [weak self] in self?.toggle() },
+                                openSettings: { [weak self] tab in self?.showSettings(tab: tab) })
         // Snapshot runs leave global shortcuts to the running copy of the app.
         if UISnapshots.directory == nil { configureHotkeys() }
         Task { await JevKeyCache.shared.load() }
@@ -94,6 +111,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             guard let self, self.wasVisible, event.window === self.panel else { return event }
             // An input method composing text owns Return, arrows, and Escape until it commits.
             if let editor = self.panel.firstResponder as? NSTextView, editor.hasMarkedText() { return event }
+            // A view such as Mail takes ↑↓, Return, ⌫, Escape, and ⌘O; other keys type in the filter.
+            if self.model.page != nil { return self.model.handleViewKey(event) ? nil : event }
             // With Luna's answer showing, Escape goes back to the rows and row keys do nothing.
             if self.model.lunaAnswer != nil {
                 switch event.keyCode {
@@ -120,6 +139,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
                 return self.model.undoJevPick() ? nil : event
             case 125: self.model.moveSelection(1); self.preview.update(path: self.model.selected?.path); return nil
             case 126: self.model.moveSelection(-1); self.preview.update(path: self.model.selected?.path); return nil
+            case 48 where event.modifierFlags.isDisjoint(with: [.command, .shift, .option, .control]):
+                // Tab completes a "/" or "$" row's name.
+                return self.model.completePrefix() ? nil : event
             case 40 where event.modifierFlags.contains(.command): self.showActions(); return nil
             case 16 where event.modifierFlags.contains(.command): self.togglePreview(); return nil
             case 15 where event.modifierFlags.contains(.command): self.model.revealSelected(); return nil
@@ -163,19 +185,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
                 model.message = "This app moved or was removed. Refresh apps in Settings › Search › Advanced."
             })
         ]
+        // Views in the panel. Mail, Calendar, and Clean Up render empty: snapshots never read them.
+        steps += ViewID.allCases.map { id in ("view-" + id.rawValue, 1.0, launcher, { model.closeAllViews(); model.showView(id) }) }
         steps.append(("", 0, { nil }, { [weak self] in
             guard let self else { return }
             rig.close()
-            self.settings = SettingsWindow(preferences: shownPreferences, model: shownModel, catalogue: shownModel.catalogue, status: self.status, updates: self.updates, changed: {})
+            self.settings = SettingsWindow(preferences: shownPreferences, model: shownModel, catalogue: shownModel.catalogue, status: self.status, updates: self.updates, changed: {}, openMail: {})
             self.settings?.window?.alphaValue = 0
             self.settings?.window?.ignoresMouseEvents = true
             self.settings?.window?.orderFrontRegardless()
         }))
+        // Panes with parts render each part. The stored choice is put back after the last capture.
+        let partKeys = ["settingsAIPart", "settingsLibraryPart"]
+        let storedParts = partKeys.map { UserDefaults.standard.string(forKey: $0) }
         for tab in SettingsWindow.Tab.allCases {
-            steps.append(("settings-" + tab.rawValue, 0.9, settingsView, { [weak self] in self?.settings?.select(tab) }))
+            let parts: (key: String, values: [String])? = switch tab {
+            case .ai: ("settingsAIPart", AISettings.Part.allCases.map(\.rawValue))
+            case .library: ("settingsLibraryPart", CommandSettings.Part.allCases.map(\.rawValue))
+            default: nil
+            }
+            guard let parts else {
+                steps.append(("settings-" + tab.rawValue, 0.9, settingsView, { [weak self] in self?.settings?.select(tab) }))
+                continue
+            }
+            for value in parts.values {
+                steps.append(("settings-\(tab.rawValue)-\(value.lowercased())", 0.9, settingsView, { [weak self] in
+                    UserDefaults.standard.set(value, forKey: parts.key)
+                    self?.settings?.select(tab)
+                }))
+            }
         }
         steps.append(("welcome", 0.9, { [weak self] in self?.welcome?.window?.contentView }, { [weak self] in
             guard let self else { return }
+            for (key, value) in zip(partKeys, storedParts) { UserDefaults.standard.set(value, forKey: key) }
             self.settings?.window?.orderOut(nil)
             self.welcome = WelcomeWindow(preferences: shownPreferences, model: shownModel, status: self.status, changed: {}, openSettings: {})
             self.welcome?.window?.alphaValue = 0
@@ -285,7 +327,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         guard wasVisible else { return }
         wasVisible = false
         resultActions.dismiss()
-        preview.close(); model.end(); panel.orderOut(nil); backdrop.close()
+        preview.close(); panel.orderOut(nil); model.end(); model.closeAllViews(); backdrop.close()
         let previous = previousApp
         previousApp = nil
         traceInteraction("closed")
@@ -352,14 +394,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     /// The Jevcast mail window, made on first use.
     func showMail(select rowID: Int64? = nil, compose address: String? = nil) {
         hide(restoreFocus: false)
-        if mail == nil {
-            let model = self.model
-            mail = MailWindow(model: MailModel(luna: { try await model.sendLuna($0) },
-                                               lunaAllowed: { model.allowedLunaContext.contains(.mailMessage) }))
-        }
+        if mail == nil { mail = MailWindow(model: mailModel) }
         mail?.show(select: rowID, compose: address)
     }
-    func showSettings(tab: SettingsWindow.Tab) {
+    /// Shows the launcher as a view, such as Mail, in place of a separate window.
+    func showView(_ view: ViewID) {
+        if view == .mail, mail?.isOpen == true { showMail(); return }
+        show(); model.showView(view)
+    }
+    private func showMailView(select rowID: Int64?) {
+        if mail?.isOpen == true { showMail(select: rowID); return }
+        showView(.mail)
+        if let rowID { (model.page as? MailPage)?.show(rowID) }
+    }
+    private func showRunView(_ run: LunaTaskRun) {
+        showView(.tasks)
+        (model.page as? SourcePage)?.showDetail("lunarun:" + run.id)
+    }
+    /// What views open outside the panel. ⌘O on Mail keeps the list's selection in the mail window.
+    private var pageLinks: LauncherPages.Links {
+        .init(mail: { [unowned self] in self.mailModel },
+              mailWindow: { [weak self] rowID in self?.model.closeAllViews(handingOff: true); self?.showMail(select: rowID) },
+              runWindow: { [weak self] run in self?.showRun(run) })
+    }
+    func showSettings(tab: SettingsWindow.Tab, aiPart: AISettings.Part? = nil) {
+        if let aiPart { UserDefaults.standard.set(aiPart.rawValue, forKey: "settingsAIPart") }
         showSettings()
         settings?.select(tab)
     }
@@ -367,7 +426,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         hide(restoreFocus: false)
         if settings == nil {
             settings = SettingsWindow(preferences: preferences, model: model, catalogue: catalogue, status: status, updates: updates,
-                                      changed: { [weak self] in self?.configureHotkeys() })
+                                      changed: { [weak self] in self?.configureHotkeys() },
+                                      openMail: { [weak self] in self?.showMail() })
         }
         settings?.showWindow(nil)
         if let window = settings?.window { Frontmost.show(window) }
@@ -384,6 +444,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         welcome?.showWindow(nil)
     }
     @objc func checkForUpdates() { updates.checkAndReport() }
+    @objc func openMailWindow() { showView(.mail) }
+    @objc func showCleanup() { showView(.cleanup) }
+    @objc func showTaskResults() { showView(.tasks) }
     @objc func showAbout() { AboutPanel.show() }
     @objc func openWebsite() { Frontmost.open(AppIdentity.website) }
     @objc func openSourceCode() { Frontmost.open(AppIdentity.repository) }

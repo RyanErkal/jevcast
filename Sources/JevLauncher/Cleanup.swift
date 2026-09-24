@@ -142,7 +142,7 @@ final class CleanupSource: ThingSource {
             }
             let ignore = Verb(title: "Always Ignore", after: .stay) { [weak self] in
                 self?.preferences.cleanupIgnored.append(item.id); self?.cache = nil
-                return "\(item.finding.title) will not be offered again. Settings › Search lists ignored items."
+                return "\(item.finding.title) will not be offered again. Settings › General lists ignored items."
             }
             return LauncherResult(id: "cleanup:" + item.id, title: item.finding.title,
                                   detail: [item.finding.group.title, Cleanup.size(item.finding.memoryMB), item.finding.detail].joined(separator: " · "),

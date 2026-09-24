@@ -29,8 +29,7 @@ struct SearchSettings: View {
         Form {
             Section {
                 FolderList(folders: $preferences.fileFolders, emptyText: "No folders. Add one to search files.")
-                Text("File search stays inside these folders. Results depend on Spotlight indexing.")
-                    .font(.caption).foregroundStyle(.secondary)
+                InfoCaption("File search stays inside these folders.", detail: "Results depend on Spotlight indexing. A folder Spotlight skips shows no files.")
             } header: { Text("File search folders") }
             Section {
                 if aliasRows.isEmpty { Text("No aliases").foregroundStyle(.secondary) }
@@ -58,17 +57,6 @@ struct SearchSettings: View {
                     }
                 }
             } header: { Text("Hidden apps") }
-            if !preferences.cleanupIgnored.isEmpty {
-                Section {
-                    ForEach(preferences.cleanupIgnored, id: \.self) { key in
-                        HStack {
-                            Text(key)
-                            Spacer()
-                            Button("Offer Again") { preferences.cleanupIgnored.removeAll { $0 == key } }.controlSize(.small)
-                        }
-                    }
-                } header: { Text("Ignored by Clean Up") }
-            }
             Section {
                 if preferences.quicklinks.isEmpty { Text("No search keywords").foregroundStyle(.secondary) }
                 ForEach(preferences.quicklinks) { link in

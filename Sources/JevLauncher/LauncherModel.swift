@@ -34,6 +34,8 @@ struct LauncherResult: Identifiable {
     let action: Action
     var score: Double
     var isCurrent = true
+    /// Hover text, such as "Picked by Jev. ⌘Z undoes." on a Jev or memory pick.
+    var help: String?
     /// Overrides the kind-based group, for favourites and recent items.
     var section: LauncherGroup?
     var group: LauncherGroup {
@@ -124,7 +126,7 @@ final class LauncherModel: ObservableObject {
     /// Empty query with nothing to suggest: the panel is only the search bar.
     var isCollapsed: Bool { query.isEmpty && rows.isEmpty }
     /// The single strip message: errors first, then permission and file-search hints.
-    /// Voice setup lives in Settings › Input; the strip shows voice only after a real failure.
+    /// Voice setup lives in Settings › Voice; the strip shows voice only after a real failure.
     var notice: Notice? {
         if let message { return Notice(symbol: "exclamationmark.triangle.fill", text: message, tone: .warning) }
         if let error = speech.errorMessage ?? voiceError { return Notice(symbol: "mic.slash", text: error, tone: .warning) }
@@ -139,7 +141,6 @@ final class LauncherModel: ObservableObject {
         }
         if let sourceNotice { return sourceNotice }
         if let portNotice { return Notice(symbol: "network", text: portNotice, tone: .info) }
-        if let jevNotice { return Notice(symbol: "sparkles", text: jevNotice, tone: .info) }
         if let aiError { return Notice(symbol: "sparkles", text: aiError, tone: .info) }
         if isFileSearch && fileStatus.hasSuffix(FileSearch.narrowHint) && !results.isEmpty {
             return Notice(symbol: "info.circle", text: "Showing recent matches. Add a name or folder to narrow the search.", tone: .info)
@@ -255,11 +256,21 @@ final class LauncherModel: ObservableObject {
     }, allowed: { [weak self] in self?.allowedLunaContext ?? [] })
     /// Opens a task result window, set by the app.
     var openTaskRun: ((LunaTaskRun) -> Void)?
-    /// Opens Settings › Luna, set by the app.
+    /// Opens Settings › AI › Luna, set by the app.
     var openLunaSettings: (() -> Void)?
+    /// Opens a Settings tab by its raw name, such as "ai", set by the app.
+    var openSettingsTab: ((String) -> Void)?
+    /// Shows a view in the panel, such as "mail", "calendar", or "tasks". Nil until the app has views.
+    var openView: ((String) -> Void)?
     /// Opens the mail window, on a message when given; opens a new message to an address.
     var openMail: ((Int64?) -> Void)?
     var composeMail: ((String) -> Void)?
+    /// The view filling the panel, such as Mail, or nil for search. See LauncherPages.swift.
+    @Published var page: LauncherPage?
+    /// Views and search text to go back to, one per Escape.
+    var viewStack: [(page: LauncherPage?, query: String)] = []
+    /// Builds a view, set by the app.
+    var makePage: ((ViewID) -> LauncherPage?)?
     /// The row that is waiting for a second Return.
     @Published var pendingConfirmID: String?
     private var subscriptions = Set<AnyCancellable>()
@@ -275,7 +286,7 @@ final class LauncherModel: ObservableObject {
         self.keys = keys ?? .shared
         self.clipboard = clipboard ?? ClipboardHistory()
         speech.onTranscript = { [weak self] text in
-            guard let self, self.acceptsSpeech else { return }
+            guard let self, self.acceptsSpeech, self.page == nil else { return }
             self.updateQuery(text, typed: false)
         }
         self.files.onStatus = { [weak self] status in
@@ -335,14 +346,16 @@ final class LauncherModel: ObservableObject {
         guard text != query else { return }
         dismissLuna()
         let wasFileSearch = isFileSearch
-        parsedFileQuery = FileSearchQuery(text: text); fileStatus = ""
+        // "/cal" lists functions, not files under "/cal".
+        parsedFileQuery = FileSearchQuery(text: Self.prefix(for: text) == nil ? text : ""); fileStatus = ""
         if isFileSearch && wasFileSearch && parsedFileQuery.isValid {
             if !fileResults.isEmpty { previousFileResults = fileResults }
         } else { previousFileResults = [] }
         query = text; message = nil; manualSelection = false; fileResults = []; promotedID = nil; semanticResult = nil
         pendingConfirmID = nil; portQuery = PortQuery.parse(text); listeners = []; portDetails = [:]; stoppedNotice = nil; jevPick = nil; jevWindowTarget = nil
         let previousKind = sourceQuery?.kind
-        sourceQuery = isFileSearch || portQuery != nil ? nil : SourceQuery.parse(text)
+        if Self.prefix(for: text) != nil { portQuery = nil }
+        sourceQuery = isFileSearch || portQuery != nil || Self.prefix(for: text) != nil ? nil : SourceQuery.parse(text)
         if sourceQuery.map({ source($0.kind) == nil }) ?? false { sourceQuery = nil }
         // The same source keeps its rows on screen, not runnable, until the new filter loads.
         sourceRows = sourceQuery?.kind == previousKind ? sourceRows.map { var row = $0; row.isCurrent = false; return row } : []
@@ -355,7 +368,7 @@ final class LauncherModel: ObservableObject {
         rebuild()
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         // Clipboard filters and keyword searches with text stay local and skip file search.
-        guard !trimmed.isEmpty, !isClipboardSearch, Quicklink.match(trimmed, in: preferences.quicklinks)?.query.isEmpty ?? true else { return }
+        guard !trimmed.isEmpty, !isClipboardSearch, Self.prefix(for: trimmed) == nil, Quicklink.match(trimmed, in: preferences.quicklinks)?.query.isEmpty ?? true else { return }
         if let portQuery { loadPorts(portQuery, revision: current, promoteFirst: false) }
         if sourceQuery != nil { loadSource(revision: current, delay: 120_000_000) }
         if portQuery == nil && (isFileSearch || trimmed.count >= 3) {
@@ -371,6 +384,8 @@ final class LauncherModel: ObservableObject {
         scheduleJev(trimmed, revision: current)
     }
     func rebuild() {
+        // While a view shows, `query` is its filter, not a search.
+        guard page == nil else { return }
         let trace = PerformanceTrace.start("LocalResults")
         defer { PerformanceTrace.end("LocalResults", trace) }
         let start = CFAbsoluteTimeGetCurrent()
@@ -381,7 +396,8 @@ final class LauncherModel: ObservableObject {
                                detail: Self.clipboardDetail(item),
                                symbol: "doc.on.clipboard", action: .clipboard(item), score: 1000 - Double(index))
             }
-            publish(rows, start: start)
+            let view = filter.isEmpty ? viewRow(.clipboard, detail: "Filter, pin, copy, and paste in a larger view", score: 999.5).map { row -> LauncherResult in var row = row; row.section = .clipboard; return row } : nil
+            publish((view.map { [$0] } ?? []) + rows, start: start)
             return
         }
         if let rows = exclusiveRows(q) {
@@ -445,11 +461,7 @@ final class LauncherModel: ObservableObject {
             rows.append(LauncherResult(id: "url", title: "Open " + q, detail: "", symbol: "globe", action: .url(url), score: 1500))
         }
         if !isFileSearch {
-            var components = URLComponents(string: preferences.webEngine == "DuckDuckGo" ? "https://duckduckgo.com/" : "https://www.google.com/search")!
-            components.queryItems = [URLQueryItem(name: "q", value: q)]
-            if let url = components.url {
-                rows.append(LauncherResult(id: "web", title: "Search " + preferences.webEngine, detail: Self.hostDetail(url), symbol: "magnifyingglass", action: .url(url), score: -1000))
-            }
+            if let web = webRow(q) { rows.append(web) }
         }
         // A pick can replace a plain row with a richer one, such as a site search with the request's words.
         if let semanticResult {
@@ -463,8 +475,9 @@ final class LauncherModel: ObservableObject {
     private func publish(_ unsorted: [LauncherResult], start: CFAbsoluteTime) {
         var unsorted = unsorted
         if let jevPick, let index = unsorted.firstIndex(where: { $0.id == jevPick.id }) {
-            let badge = jevPick.remembered ? "Remembered" : "Jev"
+            let badge = jevPick.remembered ? "Remembered · ⌘Z" : "Jev · ⌘Z"
             unsorted[index].detail = unsorted[index].detail.isEmpty ? badge : badge + " · " + unsorted[index].detail
+            unsorted[index].help = jevPick.remembered ? "Remembered pick. ⌘Z forgets it." : "Picked by Jev. ⌘Z undoes."
         }
         let ranked = unsorted.sorted {
             if $0.id == promotedID { return $1.id != promotedID }
@@ -473,7 +486,7 @@ final class LauncherModel: ObservableObject {
             return $0.title.localizedStandardCompare($1.title) == .orderedAscending
         }
         let mixed = !isFileSearch && !isClipboardSearch && !query.isEmpty
-        var groups = LauncherSections.group(Array(ranked.prefix(40)), fileLimit: mixed ? LauncherSections.mixedFileLimit : nil)
+        var groups = LauncherSections.group(Array(ranked.prefix(Self.prefix(for: query) == nil ? 40 : ranked.count)), fileLimit: mixed ? LauncherSections.mixedFileLimit : nil)
         // A long clipboard or file list stays one group; the cap bounds the table.
         groups = groups.filter { !$0.results.isEmpty }
         rows = LauncherSections.rows(groups)
@@ -522,12 +535,12 @@ final class LauncherModel: ObservableObject {
         LauncherResult(id: "window:" + action.rawValue, title: action.title, detail: target?.localizedName ?? targetName,
                        symbol: action.symbol, action: .window(action, target?.processIdentifier), score: score)
     }
-    private static func clipboardDetail(_ item: ClipboardItem) -> String {
+    static func clipboardDetail(_ item: ClipboardItem) -> String {
         let lines = item.text.split(whereSeparator: \.isNewline).count
         let age = "Copied " + item.copiedAt.formatted(.relative(presentation: .named))
         return lines > 1 ? age + " · \(lines) lines" : age
     }
-    private static func clipboardTitle(_ text: String) -> String {
+    static func clipboardTitle(_ text: String) -> String {
         let line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         return trimmed.count > 120 ? String(trimmed.prefix(120)) + "…" : trimmed
@@ -597,6 +610,7 @@ final class LauncherModel: ObservableObject {
         pendingConfirmID = nil
         // Freeze the visible action before stopping speech or accepting an async response.
         revision = UUID(); work?.cancel(); aiWork?.cancel(); speech.stop(); files.stop()
+        if let viewID = viewID(result), let openView { openView(viewID); return }
         do {
             switch result.action {
             case .app(let app) where app.launchURL != nil:
@@ -638,7 +652,7 @@ final class LauncherModel: ObservableObject {
             }
             if result.id == "calculator", case .copy(let text) = result.action { answers = [text] + answers.filter { $0 != text }.prefix(9) }
             learnFromExecution(result)
-            if result.learnsFromUse { preferences.record(result.id, query: query) }
+            if result.learnsFromUse && Self.prefix(for: query) == nil { preferences.record(result.id, query: query) }
             switch result.action {
             case .copy, .clipboard, .snippet:
                 onClose?(true)

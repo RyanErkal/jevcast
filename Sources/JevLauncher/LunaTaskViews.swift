@@ -43,7 +43,7 @@ struct LunaResultView: View {
     }
 }
 
-/// Settings › Luna: the scheduled tasks and their last results.
+/// Settings › AI › Luna: the scheduled tasks and their last results.
 struct LunaTaskSettings: View {
     @ObservedObject var center: LunaTaskCenter
     var body: some View {

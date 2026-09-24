@@ -121,7 +121,7 @@ final class LunaTaskCenter: ObservableObject {
             do {
                 let refused = self.refused(task)
                 guard refused.isEmpty else {
-                    throw LauncherError("This task reads " + refused.map(\.title).joined(separator: " and ").lowercased() + ". Turn that on in Settings › Luna.")
+                    throw LauncherError("This task reads " + refused.map(\.title).joined(separator: " and ").lowercased() + ". Turn that on in Settings › AI › Luna.")
                 }
                 let sections = await Self.gather(task.contexts)
                 let sent = Array(Set(task.contexts.map(\.lunaContext))).sorted { $0.rawValue < $1.rawValue }

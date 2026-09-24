@@ -8,10 +8,38 @@ struct LauncherView: View {
     let actions: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// An empty query shows the search bar alone.
     var body: some View {
+        // One search bar for both, so the field keeps its focus when a view opens or closes.
         VStack(spacing: 0) {
             searchBar
+            if let page = model.page { pageBody(page) } else { searchBody }
+        }
+        .frame(maxWidth: .infinity)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// A view such as Mail: the search field filters it, and the view fills the larger panel.
+    private func pageBody(_ page: LauncherPage) -> some View {
+        VStack(spacing: 0) {
+            Divider()
+            page.content().id(page.id).frame(maxWidth: .infinity, maxHeight: .infinity)
+            Divider()
+            HStack(spacing: 10) {
+                Spacer(minLength: 10)
+                KeyHint("Open", "↩")
+                KeyHint("Back", "esc")
+                if page.canPopOut { KeyHint("Open Window", "⌘O") }
+            }
+            .font(.system(size: 12))
+            .padding(.horizontal, LauncherMetrics.gutter)
+            .frame(height: LauncherMetrics.footerHeight)
+        }
+        .frame(height: LauncherPanel.viewSize.height - LauncherMetrics.searchBarHeight)
+    }
+
+    /// An empty query shows the search bar alone.
+    private var searchBody: some View {
+        VStack(spacing: 0) {
             if let answer = model.lunaAnswer {
                 Divider()
                 LunaAnswerView(answer: answer)
@@ -31,25 +59,27 @@ struct LauncherView: View {
                 footer
             }
         }
-        .frame(maxWidth: .infinity)
-        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var searchBar: some View {
         // Glyph width and spacing match the row icon column, so query text lines up with row titles.
         HStack(spacing: LauncherMetrics.iconSpacing) {
-            Image(systemName: speech.isListening ? "waveform" : "magnifyingglass")
-                .font(.system(size: LauncherMetrics.searchGlyphSize, weight: .regular))
-                .foregroundStyle(speech.isListening ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiary))
-                .frame(width: LauncherMetrics.iconSize)
-                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
-                .accessibilityHidden(true)
+            if let page = model.page { ViewChip(view: page.id) { model.closeView() } } else { searchGlyph }
             LauncherSearchField(model: model)
-            // Voice setup lives in Settings › Input; the button appears only once voice can work.
-            if speech.permissionsGranted { MicButton(speech: speech) { model.toggleListening() } }
+            // Voice setup lives in Settings › Voice; the button appears only once voice can work.
+            if speech.permissionsGranted && model.page == nil { MicButton(speech: speech) { model.toggleListening() } }
         }
         .padding(.horizontal, LauncherMetrics.gutter)
         .frame(height: LauncherMetrics.searchBarHeight)
+    }
+
+    private var searchGlyph: some View {
+        Image(systemName: speech.isListening ? "waveform" : "magnifyingglass")
+            .font(.system(size: LauncherMetrics.searchGlyphSize, weight: .regular))
+            .foregroundStyle(speech.isListening ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiary))
+            .frame(width: LauncherMetrics.iconSize)
+            .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+            .accessibilityHidden(true)
     }
 
     /// The list is exactly as tall as its rows, so the panel follows the result count.
@@ -99,6 +129,27 @@ struct LauncherView: View {
         .font(.system(size: 12))
         .padding(.horizontal, LauncherMetrics.gutter)
         .frame(height: LauncherMetrics.footerHeight)
+    }
+}
+
+/// The open view's symbol and name, left of the filter. A click goes back to search.
+private struct ViewChip: View {
+    let view: ViewID
+    let back: () -> Void
+    var body: some View {
+        Button(action: back) {
+            HStack(spacing: 5) {
+                Image(systemName: view.symbol)
+                Text(view.title)
+                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
+            }
+            .font(.system(size: 14, weight: .medium))
+            .padding(.horizontal, 9).padding(.vertical, 5)
+            .background(Capsule().fill(.quaternary))
+        }
+        .buttonStyle(.plain)
+        .help("Back to Search (esc)")
+        .accessibilityLabel(view.title + ", back to search")
     }
 }
 

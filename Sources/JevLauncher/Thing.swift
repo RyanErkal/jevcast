@@ -11,6 +11,8 @@ struct Verb {
         case closeKeepFocus
         /// Stay open, show the verb's message, and reload the list.
         case stay
+        /// Stay open as it is, for a verb that changes the panel itself, such as opening a view.
+        case keepOpen
     }
     let title: String
     var key: String = ""
@@ -39,6 +41,10 @@ extension LauncherModel {
         case .close, .closeKeepFocus:
             learnFromExecution(result)
             onClose?(verb.after == .close)
+            Task { @MainActor [weak self] in
+                do { _ = try await verb.run() } catch { self?.showFailure(error.localizedDescription) }
+            }
+        case .keepOpen:
             Task { @MainActor [weak self] in
                 do { _ = try await verb.run() } catch { self?.showFailure(error.localizedDescription) }
             }

@@ -16,7 +16,7 @@ final class MailSource: ThingSource {
 
     func load(_ filter: String) async throws -> [LauncherResult] {
         let openScore = explicit ? 150.0 : Self.openScore
-        let open = Verb(title: "Open Mail") { [weak model] in model?.openMail?(nil); return nil }
+        let open = Verb(title: "Open Mail", after: .keepOpen) { [weak model] in model?.openMail?(nil); return nil }
         let compose = Verb(title: "New Message") { [weak model] in model?.composeMail?(""); return nil }
         guard case .ready(let root) = MailStore.status() else {
             return [LauncherResult(id: "mail:open", title: "Open Mail", detail: "Needs Full Disk Access to read Apple Mail", symbol: "envelope",
@@ -39,7 +39,7 @@ final class MailSource: ThingSource {
     }
 
     private func row(_ message: MailSummary, mailbox: MailMailbox?, score: Double) -> LauncherResult {
-        var verbs = [Verb(title: "Open Message") { [weak model] in model?.openMail?(message.rowID); return nil }]
+        var verbs = [Verb(title: "Open Message", after: .keepOpen) { [weak model] in model?.openMail?(message.rowID); return nil }]
         if let mailbox {
             if !message.read {
                 verbs.append(Verb(title: "Mark as Read", after: .stay) { try await MailActions.setRead(true, message, in: mailbox); return "Marked as read." })

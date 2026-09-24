@@ -70,7 +70,7 @@ extension LauncherModel {
             guard !Task.isCancelled, self.visible, self.revision == current else { return }
             switch outcome {
             case .success(let rows):
-                self.sourceRows = rows.map { row in var row = row; row.section = .named(source.section); return row }
+                self.sourceRows = (self.viewRow(for: sourceQuery) + rows).map { row in var row = row; row.section = .named(source.section); return row }
                 self.sourceProblem = nil
             case .failure(let error):
                 self.sourceRows = []
@@ -79,6 +79,19 @@ extension LauncherModel {
             self.isLoadingSource = false
             self.rebuild()
         }
+    }
+
+    /// "calendar", "task results", and "clean up" also offer their view in the panel.
+    private func viewRow(for query: SourceQuery) -> [LauncherResult] {
+        guard query.filter.isEmpty else { return [] }
+        let view: ViewID
+        switch query.kind {
+        case .calendar: view = .calendar
+        case .taskRuns: view = .tasks
+        case .cleanup: view = .cleanup
+        default: return []
+        }
+        return viewRow(view, detail: "Show it in a larger view", score: 9000).map { [$0] } ?? []
     }
 
     /// Reloads the list after a verb that keeps the launcher open. The source reads fresh data.

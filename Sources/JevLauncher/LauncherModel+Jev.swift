@@ -65,7 +65,7 @@ extension LauncherModel {
         case .present(let value): key = value
         case .failed(let message): if revision == current && visible { aiStatus = message; aiError = message }; return
         case .missing, .unknown:
-            if revision == current && visible { aiStatus = "Add a Jev key in Settings"; aiError = "Add a TypeSafe or OpenRouter key in Settings › Input." }
+            if revision == current && visible { aiStatus = "Add a Jev key in Settings"; aiError = "Add a TypeSafe or OpenRouter key in Settings › AI › Jev." }
             return
         }
         guard !Task.isCancelled, visible, revision == current else { return }
@@ -327,17 +327,13 @@ extension LauncherModel {
         return true
     }
 
-    var jevNotice: String? {
-        guard let jevPick, let row = results.first(where: { $0.id == jevPick.id }), selectedID == jevPick.id else { return nil }
-        return (jevPick.remembered ? "Remembered: " : "Jev picked ") + row.title + ". Press ⌘Z to undo."
-    }
-
     /// Remembers what a request meant when Jev or memory was involved, or when the user
     /// chose something other than the first row. A later identical request then skips Jev.
     func learnFromExecution(_ result: LauncherResult) {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         // A Jev-chosen window target is not remembered: the ID alone would move the active window.
-        guard !q.isEmpty, Self.isLearnable(result), jevWindowTarget == nil else { return }
+        // "/" and "$" lists name functions directly; there is nothing to learn.
+        guard !q.isEmpty, Self.prefix(for: q) == nil, Self.isLearnable(result), jevWindowTarget == nil else { return }
         let firstRow = results.first(where: \.isCurrent)?.id
         let exact = (results.first(where: \.isCurrent)?.score ?? 0) >= Self.exactScore && firstRow == result.id
         guard !exact, jevPick != nil || result.id != firstRow || aiStatus == "No clear AI match" else { return }

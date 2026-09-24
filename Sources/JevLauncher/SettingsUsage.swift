@@ -1,7 +1,7 @@
 import LauncherCore
 import SwiftUI
 
-/// Settings › Usage: Jev requests, tokens, and cost over 7 days, 30 days, and all time.
+/// Settings › AI › Usage: Jev requests, tokens, and cost over 7 days, 30 days, and all time.
 /// Counts come from TypeSafe's own usage figures in each reply and stay on this Mac.
 struct UsageSettings: View {
     @ObservedObject var preferences: Preferences
@@ -13,7 +13,7 @@ struct UsageSettings: View {
     }
 
     var body: some View {
-        Form {
+        Group {
             Section {
                 Grid(alignment: .trailing, horizontalSpacing: 18, verticalSpacing: 10) {
                     GridRow {
@@ -31,14 +31,14 @@ struct UsageSettings: View {
                 }
                 .monospacedDigit()
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Text("Priced at $\(JevPricing.dollarsPerMillionInputTokens.formatted(.number.precision(.fractionLength(3)))) per million input tokens for jev-1.13.0. Output tokens are free. Your TypeSafe console has the billed amount.")
-                    .font(.caption).foregroundStyle(.secondary)
+                InfoCaption("Estimated. Your TypeSafe console has the billed amount.",
+                            detail: "Priced at $\(JevPricing.dollarsPerMillionInputTokens.formatted(.number.precision(.fractionLength(3)))) per million input tokens for jev-1.13.0. Output tokens are free.")
             } header: { Text("Jev usage") }
 
             Section {
                 LabeledContent("Remembered requests") { Text(preferences.learned.entries.count.formatted()).monospacedDigit() }
-                Text("When you choose a result for a request, Jevcast remembers it on this Mac. The same request then needs no Jev call. Press ⌘Z on a remembered pick to forget it.")
-                    .font(.caption).foregroundStyle(.secondary)
+                InfoCaption("Remembered picks need no Jev call.",
+                            detail: "When you choose a result for a request, \(AppIdentity.name) remembers it on this Mac. The same request then needs no Jev call. Press ⌘Z on a remembered pick to forget it.")
                 HStack {
                     Button("Forget all") { preferences.clearLearned() }.disabled(preferences.learned.entries.isEmpty)
                     Spacer()
@@ -47,7 +47,6 @@ struct UsageSettings: View {
                 .controlSize(.small)
             } header: { Text("Memory") }
         }
-        .formStyle(.grouped)
         .confirmationDialog("Reset Jev usage?", isPresented: $confirmReset) {
             Button("Reset", role: .destructive) { usage.reset() }
         } message: {

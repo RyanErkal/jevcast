@@ -103,7 +103,7 @@ struct JevService {
     private let session: URLSession
     /// Replaces the provider's endpoint in tests.
     private let endpointOverride: URL?
-    /// Receives token counts from every answered request, for Settings › Usage.
+    /// Receives token counts from every answered request, for Settings › AI › Usage.
     private let usage: JevUsageLog?
 
     init(session: URLSession = .shared, endpoint: URL? = nil, usage: JevUsageLog? = nil) {

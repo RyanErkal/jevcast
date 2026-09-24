@@ -205,11 +205,11 @@ final class ScheduledSource: ThingSource {
         if !task.enabled { parts.append("paused") }
         if let last { parts.append(last.succeeded ? "last run " + last.date.formatted(.relative(presentation: .named)) : "last run failed") }
         let refused = center.refused(task)
-        if !refused.isEmpty { parts.append("needs " + refused.map(\.title).joined(separator: " and ").lowercased() + " in Settings › Luna") }
+        if !refused.isEmpty { parts.append("needs " + refused.map(\.title).joined(separator: " and ").lowercased() + " in Settings › AI › Luna") }
         parts.append("Luna task")
         var verbs: [Verb] = []
         let openRun = self.openRun
-        if let last { verbs.append(Verb(title: "Show Last Result") { openRun(last); return nil }) }
+        if let last { verbs.append(Verb(title: "Show Last Result", after: .keepOpen) { openRun(last); return nil }) }
         verbs.append(Verb(title: "Run Now", after: .stay) { center.run(task); return "Running \(task.name). A notification shows the result." })
         verbs.append(Verb(title: task.enabled ? "Pause" : "Resume", after: .stay) {
             center.setEnabled(task.id, !task.enabled); return task.enabled ? "Paused \(task.name)." : "Resumed \(task.name)."

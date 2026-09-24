@@ -4,7 +4,7 @@ import LauncherCore
 extension Diagnostics {
     /// `--diagnose-jev "request" …`: runs each request through the launcher as if typed,
     /// with the stored Jev key (TypeSafe or OpenRouter), and prints Jev's pick, the top row, and the tokens used.
-    /// Prints titles only, never paths. Each request that reaches Jev is billed and counted in Settings › Usage.
+    /// Prints titles only, never paths. Each request that reaches Jev is billed and counted in Settings › AI › Usage.
     static func jev(_ requests: [String]) {
         let preferences = Preferences()
         let catalogue = AppCatalogue()
@@ -45,7 +45,7 @@ extension Diagnostics {
     }
 
     /// `--store-jev-key`: reads one TypeSafe or OpenRouter key from standard input and saves it
-    /// in the Keychain, as Settings › Input does. The key never appears in the arguments or the output.
+    /// in the Keychain, as Settings › AI › Jev does. The key never appears in the arguments or the output.
     static func storeJevKey() {
         guard let line = readLine(strippingNewline: true)?.trimmingCharacters(in: .whitespacesAndNewlines), !line.isEmpty else {
             print("No key on standard input."); exit(1)

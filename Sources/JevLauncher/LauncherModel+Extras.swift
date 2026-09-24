@@ -9,6 +9,7 @@ extension LauncherModel {
     /// Rows for a query that asks for one kind of thing only, or nil for a normal search.
     func exclusiveRows(_ q: String) -> [LauncherResult]? {
         guard !isFileSearch else { return nil }
+        if let prefix = Self.prefix(for: q) { return prefixRows(prefix) }
         if let search = Symbols.query(q) {
             return Symbols.search(search).enumerated().map { index, entry in
                 LauncherResult(id: "symbol:" + entry.character, title: entry.character + "  " + entry.name.capitalized,

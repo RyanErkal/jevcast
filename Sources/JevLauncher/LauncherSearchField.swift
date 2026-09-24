@@ -26,13 +26,16 @@ struct LauncherSearchField: NSViewRepresentable {
     }
     func updateNSView(_ field: NSTextField, context: Context) {
         if field.stringValue != model.query { field.stringValue = model.query }
+        // In a view such as Mail, the field filters the view.
+        let placeholder = model.page.map { "Filter " + $0.id.title } ?? "Search"
+        if field.placeholderString != placeholder { field.placeholderString = placeholder }
     }
     @MainActor final class Coordinator: NSObject, NSTextFieldDelegate {
         let model: LauncherModel
         init(model: LauncherModel) { self.model = model }
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSTextField else { return }
-            model.updateQuery(field.stringValue, typed: true)
+            if model.page != nil { model.filterView(field.stringValue) } else { model.updateQuery(field.stringValue, typed: true) }
             if CommandLine.arguments.contains("--trace-interaction") {
                 print("[Jev interaction] typed queryLength=\(field.stringValue.count)"); fflush(stdout)
             }

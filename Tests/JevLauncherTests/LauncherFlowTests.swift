@@ -429,7 +429,8 @@ final class LauncherFlowTests: XCTestCase {
         jev.reply(id)
         try await waitUntil { model.selected?.id == "window:maximize" }
         XCTAssertTrue(model.selected?.detail.hasPrefix("Jev") == true, "The pick is marked.")
-        XCTAssertTrue(model.notice?.text.contains("⌘Z") == true)
+        XCTAssertEqual(model.selected?.help, "Picked by Jev. ⌘Z undoes.")
+        XCTAssertNil(model.notice, "The row carries the mark; no strip.")
         // Choosing it teaches the Mac. Window moves need Accessibility, so tests teach it directly.
         model.learnFromExecution(try XCTUnwrap(model.selected))
         model.end()

@@ -26,7 +26,7 @@ struct LunaService: LunaWriting {
     }
 
     func complete(_ request: LunaRequest, effort: LunaEffort, apiKey: String) async throws -> LunaReply {
-        guard apiKey.hasPrefix("sk-or-") else { throw Failure(text: "Luna needs an OpenRouter key (sk-or-…). Add one in Settings › Luna.") }
+        guard apiKey.hasPrefix("sk-or-") else { throw Failure(text: "Luna needs an OpenRouter key (sk-or-…). Add one in Settings › AI › Luna.") }
         var urlRequest = URLRequest(url: endpoint)
         urlRequest.httpMethod = "POST"
         urlRequest.timeoutInterval = effort == .fast ? 45 : 180
@@ -49,7 +49,7 @@ struct LunaService: LunaWriting {
         case 400:
             let detail = (try? JSONDecoder().decode(ErrorBody.self, from: data))?.error.message.prefix(200)
             throw Failure(text: "Luna refused the request" + (detail.map { ": " + $0 } ?? "."))
-        case 401, 403: throw Failure(text: "OpenRouter rejected the key. Check it in Settings › Luna.")
+        case 401, 403: throw Failure(text: "OpenRouter rejected the key. Check it in Settings › AI › Luna.")
         case 402: throw Failure(text: "The OpenRouter account needs credits.")
         case 429: throw Failure(text: "Luna is rate limited. Try again in a moment.")
         default: throw Failure(text: "Luna returned HTTP \(http.statusCode).")

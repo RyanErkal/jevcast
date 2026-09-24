@@ -41,7 +41,7 @@ extension LauncherModel {
         guard lunaReady, case .text(let text, _) = context else { return [] }
         guard preferences.lunaSendsSelection else {
             let verb = Verb(title: "Open Luna Settings") { [weak self] in self?.openLunaSettings?(); return nil }
-            return [LauncherResult(id: "this:luna:off", title: "Use Luna on Selected Text", detail: "Turn on “Selected text” in Settings › Luna",
+            return [LauncherResult(id: "this:luna:off", title: "Use Luna on Selected Text", detail: "Turn on “Selected text” in Settings › AI › Luna",
                                    symbol: "sparkles", action: .thing(Thing(verbs: [verb], twoLine: false)), score: 0)]
         }
         // Luna sees at most `maxText` characters, so a longer selection is copied, never replaced.
@@ -118,11 +118,11 @@ extension LauncherModel {
     /// The checked request, used by the launcher and the mail window.
     func sendLuna(_ request: LunaRequest) async throws -> LunaReply {
         let refused = Set(request.sent).subtracting(allowedLunaContext)
-        guard preferences.lunaEnabled else { throw LauncherError("Luna is off. Turn it on in Settings › Luna.") }
+        guard preferences.lunaEnabled else { throw LauncherError("Luna is off. Turn it on in Settings › AI › Luna.") }
         guard refused.isEmpty else {
-            throw LauncherError("Luna may not read " + refused.map(\.title).sorted().joined(separator: " or ").lowercased() + ". Turn it on in Settings › Luna.")
+            throw LauncherError("Luna may not read " + refused.map(\.title).sorted().joined(separator: " or ").lowercased() + ". Turn it on in Settings › AI › Luna.")
         }
-        guard let key = await lunaKey() else { throw LauncherError("Luna needs an OpenRouter key. Add one in Settings › Luna.") }
+        guard let key = await lunaKey() else { throw LauncherError("Luna needs an OpenRouter key. Add one in Settings › AI › Luna.") }
         let effort = preferences.lunaEffort
         do {
             let reply = try await luna.complete(request, effort: effort, apiKey: key)
@@ -168,7 +168,7 @@ extension LauncherModel {
         var parts = [task.schedule.summary]
         if !task.contexts.isEmpty { parts.append("reads " + task.contexts.map(\.title).joined(separator: ", ").lowercased()) }
         let refused = lunaTasks.refused(task)
-        if !refused.isEmpty { parts.append("turn on " + refused.map(\.title).joined(separator: " and ").lowercased() + " in Settings › Luna") }
+        if !refused.isEmpty { parts.append("turn on " + refused.map(\.title).joined(separator: " and ").lowercased() + " in Settings › AI › Luna") }
         let verb = Verb(title: "Schedule Task") { [weak self] in
             guard let self else { return nil }
             self.lunaTasks.add(task)

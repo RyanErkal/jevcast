@@ -28,8 +28,11 @@ final class MailWindow: NSWindowController, NSWindowDelegate {
 
     /// Opens the window, optionally on one message.
     func show(select rowID: Int64? = nil, compose address: String? = nil) {
+        isOpen = true
         model.start()
-        if let rowID { model.open(rowID) }
+        // The launcher's Mail view may have left a filter or another mailbox; show them plainly.
+        model.searching = !model.search.isEmpty
+        if let rowID { model.open(rowID) } else { model.place = .inbox }
         // An open draft is kept; a contact's address fills a new one only when none is open.
         if let address, model.draft == nil { model.compose(to: address) }
         guard let window else { return }
@@ -43,7 +46,9 @@ final class MailWindow: NSWindowController, NSWindowDelegate {
         Frontmost.show(window)
     }
 
-    func windowWillClose(_ notification: Notification) { model.stop() }
+    func windowWillClose(_ notification: Notification) { isOpen = false; model.stop() }
+    /// True from showing until closing, also while minimized, since the window still uses the model.
+    private(set) var isOpen = false
 
     private var keyMonitor: Any?
     func windowDidBecomeKey(_ notification: Notification) {

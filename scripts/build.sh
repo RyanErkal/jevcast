@@ -37,7 +37,8 @@ chmod 755 "$APP/Contents/MacOS/$EXECUTABLE"
 # macOS 26 draws the Icon Composer bundle as a Liquid Glass icon. actool also writes an
 # AppIcon.icns fallback for older systems. Without actool (no Xcode), ship the static .icns.
 if [ -d Resources/AppIcon.icon ] && xcrun --find actool >/dev/null 2>&1; then
-  ICON_OUT="$STAGE/icon"
+  # Absolute: actool runs in a shared daemon, which reads a relative path from its own folder.
+  ICON_OUT="$(pwd)/$STAGE/icon"
   mkdir -p "$ICON_OUT"
   xcrun actool "$(pwd)/Resources/AppIcon.icon" --compile "$ICON_OUT" --platform macosx --minimum-deployment-target 14.0 \
     --app-icon AppIcon --target-device mac --output-partial-info-plist "$ICON_OUT/partial.plist" >/dev/null
@@ -65,7 +66,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>NSApplicationSupportsSecureRestorableState</key><true/>
 <key>NSHumanReadableCopyright</key><string>© 2026 Ryan Erkal. MIT License.</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
-<key>NSMicrophoneUsageDescription</key><string>Transcribe your voice while the launcher is open. Audio is not saved.</string>
+<key>NSMicrophoneUsageDescription</key><string>Transcribe your voice while the launcher is open, or while you hold Right Command to dictate. Audio is not saved.</string>
 <key>NSSpeechRecognitionUsageDescription</key><string>Turn spoken launcher commands into text using on-device speech recognition.</string>
 <key>NSCalendarsFullAccessUsageDescription</key><string>List your events, join calls, and add events you type in the launcher.</string>
 <key>NSRemindersFullAccessUsageDescription</key><string>List, complete, and add reminders from the launcher.</string>

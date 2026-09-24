@@ -32,6 +32,9 @@ final class LunaTests: XCTestCase {
         XCTAssertEqual(LunaRequest.summarise(message: "x").sent, [.mailMessage])
         XCTAssertEqual(LunaEffort.max.apiValue, "max")
         XCTAssertEqual(LunaEffort.fast.apiValue, "low")
+        XCTAssertEqual(LunaEffort.off.apiValue, "none")
+        XCTAssertEqual(LunaEffort(rawValue: "none"), .off)
+        XCTAssertEqual(LunaEffort.choices, [.fast, .high, .max], "Reasoning off is not a Settings choice.")
     }
 
     @MainActor private func makeModel(luna: FakeLuna, key: String? = "sk-or-test") -> (LauncherModel, Preferences, () -> Void) {
@@ -125,5 +128,32 @@ final class LunaTests: XCTestCase {
         XCTAssertEqual(reply.text, "Done.")
         XCTAssertEqual(reply.cost, 0.0002)
         do { _ = try await service.complete(.ask("hi"), effort: .fast, apiKey: "ts-key"); XCTFail("TypeSafe keys cannot run Luna") } catch {}
+    }
+
+    func testServiceSendsReasoningOffForDictation() async throws {
+        let url = URL(string: "https://luna-off.test/v1/chat/completions")!
+        let request = LunaRequest.cleanDictation("hello there")
+        MockURLProtocol.setHandler({ sent in
+            let body = try XCTUnwrap(sent.httpBody ?? sent.httpBodyStream.map { stream -> Data in
+                stream.open(); defer { stream.close() }
+                var data = Data(); var buffer = [UInt8](repeating: 0, count: 4096)
+                while stream.hasBytesAvailable { let n = stream.read(&buffer, maxLength: buffer.count); if n <= 0 { break }; data.append(buffer, count: n) }
+                return data
+            })
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(object["model"] as? String, "openai/gpt-6-luna", "Dictation uses Luna itself.")
+            XCTAssertEqual((object["reasoning"] as? [String: Any])?["effort"] as? String, "none")
+            XCTAssertEqual(object["max_tokens"] as? Int, request.maxOutputTokens, "No room is kept for reasoning.")
+            XCTAssertEqual(sent.timeoutInterval, 45)
+            let reply = #"{"choices":[{"message":{"content":"Hello there."}}]}"#
+            return (HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(reply.utf8))
+        }, for: url)
+        defer { MockURLProtocol.removeHandler(for: url) }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let reply = try await LunaService(session: session, endpoint: url).complete(request, effort: .off, apiKey: "sk-or-abc")
+        XCTAssertEqual(reply.text, "Hello there.")
     }
 }

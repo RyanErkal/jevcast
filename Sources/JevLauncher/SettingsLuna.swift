@@ -25,7 +25,7 @@ struct LunaSettings: View {
                 InfoCaption("Writes text. Never runs actions.",
                             detail: "Jev decides what a request means. Luna, GPT-6 Luna through OpenRouter, writes text when a request needs it: “ask …”, rewrites of selected text, and mail summaries and replies. Luna never runs actions.")
                 Picker("Effort", selection: $preferences.lunaEffort) {
-                    ForEach(LunaEffort.allCases, id: \.self) { Text($0.title).tag($0) }
+                    ForEach(LunaEffort.choices, id: \.self) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 Text("Fast answers in seconds. High and Max think longer and cost more.").font(.caption).foregroundStyle(.secondary)
@@ -53,6 +53,9 @@ struct LunaSettings: View {
                 Toggle("Mail messages, for summaries and reply drafts", isOn: $preferences.lunaSendsMail)
                 Toggle("Calendar and reminders, for scheduled tasks", isOn: $preferences.lunaSendsCalendar)
                 Toggle("Unread mail list (senders, subjects, previews), for scheduled tasks", isOn: $preferences.lunaSendsUnreadMail)
+                if DictationEngines.isSupported {
+                    Toggle("Dictation transcripts, to fix punctuation and remove fillers", isOn: $preferences.lunaSendsDictation)
+                }
                 InfoCaption("File paths, clipboard history, and audio are never sent.",
                             detail: "Task results show in notifications, which can appear on the lock screen. Change that in System Settings › Notifications.")
             }

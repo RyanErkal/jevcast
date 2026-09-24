@@ -40,7 +40,7 @@ extension LauncherModel {
         case .tabs: made = TabsSource()
         case .history: made = HistorySource()
         case .mail: made = MailSource(model: self)
-        default: made = nil
+        case .dictation: made = DictationEngines.isSupported ? DictationSource() : nil
         }
         sources[kind] = made
         return made

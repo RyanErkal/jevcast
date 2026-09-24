@@ -88,6 +88,7 @@ extension LauncherModel {
         if preferences.lunaSendsMail { allowed.insert(.mailMessage) }
         if preferences.lunaSendsCalendar { allowed.insert(.calendar) }
         if preferences.lunaSendsUnreadMail { allowed.insert(.unreadMail) }
+        if preferences.lunaSendsDictation { allowed.insert(.dictation) }
         return allowed
     }
 
@@ -123,7 +124,7 @@ extension LauncherModel {
             throw LauncherError("Luna may not read " + refused.map(\.title).sorted().joined(separator: " or ").lowercased() + ". Turn it on in Settings › AI › Luna.")
         }
         guard let key = await lunaKey() else { throw LauncherError("Luna needs an OpenRouter key. Add one in Settings › AI › Luna.") }
-        let effort = preferences.lunaEffort
+        let effort = request.effort ?? preferences.lunaEffort
         do {
             let reply = try await luna.complete(request, effort: effort, apiKey: key)
             lunaLog.record(.init(date: Date(), action: request.action, sent: request.sent, effort: effort,

@@ -47,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     private var welcome: WelcomeWindow?
     private let catalogue = AppCatalogue()
     private lazy var model = LauncherModel(preferences: preferences, catalogue: catalogue, jev: JevService(usage: .shared), usage: .shared)
+    private lazy var dictation = DictationController(preferences: preferences, model: model)
     private let hotkeys = HotkeyCenter()
     private var launcherHotkey: (hotkey: Hotkey, token: UInt32)?
     private var windowHotkeyIDs: [UInt32] = []
@@ -103,7 +104,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
                                 isOpen: { [weak self] in self?.wasVisible ?? false }, toggle: { [weak self] in self?.toggle() },
                                 openSettings: { [weak self] tab in self?.showSettings(tab: tab) })
         // Snapshot runs leave global shortcuts to the running copy of the app.
-        if UISnapshots.directory == nil { configureHotkeys() }
+        if UISnapshots.directory == nil {
+            configureHotkeys()
+            dictation.canStart = { [weak self] in !(self?.wasVisible ?? false) }
+            dictation.start()
+        }
         Task { await JevKeyCache.shared.load() }
         observeAppSwitches()
         catalogue.refresh(extra: preferences.appFolders)
@@ -190,7 +195,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         steps.append(("", 0, { nil }, { [weak self] in
             guard let self else { return }
             rig.close()
-            self.settings = SettingsWindow(preferences: shownPreferences, model: shownModel, catalogue: shownModel.catalogue, status: self.status, updates: self.updates, changed: {}, openMail: {})
+            self.settings = SettingsWindow(preferences: shownPreferences, model: shownModel, catalogue: shownModel.catalogue, status: self.status, updates: self.updates,
+                                           dictation: DictationController(preferences: shownPreferences, model: shownModel), changed: {}, openMail: {})
             self.settings?.window?.alphaValue = 0
             self.settings?.window?.ignoresMouseEvents = true
             self.settings?.window?.orderFrontRegardless()
@@ -426,6 +432,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         hide(restoreFocus: false)
         if settings == nil {
             settings = SettingsWindow(preferences: preferences, model: model, catalogue: catalogue, status: status, updates: updates,
+                                      dictation: dictation,
                                       changed: { [weak self] in self?.configureHotkeys() },
                                       openMail: { [weak self] in self?.showMail() })
         }

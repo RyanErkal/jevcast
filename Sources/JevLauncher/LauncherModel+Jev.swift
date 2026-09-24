@@ -76,6 +76,17 @@ extension LauncherModel {
                 ? layeredChoice(text, candidates: candidates, ids: ids, key: key, revision: current)
                 : jev.choose(query: text, candidates: candidates, apiKey: key).flatMap { ids[$0] }
             guard !Task.isCancelled, visible, self.revision == current else { return }
+            if chosen == Self.clockCandidateID {
+                // Not cached or remembered: the answer depends on the time of day.
+                let row = try await clockRow(for: text, key: key)
+                guard !Task.isCancelled, visible, self.revision == current else { return }
+                aiStatus = row == nil ? "No clear AI match" : "Jev matched"
+                guard let row else { return }
+                usage?.recordMatch()
+                semanticResult = row; promotedID = row.id; jevPick = (row.id, false)
+                rebuild()
+                return
+            }
             // A pick that moves an app Jev chose is not cached: the ID alone would move the active window.
             if jevWindowTarget == nil { replyCache[LearnedIntents.normalize(text)] = (chosen, Date()) }
             aiStatus = chosen == nil ? "No clear AI match" : "Jev matched"
@@ -118,6 +129,7 @@ extension LauncherModel {
         for row in results where row.isCurrent {
             if let described = Self.jevDescription(row) { add(row.id, described.title, described.detail) }
         }
+        if let clock = clockCandidate() { add(clock.id, clock.title, clock.detail) }
         // 2. Things the request's words point at, from every source.
         let pool = jevPool()
         let words = LearnedIntents.normalize(query).split(separator: " ").map(String.init).filter { $0.count >= 3 }

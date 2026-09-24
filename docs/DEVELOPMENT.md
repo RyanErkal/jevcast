@@ -75,5 +75,5 @@ Snapshots render the app's own views. They show layout only, not window material
 
 - Preview: `python3 -m http.server 4388 --directory site`, then open `http://localhost:4388`.
 - Images: the launcher states in `site/images/launcher-*.png` come from `--snapshot-ui <dir> --demo`. Replace them only with demo renders.
-- Deploy: `vercel deploy site --prod`. `site/vercel.json` sets the security headers.
+- Deploy: the Vercel project `jevcast` uses `site` as its root folder, so deploy from a folder that contains only `site/` and the project link: copy `site/` and `site/.vercel` into an empty folder, then run `vercel deploy --prod` there. Deploying from the repository root uploads build folders. `site/vercel.json` sets the security headers.
 - The download link points to the newest GitHub release, so a release needs no website change.

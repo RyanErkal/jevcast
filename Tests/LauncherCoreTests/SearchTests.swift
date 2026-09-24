@@ -183,3 +183,11 @@ final class CalculatorTests: XCTestCase {
 
     private let us = Locale(identifier: "en_US")
 }
+
+final class JoinedNameTests: XCTestCase {
+    func testNamesMatchWithoutSpaces() {
+        XCTAssertEqual(SearchRanking.score(query: "t3code", title: "T3 Code (Nightly)"), 0.88)
+        XCTAssertNotNil(SearchRanking.score(query: "facetime", title: "Face Time"))
+        XCTAssertGreaterThan(SearchRanking.score(query: "t3 code", title: "T3 Code (Nightly)") ?? 0, 0.88)
+    }
+}

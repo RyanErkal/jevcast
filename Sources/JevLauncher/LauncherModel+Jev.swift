@@ -226,7 +226,8 @@ extension LauncherModel {
         pool += menuCommands.prefix(150).map { ($0.id, $0.title, "Menu item in the front app: " + $0.path.replacingOccurrences(of: " › ", with: " > ")) }
         let running = Set(catalogue.runningApplications.compactMap(\.bundleURL).map(\.path))
         let likely = Set(preferences.favourites + preferences.recentIDs)
-        let apps = catalogue.entries.sorted { lhs, rhs in
+        let hidden = Set(preferences.hiddenApps)
+        let apps = catalogue.entries.filter { !hidden.contains($0.id) }.sorted { lhs, rhs in
             let l = (likely.contains(lhs.id) ? 2 : 0) + (running.contains(lhs.path) ? 1 : 0)
             let r = (likely.contains(rhs.id) ? 2 : 0) + (running.contains(rhs.path) ? 1 : 0)
             return l != r ? l > r : lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending

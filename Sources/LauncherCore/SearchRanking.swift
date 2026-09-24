@@ -140,6 +140,12 @@ public enum SearchRanking {
             return 0.90
         }
 
+        // Spaces and brackets ignored: "t3code" finds "T3 Code (Nightly)", "facetime" finds "Face Time".
+        let joinedQuery = query.replacingOccurrences(of: " ", with: "")
+        if joinedQuery.count >= 3, candidate.replacingOccurrences(of: " ", with: "").hasPrefix(joinedQuery) {
+            return 0.88
+        }
+
         let queryTokens = query.split(separator: " ").map(String.init)
         let candidateTokens = candidate.split(separator: " ").map(String.init)
         let querySet = Set(queryTokens)

@@ -25,6 +25,8 @@ final class Preferences: ObservableObject {
     @Published var appFolders: [String] { didSet { defaults.set(appFolders, forKey: "appFolders") } }
     @Published var fileFolders: [String] { didSet { defaults.set(fileFolders, forKey: "fileFolders") } }
     @Published var favourites: [String] { didSet { defaults.set(favourites, forKey: "favourites") } }
+    /// Apps left out of search and Jev, such as an old copy of an app you no longer use.
+    @Published var hiddenApps: [String] { didSet { defaults.set(hiddenApps, forKey: "hiddenApps") } }
     @Published var aliases: [String: String] { didSet { defaults.set(aliases, forKey: "aliases") } }
     @Published var quicklinks: [Quicklink] { didSet { defaults.set(try? JSONEncoder().encode(quicklinks), forKey: "quicklinks") } }
     /// Commands the user writes. Only their names go to Jev.
@@ -74,6 +76,7 @@ final class Preferences: ObservableObject {
         appFolders = d.stringArray(forKey: "appFolders") ?? []
         fileFolders = d.stringArray(forKey: "fileFolders") ?? [NSHomeDirectory()]
         favourites = d.stringArray(forKey: "favourites") ?? []
+        hiddenApps = d.stringArray(forKey: "hiddenApps") ?? []
         aliases = d.dictionary(forKey: "aliases") as? [String: String] ?? [:]
         quicklinks = d.data(forKey: "quicklinks").flatMap { try? JSONDecoder().decode([Quicklink].self, from: $0) } ?? Quicklink.defaults
         customCommands = Self.load(d, "customCommands") ?? []

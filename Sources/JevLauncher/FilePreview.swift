@@ -115,6 +115,10 @@ final class ResultActions {
             add(model.preferences.favourites.contains(result.id) ? "Remove Favourite" : "Add Favourite") {
                 model.preferences.toggleFavourite(result.id); model.rebuild()
             }
+            add("Hide from Search") {
+                model.preferences.hiddenApps.append(result.id)
+                model.message = nil; model.rebuild()
+            }
         }
         menu.popUp(positioning: nil, at: point, in: view)
         activeMenu = nil; callbacks = []

@@ -49,6 +49,16 @@ struct SearchSettings: View {
                 }
             } header: { Text("App aliases") }
             Section {
+                if preferences.hiddenApps.isEmpty { Text("No hidden apps. ⌘K on an app offers Hide from Search.").foregroundStyle(.secondary) }
+                ForEach(preferences.hiddenApps, id: \.self) { id in
+                    HStack {
+                        Text(catalogue.entries.first { $0.id == id }?.name ?? (id.split(separator: "/").last.map(String.init) ?? id))
+                        Spacer()
+                        Button("Show Again") { preferences.hiddenApps.removeAll { $0 == id } }.controlSize(.small)
+                    }
+                }
+            } header: { Text("Hidden apps") }
+            Section {
                 if preferences.quicklinks.isEmpty { Text("No search keywords").foregroundStyle(.secondary) }
                 ForEach(preferences.quicklinks) { link in
                     HStack(spacing: 8) {

@@ -396,7 +396,8 @@ final class LauncherModel: ObservableObject {
         }
         let aliasesByApp = self.aliasesByApp
         var rows: [LauncherResult] = []
-        for app in catalogue.entries where !isFileSearch {
+        let hidden = Set(preferences.hiddenApps)
+        for app in catalogue.entries where !isFileSearch && !hidden.contains(app.id) {
             let aliases = aliasesByApp[app.id] ?? []
             guard let score = SearchRanking.score(query: q, title: app.name, aliases: aliases) else { continue }
             let favourite = preferences.favourites.contains(app.id) ? 4.0 : 0

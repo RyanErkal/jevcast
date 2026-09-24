@@ -16,7 +16,7 @@ final class TimeZoneQueryTests: XCTestCase {
         XCTAssertEqual(title("3pm california time in ireland time"), "11:00 PM IST")
         XCTAssertEqual(title("3pm uk time in PST"), "7:00 AM PDT")
         let detail = TimeZoneQuery.evaluate("6pm atlanta time in uk time", now: september, local: london)?.detail
-        XCTAssertEqual(detail, "6:00 PM EDT New York → UK · 5h ahead")
+        XCTAssertEqual(detail, "6:00 PM EDT Atlanta → UK · 5h ahead")
     }
 
     func testDaylightSavingGaps() {
@@ -25,14 +25,47 @@ final class TimeZoneQueryTests: XCTestCase {
     }
 
     func testForms() {
-        XCTAssertEqual(title("18:00 new york to tokyo"), "07:00 JST (next day)")
+        XCTAssertEqual(title("18:00 new york to tokyo"), "07:00 JST")
         XCTAssertEqual(title("9am in sydney"), "6:00 PM AEST")
-        XCTAssertEqual(title("what's 6:30 pm est in india?"), "4:00 AM IST (next day)")
+        XCTAssertEqual(title("what's 6:30 pm est in india?"), "4:00 AM IST")
         XCTAssertEqual(title("noon pst in uk"), "8:00 PM BST")
-        XCTAssertEqual(title("1am tokyo to la"), "9:00 AM PDT (previous day)")
+        XCTAssertEqual(title("1am tokyo to la"), "9:00 AM PDT")
         XCTAssertEqual(title("now in tokyo"), "9:00 PM JST")
         XCTAssertEqual(title("what time is it in new york"), "8:00 AM EDT")
         XCTAssertEqual(title("atlanta 6pm in uk"), "11:00 PM BST")
+    }
+
+    func testReviewFixes() {
+        XCTAssertEqual(title("3pm gmt in new york"), "11:00 AM EDT", "GMT is a fixed zone, not UK local time.")
+        XCTAssertEqual(title("3pm uk in utc"), "2:00 PM UTC")
+        let ist = TimeZoneQuery.evaluate("noon ist in dublin", now: september, local: london)
+        XCTAssertEqual(ist?.title, "7:30 AM IST")
+        XCTAssertTrue(ist?.detail.contains("IST read as India Standard Time") ?? false)
+        XCTAssertTrue(TimeZoneQuery.evaluate("3pm pst in uk", now: september, local: london)?.detail.contains("PST read as Pacific Time (PDT now)") ?? false)
+        XCTAssertTrue(TimeZoneQuery.evaluate("18:00 new york to tokyo", now: september, local: london)?.detail.contains("next day") ?? false)
+        for text in ["what time is it now in tokyo", "time now in tokyo", "what's the time now in tokyo", "whats the current time in tokyo", "what\u{2019}s the time in tokyo"] {
+            XCTAssertEqual(title(text), "9:00 PM JST", text)
+        }
+        XCTAssertEqual(title("6.30pm uk in pst"), "10:30 AM PDT")
+        XCTAssertEqual(title("3pm pst in my time"), "11:00 PM BST")
+        XCTAssertEqual(title("3pm pst for me"), "11:00 PM BST")
+        XCTAssertEqual(title("6pm from london to new york"), "1:00 PM EDT")
+        XCTAssertEqual(title("time in new york city"), "8:00 AM EDT")
+        XCTAssertEqual(title("3pm in london in tokyo"), "11:00 PM JST")
+        XCTAssertEqual(title("1pm in kathmandu"), "5:45 PM GMT+5:45")
+        for text in ["time to christmas", "time to easter", "now to wake", "time to center", "tomorrow 9am uk in pst", "in 2 hours what time will it be in tokyo"] {
+            XCTAssertNil(title(text), text)
+        }
+        XCTAssertNil(TimeZoneQuery.clock(in: "screen time", explicitOnly: true))
+    }
+
+    func testClockChangeDays() {
+        let skipped = TimeZoneQuery.evaluate("1:30am london in new york", now: ISO8601DateFormatter().date(from: "2026-03-29T12:00:00Z")!, local: london)
+        XCTAssertTrue(skipped?.detail.contains("time moved forward") ?? false)
+        let repeated = TimeZoneQuery.evaluate("1:30am london in new york", now: ISO8601DateFormatter().date(from: "2026-10-25T12:00:00Z")!, local: london)
+        XCTAssertTrue(repeated?.detail.contains("happens twice") ?? false)
+        // Sydney moves forward on 4 October 2026.
+        XCTAssertEqual(title("9am sydney in london", at: ISO8601DateFormatter().date(from: "2026-10-05T12:00:00Z")!), "11:00 PM BST")
     }
 
     func testNotesForBroadPlaces() {
@@ -56,10 +89,11 @@ final class TimeZoneQueryTests: XCTestCase {
     }
 
     func testChoicesResolve() {
-        for choice in TimeZonePlaces.choices {
+        for choice in TimeZonePlaces.choices(for: "6pm in kathmandu") {
             XCTAssertNotNil(TimeZonePlaces.place(forChoice: choice.id)?.timeZone, choice.id)
         }
         XCTAssertNil(TimeZonePlaces.place(forChoice: "zone:Mars/Olympus|Mars"))
+        XCTAssertEqual(TimeZonePlaces.choices(for: "6pm in kathmandu").first?.id, "zone:Asia/Kathmandu|Kathmandu")
         XCTAssertEqual(TimeZonePlaces.label(TimeZone(identifier: "Asia/Kolkata")!, at: september), "IST")
         XCTAssertEqual(TimeZonePlaces.label(TimeZone(identifier: "Asia/Kathmandu")!, at: september), "GMT+5:45")
     }

@@ -4,7 +4,7 @@
 
 The package has two targets.
 
-- `Sources/LauncherCore`: pure logic with no AppKit, so tests are fast and exact. Calculator and unit conversion, file-query parsing, search ranking, frecency, window geometry, the built-in command list (`SystemCommands.swift`), port-query and `lsof` parsing (`Ports.swift`), Jev usage totals, learned requests, timer parsing, emoji, and query text helpers. Tests are in `Tests/LauncherCoreTests`.
+- `Sources/LauncherCore`: pure logic with no AppKit, so tests are fast and exact. Calculator and unit conversion, time zone conversion (`TimeZoneQuery.swift`, with the bundled place table in `TimeZonePlaces.swift`), file-query parsing, search ranking, frecency, window geometry, the built-in command list (`SystemCommands.swift`), port-query and `lsof` parsing (`Ports.swift`), Jev usage totals, learned requests, timer parsing, emoji, and query text helpers. Tests are in `Tests/LauncherCoreTests`.
 - `Sources/JevLauncher`: the app.
   - `App.swift`: app delegate, global shortcuts, open and close, snapshot runs.
   - `LauncherModel.swift`: builds, ranks, and runs results.
@@ -16,6 +16,7 @@ The package has two targets.
   - `SpeechService.swift`: on-device speech recognition.
   - `SpeakerGuard.swift`: mutes the built-in speakers while the microphone listens.
   - `LauncherModel+Jev.swift`: when to ask Jev, memory, the reply cache, candidate ranking, routes, and undo.
+  - `LauncherModel+Clock.swift`: the time zone answer row, and the Jev path for loose wording. Jev picks only the two places from a fixed list; code reads the time and does the math.
   - `LauncherModel+Extras.swift`: workflows, Shortcuts, snippets, timers, menu items, emoji, calculator history, and open-then-arrange.
   - `JevUsageLog.swift`, `SettingsUsage.swift`: token and cost counts for Settings › Usage.
   - `MenuScanner.swift`, `Notifier.swift`, `UserItems.swift`: front-app menus, local notifications and timers, and the user's commands, workflows, and snippets.

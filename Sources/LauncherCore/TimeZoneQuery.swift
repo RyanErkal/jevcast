@@ -17,23 +17,36 @@ public enum TimeZoneQuery {
     public struct Answer: Equatable, Sendable {
         /// The converted time, which Return copies: "11:00 PM IST".
         public let title: String
-        /// Both sides and the gap: "6:00 PM EDT Atlanta → Ireland · 5h ahead".
+        /// Both sides, the day, and the gap: "6:00 PM EDT Atlanta → Ireland · 5h ahead".
         public let detail: String
     }
 
     private static let connectors = [" in ", " to ", " into ", " for ", " as ", " -> ", " → "]
+    /// Targets that mean the Mac's own time zone.
+    private static let localNames: Set<String> = ["me", "here", "local", "local time", "my time", "mine", "my timezone", "my time zone", "our time"]
+    /// Words that say a different day or a later moment. The answer would need a date, so there is none.
+    private static let relativeWords: Set<String> = ["tomorrow", "yesterday", "tonight", "later", "ago", "hours", "hour", "minutes", "mins", "hrs",
+                                                     "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "next", "last"]
 
     /// The local answer, or nil when the text is not a clear time conversion.
     public static func evaluate(_ text: String, now: Date = Date(), local: TimeZone = .current) -> Answer? {
         let lower = normalized(text)
+        guard !lower.split(separator: " ").contains(where: { relativeWords.contains(String($0)) }) else { return nil }
         // Every split is tried, last first, so "3pm in london in tokyo" and "time in tokyo" both work.
         var searchEnd = lower.endIndex
         while let range = lower.range(of: " ", options: .backwards, range: lower.startIndex..<searchEnd) {
             searchEnd = range.lowerBound
-            for connector in connectors {
-                guard lower[range.lowerBound...].hasPrefix(connector) else { continue }
-                let left = String(lower[..<range.lowerBound]), right = String(lower[lower.index(range.lowerBound, offsetBy: connector.count)...])
-                guard let target = TimeZonePlaces.place(right), let (clock, sourceText) = leadingClock(left) else { continue }
+            for connector in connectors where lower[range.lowerBound...].hasPrefix(connector) {
+                let left = String(lower[..<range.lowerBound])
+                let right = String(lower[lower.index(range.lowerBound, offsetBy: connector.count)...])
+                guard let (clock, sourceText) = leadingClock(left) else { continue }
+                // "time to christmas" is not a conversion: the current time needs "in".
+                if clock.isNow && connector != " in " { continue }
+                let target: TimeZonePlace?
+                if localNames.contains(right) { target = nil } else {
+                    guard let named = TimeZonePlaces.place(right) else { continue }
+                    target = named
+                }
                 let source: TimeZonePlace?
                 if sourceText.isEmpty { source = nil } else {
                     guard let named = TimeZonePlaces.place(sourceText) else { continue }
@@ -45,13 +58,15 @@ public enum TimeZoneQuery {
         return nil
     }
 
-    /// The first clock time anywhere in the text, for Jev to work with. Nil when there is none.
-    public static func clock(in text: String) -> Clock? {
+    /// A clock time anywhere in the text, for Jev to work with. `now` and `time` count only when
+    /// `explicitOnly` is false. Nil when there is none, or when the text names another day.
+    public static func clock(in text: String, explicitOnly: Bool = false) -> Clock? {
         let words = normalized(text).split(separator: " ").map(String.init)
+        guard !words.contains(where: relativeWords.contains) else { return nil }
         for start in words.indices {
             for length in [2, 1] where start + length <= words.count {
                 let piece = words[start..<start + length].joined(separator: " ")
-                if let clock = parseClock(piece) { return clock }
+                if let clock = parseClock(piece), !(explicitOnly && clock.isNow) { return clock }
             }
         }
         return nil
@@ -64,7 +79,7 @@ public enum TimeZoneQuery {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = sourceZone
         let moment: Date
-        var shifted = false
+        var notes: [String] = []
         if clock.isNow {
             moment = now
         } else {
@@ -73,19 +88,26 @@ public enum TimeZoneQuery {
                                            matchingPolicy: .nextTime, repeatedTimePolicy: .first, direction: .forward) else { return nil }
             moment = date
             let parts = calendar.dateComponents([.hour, .minute], from: date)
-            shifted = parts.hour != clock.hour || parts.minute != clock.minute
+            if parts.hour != clock.hour || parts.minute != clock.minute {
+                notes.append("clocks change today: time moved forward")
+            } else if calendar.dateComponents([.hour, .minute], from: date.addingTimeInterval(3600)) == parts {
+                notes.append("clocks change today: this time happens twice, the first is used")
+            }
         }
-        let targetTime = format(moment, zone: targetZone, twentyFourHour: clock.twentyFourHour)
-        let sourceTime = format(moment, zone: sourceZone, twentyFourHour: clock.twentyFourHour)
-        var title = targetTime + " " + TimeZonePlaces.label(targetZone, at: moment)
+        let sourceID = source?.zone ?? local.identifier, targetID = target?.zone ?? local.identifier
+        let title = format(moment, zone: targetZone, twentyFourHour: clock.twentyFourHour) + " " + TimeZonePlaces.label(targetZone, id: targetID, at: moment)
+        var detail = format(moment, zone: sourceZone, twentyFourHour: clock.twentyFourHour) + " " + TimeZonePlaces.label(sourceZone, id: sourceID, at: moment)
+        detail += " " + (source?.name ?? "Here") + " → " + (target?.name ?? "here")
         let dayShift = dayDifference(moment, from: sourceZone, to: targetZone)
-        if dayShift > 0 { title += " (next day)" } else if dayShift < 0 { title += " (previous day)" }
-
-        let sourceName = source?.name ?? "Here"
-        let targetName = target?.name ?? "here"
-        var detail = sourceTime + " " + TimeZonePlaces.label(sourceZone, at: moment) + " " + sourceName + " → " + targetName
+        if dayShift > 0 { detail += " · next day" } else if dayShift < 0 { detail += " · previous day" }
         detail += " · " + gap(targetZone.secondsFromGMT(for: moment) - sourceZone.secondsFromGMT(for: moment))
-        let notes = [source?.note, target?.note, shifted ? "clock change: time moved forward" : nil].compactMap { $0 }
+        notes = [source?.note, target?.note].compactMap { $0 } + notes
+        for place in [source, target].compactMap({ $0 }) {
+            // "pst" in September: the zone is on summer time, so say which one was used.
+            if let fixed = place.abbreviation, let zone = place.timeZone, zone.secondsFromGMT(for: moment) != fixed.offset {
+                notes.append(fixed.text + " read as " + place.name + " (" + TimeZonePlaces.label(zone, id: place.zone, at: moment) + " now)")
+            }
+        }
         if !notes.isEmpty { detail += " · " + notes.joined(separator: ", ") }
         return Answer(title: title, detail: detail)
     }
@@ -94,35 +116,47 @@ public enum TimeZoneQuery {
 
     private static func normalized(_ text: String) -> String {
         var lower = text.lowercased()
+            .replacingOccurrences(of: "\u{2019}", with: "'")
             .replacingOccurrences(of: "?", with: " ")
             .replacingOccurrences(of: "a.m.", with: "am")
             .replacingOccurrences(of: "p.m.", with: "pm")
+        lower = lower.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         if lower.hasPrefix("what time is it ") { lower = "now " + lower.dropFirst(16) }
         for lead in ["what time is ", "what's ", "whats ", "what is ", "convert "] where lower.hasPrefix(lead) {
             lower.removeFirst(lead.count)
         }
-        return lower.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        return lower
     }
+
+    /// Words around a place that carry no meaning: "6pm from london", "3pm in london in tokyo".
+    private static let fillers: Set<String> = ["now", "right", "current", "from", "in", "at", "the"]
 
     /// "6pm atlanta time" → (6 PM, "atlanta time"). Also "atlanta 6pm". The rest may be empty.
     private static func leadingClock(_ text: String) -> (Clock, String)? {
         let words = text.split(separator: " ").map(String.init)
         guard !words.isEmpty else { return nil }
-        for length in [2, 1] where length <= words.count {
-            if let clock = parseClock(words.prefix(length).joined(separator: " ")) {
-                return (clock, words.dropFirst(length).joined(separator: " "))
-            }
-            if let clock = parseClock(words.suffix(length).joined(separator: " ")) {
-                return (clock, words.dropLast(length).joined(separator: " "))
-            }
+        func rest(_ slice: ArraySlice<String>) -> String {
+            var slice = slice
+            while let first = slice.first, fillers.contains(first) { slice.removeFirst() }
+            while let last = slice.last, fillers.contains(last) { slice.removeLast() }
+            return slice.joined(separator: " ")
+        }
+        for length in [4, 3, 2, 1] where length <= words.count {
+            if let clock = parseClock(words.prefix(length).joined(separator: " ")) { return (clock, rest(words.dropFirst(length))) }
+            if let clock = parseClock(words.suffix(length).joined(separator: " ")) { return (clock, rest(words.dropLast(length))) }
         }
         return nil
     }
 
-    /// "6pm", "6 pm", "6:30pm", "18:00", "noon", "midnight", "now". A bare "6" is not a time.
+    private static let nowPhrases: Set<String> = [
+        "now", "time", "the time", "current time", "the current time", "time now", "the time now",
+        "right now", "time right now", "the time right now", "now now"
+    ]
+
+    /// "6pm", "6 pm", "6:30pm", "6.30pm", "18:00", "noon", "midnight", "now". A bare "6" is not a time.
     static func parseClock(_ text: String) -> Clock? {
+        if nowPhrases.contains(text) { return .now }
         switch text {
-        case "now", "time", "the time", "current time": return .now
         case "noon", "midday": return Clock(hour: 12, minute: 0, isNow: false, twentyFourHour: false)
         case "midnight": return Clock(hour: 0, minute: 0, isNow: false, twentyFourHour: false)
         default: break
@@ -132,6 +166,8 @@ public enum TimeZoneQuery {
         for suffix in ["am", "pm"] where body.hasSuffix(suffix) {
             meridiem = suffix; body.removeLast(2)
         }
+        // "6.30pm" is common in the UK and Ireland. Without am or pm, "6.30" stays a number.
+        if meridiem != nil { body = body.replacingOccurrences(of: ".", with: ":") }
         let parts = body.split(separator: ":", omittingEmptySubsequences: false)
         guard (1...2).contains(parts.count), parts.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isASCII) && $0.allSatisfy(\.isNumber) }),
               parts[0].count <= 2, let hour = Int(parts[0]) else { return nil }

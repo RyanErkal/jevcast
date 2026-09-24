@@ -129,6 +129,7 @@ extension LauncherModel {
         for row in results where row.isCurrent {
             if let described = Self.jevDescription(row) { add(row.id, described.title, described.detail) }
         }
+        if let clock = clockCandidate() { add(clock.id, clock.title, clock.detail) }
         // 2. Things the request's words point at, from every source.
         let pool = jevPool()
         let words = LearnedIntents.normalize(query).split(separator: " ").map(String.init).filter { $0.count >= 3 }
@@ -143,7 +144,6 @@ extension LauncherModel {
         // 3. Every action, so loose phrasing still has a target.
         for action in WindowAction.allCases { add("window:" + action.rawValue, action.title, "Arrange the active window") }
         for command in SystemCommands.all { add("command:" + command.id, command.title, command.detail) }
-        if let clock = clockCandidate() { add(clock.id, clock.title, clock.detail) }
         add(Self.portsCandidateID, "Stop the process on a port", "Find the app or server listening on a local TCP port and stop it")
         for route in Self.routes { add(route.id, route.title, route.detail) }
         if lunaReady { add(Self.askID, "Ask Luna", "Answer a question, explain something, or write new text with the Luna writing model") }

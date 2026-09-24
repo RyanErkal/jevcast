@@ -2,6 +2,19 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+
+- **Clean up.** "cleanup" or "cool down" lists background work to stop: booted simulators, dev servers idle for an hour or more, dev processes left over from closed terminals or agents, and Docker Desktop with no containers. Heavy processes are listed but never checked. Return on the Clean Up row stops the checked items and reports the memory freed. T3 Code, Chrome, Codex, Finder, Mail, your terminals, the app in front, everything those apps started, launchd jobs, and system processes are never offered. Manual only. ⌘K offers Stop Now and Always Ignore.
+- **Mail for quick checks.** One inbox list with no previews, full keyboard control, delete, images and styling, read after a second on screen, and Apple Mail running only while the inbox is open.
+- **Hide from Search** on apps, and names that match without spaces, such as "t3code".
+
+### Fixed
+
+- Mail actions failed with an AppleScript syntax error.
+- Apps, links, and files Jevcast opens come to the front.
+
 ## [1.4.0] - 2026-09-24
 
 ### Added

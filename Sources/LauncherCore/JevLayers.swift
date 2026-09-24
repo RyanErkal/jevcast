@@ -64,6 +64,7 @@ public enum JevKind: String, CaseIterable, Sendable {
         if id == "route:timers" || id == "route:scheduled" { return .schedule }
         if id == "route:calendar" || id == "route:reminders" { return .organizer }
         if id == "route:mail" { return .mail }
+        if id == "route:cleanup" { return .command }
         if id == "route:tabs" { return .browser }
         if id == "route:contacts" { return .people }
         if id == "luna:ask" || id.hasPrefix("this:luna:") { return .luna }

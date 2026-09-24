@@ -58,6 +58,17 @@ struct SearchSettings: View {
                     }
                 }
             } header: { Text("Hidden apps") }
+            if !preferences.cleanupIgnored.isEmpty {
+                Section {
+                    ForEach(preferences.cleanupIgnored, id: \.self) { key in
+                        HStack {
+                            Text(key)
+                            Spacer()
+                            Button("Offer Again") { preferences.cleanupIgnored.removeAll { $0 == key } }.controlSize(.small)
+                        }
+                    }
+                } header: { Text("Ignored by Clean Up") }
+            }
             Section {
                 if preferences.quicklinks.isEmpty { Text("No search keywords").foregroundStyle(.secondary) }
                 ForEach(preferences.quicklinks) { link in

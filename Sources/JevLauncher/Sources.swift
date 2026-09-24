@@ -32,6 +32,7 @@ extension LauncherModel {
         switch kind {
         case .scheduled: made = ScheduledSource(timers: timers, catalogue: catalogue, tasks: lunaTasks, openRun: { [weak self] in self?.openTaskRun?($0) })
         case .help: made = HelpSource()
+        case .cleanup: made = CleanupSource(preferences: preferences)
         case .taskRuns: made = TaskRunsSource(tasks: lunaTasks, openRun: { [weak self] in self?.openTaskRun?($0) })
         case .calendar: made = CalendarSource()
         case .reminders: made = RemindersSource()

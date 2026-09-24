@@ -18,6 +18,7 @@ final class HelpSource: ThingSource {
         ("Browser history", "history <words>", "history ", "clock"),
         ("This page, file, or selection", "this · copy link", "this", "hand.point.up.left"),
         ("Ask Luna", "ask <question>", "ask ", "sparkles"),
+        ("Clean up background work", "cleanup · cool down", "cleanup", "leaf"),
         ("Ports and servers", "ports · port 3000", "ports", "server.rack"),
         ("Clipboard history", "clip", "clip", "doc.on.clipboard"),
         ("Timers", "5m tea · timers", "timers", "timer"),

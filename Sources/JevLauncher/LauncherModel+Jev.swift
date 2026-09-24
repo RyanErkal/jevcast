@@ -20,6 +20,7 @@ extension LauncherModel {
         ("route:scheduled", "Scheduled tasks", "Show what runs on a schedule or in the background: launch agents, daemons, cron jobs, login items, and timers", { _ in "scheduled tasks" }),
         ("route:calendar", "Calendar events", "Show upcoming events and meetings, and join video calls", { _ in "calendar" }),
         ("route:reminders", "Reminders", "Show open reminders and to-dos, and complete them", { _ in "reminders" }),
+        ("route:cleanup", "Clean up background work", "Stop idle dev servers, leftover processes, and simulators to free memory and cool the Mac", { _ in "cleanup" }),
         ("route:mail", "Mail", "Open the mail inbox, read unread email, or search email", { _ in "mail" }),
         ("route:tabs", "Open browser tabs", "Find, switch to, or close tabs open in the web browser", { _ in "tabs" }),
         ("route:contacts", "Find a contact", "Find a person to email, message, or call", { q in "contact " + QueryText.remainder(of: q, removing: ["contact", "email", "call", "message", "text", "phone"]) })

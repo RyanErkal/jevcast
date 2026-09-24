@@ -27,6 +27,8 @@ final class Preferences: ObservableObject {
     @Published var favourites: [String] { didSet { defaults.set(favourites, forKey: "favourites") } }
     /// Apps left out of search and Jev, such as an old copy of an app you no longer use.
     @Published var hiddenApps: [String] { didSet { defaults.set(hiddenApps, forKey: "hiddenApps") } }
+    /// Cleanup items you chose never to be offered again, by key, such as "server:node:3000".
+    @Published var cleanupIgnored: [String] { didSet { defaults.set(cleanupIgnored, forKey: "cleanupIgnored") } }
     @Published var aliases: [String: String] { didSet { defaults.set(aliases, forKey: "aliases") } }
     @Published var quicklinks: [Quicklink] { didSet { defaults.set(try? JSONEncoder().encode(quicklinks), forKey: "quicklinks") } }
     /// Commands the user writes. Only their names go to Jev.
@@ -77,6 +79,7 @@ final class Preferences: ObservableObject {
         fileFolders = d.stringArray(forKey: "fileFolders") ?? [NSHomeDirectory()]
         favourites = d.stringArray(forKey: "favourites") ?? []
         hiddenApps = d.stringArray(forKey: "hiddenApps") ?? []
+        cleanupIgnored = d.stringArray(forKey: "cleanupIgnored") ?? []
         aliases = d.dictionary(forKey: "aliases") as? [String: String] ?? [:]
         quicklinks = d.data(forKey: "quicklinks").flatMap { try? JSONDecoder().decode([Quicklink].self, from: $0) } ?? Quicklink.defaults
         customCommands = Self.load(d, "customCommands") ?? []

@@ -116,3 +116,28 @@ extension Diagnostics {
         RunLoop.main.run()
     }
 }
+
+extension Diagnostics {
+    /// `--cleanup`: prints the cleanup checklist. `--cleanup --apply` then stops the checked items,
+    /// exactly as Return on the Clean Up row does.
+    static func cleanup(apply: Bool) {
+        Task { @MainActor in
+            let items = await Cleanup.scan(ignored: Set(Preferences().cleanupIgnored))
+            if items.isEmpty { print("Nothing to clean up."); exit(0) }
+            for item in items {
+                print("\(item.finding.checked ? "[x]" : "[ ]") \(item.finding.group.title): \(item.finding.title) · \(Cleanup.size(item.finding.memoryMB)) · \(item.finding.detail)")
+            }
+            let checked = items.filter(\.finding.checked)
+            print("Checked: \(checked.count), using up to \(Cleanup.size(checked.map(\.finding.memoryMB).reduce(0, +)))")
+            if apply {
+                let before = Cleanup.availableMB()
+                for item in checked { print("→ " + (await Cleanup.stop(item))) }
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                print("Memory now free: \(Cleanup.size(Cleanup.availableMB() - before)) more than before")
+            }
+            fflush(stdout)
+            exit(0)
+        }
+        RunLoop.main.run()
+    }
+}

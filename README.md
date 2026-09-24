@@ -67,6 +67,7 @@ Press **Option–Space** and type. If another app already uses that shortcut, ch
 | `ask what is a p-value`                                    | Luna answers in the panel. Needs Luna on.                                |
 | `every weekday at 8am brief me on my meetings`             | Schedules a Luna task. Its result arrives as a notification.             |
 | `task results`                                             | Lists what scheduled tasks wrote.                                        |
+| `cleanup`, `cool down`                                     | Lists idle servers, leftover processes, and simulators to stop.          |
 
 **Move a window** by typing a layout:
 

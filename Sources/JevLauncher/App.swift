@@ -192,6 +192,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         ]
         // Views in the panel. Mail, Calendar, and Clean Up render empty: snapshots never read them.
         steps += ViewID.allCases.map { id in ("view-" + id.rawValue, 1.0, launcher, { model.closeAllViews(); model.showView(id) }) }
+        steps.append(("view-calendar-week", 1.0, launcher, {
+            model.closeAllViews(); model.showView(.calendar); (model.page as? CalendarPage)?.setMode(.week)
+        }))
         steps.append(("", 0, { nil }, { [weak self] in
             guard let self else { return }
             rig.close()

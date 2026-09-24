@@ -6,12 +6,26 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
-- **Clean up.** "cleanup" or "cool down" lists background work to stop: booted simulators, dev servers idle for an hour or more, dev processes left over from closed terminals or agents, and Docker Desktop with no containers. Heavy processes are listed but never checked. Return on the Clean Up row stops the checked items and reports the memory freed. T3 Code, Chrome, Codex, Finder, Mail, your terminals, the app in front, everything those apps started, launchd jobs, and system processes are never offered. Manual only. ⌘K offers Stop Now and Always Ignore.
-- **Mail for quick checks.** One inbox list with no previews, full keyboard control, delete, images and styling, read after a second on screen, and Apple Mail running only while the inbox is open.
+- **Views in the launcher.** Mail, Calendar, Tasks, Clipboard, and Clean Up open inside the panel instead of a separate window. The search field becomes the view's filter, Escape goes back one level, and ⌘O opens Mail in its own window.
+- **Mail with a preview.** The inbox list on the left and the message on the right, half and half. ↑ and ↓ move through messages, a previewed message is marked read after a second, ⌫ deletes, and Return opens it in Apple Mail. Unread messages show a dot and a bold sender. The inbox refreshes by itself while it is open.
+- **Calendar views.** Month (the default), Week, and List. ← and → switch views, ↑ and ↓ move to the previous or next month or week. Events show in their calendar's colour, all-day events as a bar, and today in red.
+- **Functions with `/`.** Type `/` to list everything Jevcast can do, in groups, with one line on what each does. `/cal` filters the list, Tab completes, and Return runs it. `/` followed by a real path, such as `/Applications`, still opens the folder.
+- **Your library with `$`.** `$` lists only your own commands, workflows, and snippets. `$120` is still an ordinary search.
+- **Time zones.** "6pm atlanta time in uk time", "3pm uk in pst", or "now in tokyo" converts a time between places. Return copies the answer, and Jev understands looser wording.
+- **Dictation.** Hold Right Command, speak, and let go: the text goes into the app in front. Speech is transcribed on this Mac, audio is never saved or sent, and an optional Luna clean-up has its own switch. "dictation history" lists what you said. Off by default; turn it on in Settings › Dictation.
+- **Clean up.** "cleanup" or "cool down" lists background work to stop: booted simulators, dev servers idle for an hour or more, dev processes left over from closed terminals or agents, and Docker Desktop with no containers. Heavy processes are listed but never checked. T3 Code, Chrome, Codex, Finder, Mail, your terminals, the app in front, everything those apps started, launchd jobs, and system processes are never offered. Manual only. ⌘K offers Stop Now and Always Ignore.
+- **Library export and import.** Settings › Library saves your commands, workflows, snippets, search keywords, and app aliases as one file. Import shows every command's full text first and adds only what is new.
 - **Hide from Search** on apps, and names that match without spaces, such as "t3code".
+
+### Changed
+
+- **A simpler menu bar menu.** Open, then Mail, Clean Up, and Luna Task Results. A warning row shows only when a feature you turned on needs a permission or a key.
+- **Settings, reorganised.** Tabs are General, Search, Library, Windows, Voice, Dictation, AI, and Mail. General lists every permission in one place and every feature that uses the network. AI holds Jev, Luna, and Usage. Long explanations moved behind ⓘ.
+- The "Jev picked … Press ⌘Z to undo" strip is gone. A Jev pick shows "Jev · ⌘Z" on its row instead.
 
 ### Fixed
 
+- Scrolling with a trackpad or mouse wheel did nothing inside the launcher.
 - Mail actions failed with an AppleScript syntax error.
 - Apps, links, and files Jevcast opens come to the front.
 

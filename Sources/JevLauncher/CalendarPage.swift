@@ -8,7 +8,7 @@ import SwiftUI
 @MainActor
 final class CalendarPage: ObservableObject, LauncherPage {
     enum Mode: String, CaseIterable { case month = "Month", week = "Week", list = "List" }
-    struct Event: Identifiable, Equatable {
+    struct Event: Identifiable, Equatable, Sendable {
         let id: String
         let title: String
         let start: Date
@@ -24,11 +24,18 @@ final class CalendarPage: ObservableObject, LauncherPage {
     @Published private(set) var mode: Mode = .month
     /// Any day inside the month or week on screen.
     @Published private(set) var anchor = Date()
-    @Published private(set) var events: [Event] = []
+    /// The days on screen and each day's events, worked out once per change, not per redraw.
+    @Published private(set) var days: [Date] = []
+    @Published private(set) var byDay: [Date: [Event]] = [:]
     @Published private(set) var problem: SourceProblem?
-    @Published private(set) var filterText = ""
+    private var events: [Event] = []
+    private var filterText = ""
     private var work: Task<Void, Never>?
     private var changeObserver: NSObjectProtocol?
+    private var changeWork: Task<Void, Never>?
+    /// Fetched ranges, so going back to a month or week shows at once. Cleared when Calendar changes.
+    private var cache: [DateInterval: [Event]] = [:]
+    private var listOpened = false
     private var calendar: Calendar { Calendar.current }
 
     init(list: SourcePage, readsEvents: Bool) {
@@ -39,17 +46,24 @@ final class CalendarPage: ObservableObject, LauncherPage {
     func popOut() { list.popOut() }
 
     func opened() {
-        mode = .month; anchor = Date()
-        list.opened()
+        mode = .month; anchor = Date(); cache = [:]; listOpened = false
         load()
-        // Changes made in Calendar show while the view is open.
+        // Changes made in Calendar show while the view is open. A burst of changes reloads once.
         changeObserver = NotificationCenter.default.addObserver(forName: .EKEventStoreChanged, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.load() }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.changeWork?.cancel()
+                self.changeWork = Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: 400_000_000)
+                    guard !Task.isCancelled, let self else { return }
+                    self.cache = [:]; self.load()
+                }
+            }
         }
     }
     func closed(handingOff: Bool) {
-        list.closed(handingOff: handingOff)
-        work?.cancel()
+        if listOpened { list.closed(handingOff: handingOff) }
+        work?.cancel(); changeWork?.cancel()
         if let changeObserver { NotificationCenter.default.removeObserver(changeObserver) }
         changeObserver = nil
     }
@@ -57,6 +71,7 @@ final class CalendarPage: ObservableObject, LauncherPage {
     func filter(_ text: String) {
         filterText = text
         list.filter(text)
+        group()
     }
 
     func handle(_ key: PageKey) -> Bool {
@@ -72,7 +87,13 @@ final class CalendarPage: ObservableObject, LauncherPage {
     }
     func back() -> Bool { mode == .list ? list.back() : false }
 
-    func setMode(_ next: Mode) { mode = next; load() }
+    func setMode(_ next: Mode) {
+        guard next != mode else { return }
+        mode = next
+        // The list loads its rows the first time it shows, not while the grid is on screen.
+        if next == .list, !listOpened { listOpened = true; list.opened() }
+        load()
+    }
     func cycle(_ delta: Int) {
         let all = Mode.allCases
         let index = all.firstIndex(of: mode) ?? 0
@@ -86,7 +107,7 @@ final class CalendarPage: ObservableObject, LauncherPage {
     func today() { anchor = Date(); load() }
 
     /// The days on screen: whole weeks covering the month, or the one week.
-    var days: [Date] {
+    private func computeDays() -> [Date] {
         let range: DateInterval?
         if mode == .week {
             range = calendar.dateInterval(of: .weekOfYear, for: anchor)
@@ -110,41 +131,93 @@ final class CalendarPage: ObservableObject, LauncherPage {
         }
         return anchor.formatted(.dateTime.month(.wide).year())
     }
-    func events(on day: Date) -> [Event] {
-        let end = calendar.date(byAdding: .day, value: 1, to: day) ?? day
+    func events(on day: Date) -> [Event] { byDay[day] ?? [] }
+    /// Puts each event on every day it covers, with the filter applied. One pass over the events.
+    private func group() {
         let words = filterText.trimmingCharacters(in: .whitespaces).lowercased()
-        return events.filter { $0.start < end && $0.end > day && (words.isEmpty || $0.title.lowercased().contains(words)) }
+        var result: [Date: [Event]] = [:]
+        guard let first = days.first, let last = days.last else { byDay = [:]; return }
+        for event in events where words.isEmpty || event.title.lowercased().contains(words) {
+            var day = max(calendar.startOfDay(for: event.start), first)
+            // An event that ends exactly at midnight does not show on the next day.
+            let end = event.end > event.start ? event.end : event.start.addingTimeInterval(1)
+            while day < end && day <= last {
+                result[day, default: []].append(event)
+                guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+                day = next
+            }
+        }
+        byDay = result
     }
     func inMonth(_ day: Date) -> Bool { mode == .week || calendar.isDate(day, equalTo: anchor, toGranularity: .month) }
 
     private func load() {
-        guard mode != .list, readsEvents else { events = []; return }
+        guard mode != .list else { return }
+        days = computeDays()
+        guard readsEvents else { events = Self.demoEvents(around: anchor); group(); return }
         guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else {
-            events = []
+            events = []; group()
             problem = SourceProblem(text: "Allow Calendar access to see your events.", access: .calendars)
             return
         }
         problem = nil
         guard let start = days.first, let last = days.last, let end = calendar.date(byAdding: .day, value: 1, to: last) else { return }
+        let range = DateInterval(start: start, end: end)
         work?.cancel()
+        if let cached = cache[range] { events = cached; group(); return }
+        // Keep the old events on screen until the new range arrives, so the grid never flashes empty.
+        nonisolated(unsafe) let store = Permissions.events
         work = Task { @MainActor [weak self] in
-            let store = Permissions.events
-            let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
-            // Cancelled events and declined invitations are not on their day.
-            let found = store.events(matching: predicate).filter { event in
-                event.status != .canceled && !(event.attendees ?? []).contains { $0.isCurrentUser && $0.participantStatus == .declined }
-            }
-            .sorted { ($0.isAllDay ? 0 : 1, $0.startDate) < ($1.isAllDay ? 0 : 1, $1.startDate) }
-            .map { event in
-                Event(id: (event.eventIdentifier ?? UUID().uuidString) + ":\(event.startDate.timeIntervalSince1970)",
-                      title: event.title ?? "Untitled event", start: event.startDate, end: event.endDate, allDay: event.isAllDay,
-                      color: event.calendar.map { Color(nsColor: $0.color) } ?? .accentColor)
-            }
+            let found = await Task.detached(priority: .userInitiated) { Self.fetch(store, range) }.value
             guard !Task.isCancelled, let self else { return }
+            self.cache[range] = found
             self.events = found
+            self.group()
         }
     }
+    /// Reads EventKit off the main thread. Cancelled events and declined invitations are left out.
+    nonisolated private static func fetch(_ store: EKEventStore, _ range: DateInterval) -> [Event] {
+        let predicate = store.predicateForEvents(withStart: range.start, end: range.end, calendars: nil)
+        var colours: [String: Color] = [:]
+        return store.events(matching: predicate).filter { event in
+            event.status != .canceled && !(event.attendees ?? []).contains { $0.isCurrentUser && $0.participantStatus == .declined }
+        }
+        .sorted { ($0.isAllDay ? 0 : 1, $0.startDate) < ($1.isAllDay ? 0 : 1, $1.startDate) }
+        .map { event in
+            let key = event.calendar?.calendarIdentifier ?? ""
+            let colour = colours[key] ?? color(of: event.calendar)
+            colours[key] = colour
+            return Event(id: (event.eventIdentifier ?? UUID().uuidString) + ":\(event.startDate.timeIntervalSince1970)",
+                         title: event.title ?? "Untitled event", start: event.startDate, end: event.endDate, allDay: event.isAllDay,
+                         color: colour)
+        }
+    }
+    /// The calendar's own colour. `cgColor` keeps it in its colour space; a missing or
+    /// near-black colour falls back to the accent colour so the event never draws as a black dot.
+    nonisolated static func color(of calendar: EKCalendar?) -> Color {
+        guard let cg = calendar?.cgColor, let rgb = NSColor(cgColor: cg)?.usingColorSpace(.sRGB),
+              rgb.redComponent + rgb.greenComponent + rgb.blueComponent > 0.15 else { return .accentColor }
+        return Color(nsColor: rgb)
+    }
     func grant() { Task { await Permissions.request(.calendars); load() } }
+
+    /// Invented events for `--snapshot-ui`, so the layout can be checked without real data.
+    private static func demoEvents(around anchor: Date) -> [Event] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: anchor)
+        let items: [(Int, Int, Int, String, Color, Bool)] = [
+            (0, 9, 30, "Team stand-up", .blue, false), (0, 13, 60, "Lunch with Sam", .orange, false),
+            (0, 16, 45, "Design review", .purple, false), (0, 18, 30, "Gym", .green, false),
+            (1, 0, 0, "Holiday", .red, true), (2, 11, 60, "Dentist", .teal, false),
+            (-2, 10, 90, "Workshop", .pink, false), (-1, 15, 30, "Call with Alex", .blue, false)
+        ]
+        return items.enumerated().compactMap { index, item in
+            guard let day = cal.date(byAdding: .day, value: item.0, to: today),
+                  let start = cal.date(byAdding: .minute, value: item.1 * 60, to: day) else { return nil }
+            let end = item.5 ? cal.date(byAdding: .day, value: 1, to: day)! : start.addingTimeInterval(Double(item.2) * 60)
+            return Event(id: "demo\(index)", title: item.3, start: start, end: end, allDay: item.5, color: item.4)
+        }
+    }
 
     func content() -> AnyView { AnyView(CalendarPageView(page: self, list: list)) }
 }
@@ -240,20 +313,7 @@ private struct DayCell: View {
                     .frame(minWidth: 20, minHeight: 20)
                     .background(Circle().fill(isToday ? Color.red : .clear))
             }
-            ForEach(events.prefix(limit)) { event in
-                HStack(spacing: 4) {
-                    if event.allDay {
-                        Text(event.title).lineLimit(1).padding(.horizontal, 4).frame(maxWidth: .infinity, alignment: .leading)
-                            .background(RoundedRectangle(cornerRadius: 3).fill(event.color.opacity(0.3)))
-                    } else {
-                        Circle().fill(event.color).frame(width: 6, height: 6)
-                        if tall { Text(event.start.formatted(date: .omitted, time: .shortened)).foregroundStyle(.secondary) }
-                        Text(event.title).lineLimit(1)
-                    }
-                }
-                .font(.system(size: 11))
-                .help(event.title + " · " + (event.allDay ? "All day" : event.start.formatted(date: .omitted, time: .shortened)))
-            }
+            ForEach(events.prefix(limit)) { event in EventChip(event: event, showsTime: tall) }
             if events.count > limit {
                 Text("+\(events.count - limit) more").font(.system(size: 10)).foregroundStyle(.secondary)
             }
@@ -261,6 +321,51 @@ private struct DayCell: View {
         }
         .padding(4)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .opacity(dimmed ? 0.6 : 1)
+        .background(isToday ? Color.red.opacity(0.06) : .clear)
+        .opacity(dimmed ? 0.55 : 1)
+    }
+}
+
+/// One event, styled like Calendar: all-day events as a filled bar, timed events as a tinted
+/// chip with a bar in the calendar's colour on the left.
+private struct EventChip: View {
+    let event: CalendarPage.Event
+    let showsTime: Bool
+    private var time: String { event.start.formatted(date: .omitted, time: .shortened) }
+
+    var body: some View {
+        Group {
+            if event.allDay {
+                Text(event.title).fontWeight(.medium).lineLimit(1)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(event.color.opacity(0.85)))
+            } else if showsTime {
+                HStack(spacing: 5) {
+                    RoundedRectangle(cornerRadius: 1.5).fill(event.color).frame(width: 3)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(event.title).fontWeight(.medium).lineLimit(2)
+                        Text(time).font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, 3).padding(.trailing, 4)
+                // The colour bar would otherwise stretch the chip to the full day.
+                .fixedSize(horizontal: false, vertical: true)
+                .background(RoundedRectangle(cornerRadius: 4).fill(event.color.opacity(0.16)))
+            } else {
+                HStack(spacing: 4) {
+                    RoundedRectangle(cornerRadius: 1.5).fill(event.color).frame(width: 3, height: 12)
+                    // Month cells are narrow: the title gets the room, and the time shows on hover.
+                    Text(event.title).lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 3).padding(.vertical, 1)
+                .background(RoundedRectangle(cornerRadius: 3).fill(event.color.opacity(0.12)))
+            }
+        }
+        .font(.system(size: 11))
+        .help(event.title + " · " + (event.allDay ? "All day" : time))
     }
 }

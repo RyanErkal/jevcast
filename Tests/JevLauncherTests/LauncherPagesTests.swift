@@ -123,6 +123,16 @@ final class LauncherPagesTests: XCTestCase {
         XCTAssertEqual(calendar.mode, CalendarPage.Mode.month)
         XCTAssertEqual(calendar.days.count % 7, 0, "The month shows whole weeks.")
         XCTAssertTrue(calendar.days.count >= 28)
+        // Demo events: four today, and an all-day event tomorrow that ends at midnight and stays on its own day.
+        let today = Calendar.current.startOfDay(for: Date())
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today)!
+        let dayAfter = Calendar.current.date(byAdding: .day, value: 1, to: tomorrow)!
+        if calendar.days.contains(tomorrow) { XCTAssertEqual(calendar.events(on: tomorrow).map(\.title), ["Holiday"]) }
+        if calendar.days.contains(dayAfter) { XCTAssertFalse(calendar.events(on: dayAfter).contains { $0.title == "Holiday" }) }
+        XCTAssertEqual(calendar.events(on: today).count, 4)
+        calendar.filter("gym")
+        XCTAssertEqual(calendar.events(on: today).map(\.title), ["Gym"])
+        calendar.filter("")
         XCTAssertTrue(calendar.handle(.right)); XCTAssertEqual(calendar.mode, CalendarPage.Mode.week)
         XCTAssertEqual(calendar.days.count, 7)
         XCTAssertTrue(calendar.handle(.right)); XCTAssertEqual(calendar.mode, CalendarPage.Mode.list)

@@ -135,3 +135,10 @@ final class DiscoveryQueryTests: XCTestCase {
         XCTAssertEqual(SourceQuery.parse("check my inbox")?.explicit, true)
     }
 }
+
+final class SpokenQueryTests: XCTestCase {
+    func testDictatedPunctuation() {
+        XCTAssertEqual(SourceQuery.parse("Show mail.")?.kind, .mail)
+        XCTAssertEqual(SourceQuery.parse("Show mail.")?.explicit, true)
+    }
+}

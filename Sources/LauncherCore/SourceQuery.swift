@@ -39,7 +39,8 @@ public struct SourceQuery: Equatable, Sendable {
     private static let leadIns: Set<String> = ["show", "me", "list", "open", "our", "my", "all", "the", "see", "view", "check", "whats", "what's", "get"]
 
     public static func parse(_ text: String) -> SourceQuery? {
-        var words = text.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
+        // Dictation adds capitals and full stops: "Show mail." reads as "show mail".
+        var words = text.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".!?, ")).split(whereSeparator: \.isWhitespace).map(String.init)
         guard !words.isEmpty else { return nil }
         let full = words.joined(separator: " ")
         // Whole-phrase keywords that read as a question keep their lead-in words.

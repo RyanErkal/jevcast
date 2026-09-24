@@ -25,6 +25,8 @@ final class MailModel: ObservableObject {
     @Published private(set) var mailboxes: [MailMailbox] = []
     @Published var place: Place = .inbox { didSet { if oldValue != place { selectedID = nil; reload() } } }
     @Published var search = "" { didSet { if oldValue != search { reloadSoon() } } }
+    /// The search field shows only while searching.
+    @Published var searching = false
     @Published private(set) var messages: [MailSummary] = []
     /// Setting this from the list or the keyboard marks the message read. The model's own
     /// selections, after a reload, use `select(_:byUser:)` with false and change nothing.
@@ -49,6 +51,14 @@ final class MailModel: ObservableObject {
     private var poll: Task<Void, Never>?
     private var searchWork: Task<Void, Never>?
     private var loadWork: Task<Void, Never>?
+    /// Parsed bodies of recent messages, so moving back and forth shows them at once.
+    private var bodies: [Int64: MIMEMessage] = [:]
+    private var bodyOrder: [Int64] = []
+    /// Messages removed here whose change Mail has not written to its index yet. A refresh in the
+    /// meantime must not bring them back.
+    private var removing: [Int64: Date] = [:]
+    /// Mail actions run one after another, so quick deletes never race each other.
+    private var actionChain: Task<Void, Never>?
 
     init(luna: @escaping (LunaRequest) async throws -> LunaReply, lunaAllowed: @escaping () -> Bool) {
         self.luna = luna; self.lunaAllowed = lunaAllowed
@@ -107,7 +117,10 @@ final class MailModel: ObservableObject {
                 return (messages, (try? MailStore.mailboxes(root: root)) ?? [])
             }.value
             guard !Task.isCancelled, let self else { return }
-            guard let (messages, boxes) = result else { self.banner = "Mail's index could not be read. Try again in a moment."; return }
+            guard let (fetched, boxes) = result else { self.banner = "Mail's index could not be read. Try again in a moment."; return }
+            // Removals older than two minutes are Mail's business again.
+            self.removing = self.removing.filter { Date().timeIntervalSince($0.value) < 120 }
+            let messages = fetched.filter { self.removing[$0.rowID] == nil }
             self.messages = messages
             if !boxes.isEmpty { self.mailboxes = boxes }
             if let pending = self.pending {
@@ -154,17 +167,48 @@ final class MailModel: ObservableObject {
     private var loadingID: Int64?
 
     private func loadSelected(markRead: Bool) {
-        detail = nil; detailMissing = false; summary = nil
-        guard let root, let message = selected, let box = mailbox(message.mailbox) else { return }
+        summary = nil
+        guard let root, let message = selected, let box = mailbox(message.mailbox) else { detail = nil; detailMissing = false; return }
         let rowID = message.rowID
         loadingID = rowID
+        // Opening a message yourself marks it read, as Mail does.
+        if markRead, !message.read { perform("mark read") { try await MailActions.setRead(true, message, in: box) } update: { $0.read = true } }
+        if let cached = bodies[rowID] {
+            detail = cached; detailMissing = false
+            prefetchNeighbours(of: rowID, root: root)
+            return
+        }
+        detail = nil; detailMissing = false
         Task { @MainActor [weak self] in
             let parsed = await Task.detached(priority: .userInitiated) { MailStore.message(root: root, mailbox: box, rowID: rowID) }.value
-            guard let self, self.selectedID == rowID, self.loadingID == rowID else { return }
+            guard let self else { return }
+            if let parsed { self.remember(parsed, for: rowID) }
+            guard self.selectedID == rowID, self.loadingID == rowID else { return }
             self.detail = parsed
             self.detailMissing = parsed == nil
-            // Opening a message yourself marks it read, as Mail does.
-            if markRead, !message.read { self.perform("mark read") { try await MailActions.setRead(true, message, in: box) } update: { $0.read = true } }
+            self.prefetchNeighbours(of: rowID, root: root)
+        }
+    }
+
+    private func remember(_ body: MIMEMessage, for rowID: Int64) {
+        if bodies[rowID] == nil { bodyOrder.append(rowID) }
+        bodies[rowID] = body
+        while bodyOrder.count > 40 { bodies.removeValue(forKey: bodyOrder.removeFirst()) }
+    }
+
+    /// Reads the messages above and below in the background, so the next one opens at once.
+    private func prefetchNeighbours(of rowID: Int64, root: String) {
+        guard let index = messages.firstIndex(where: { $0.rowID == rowID }) else { return }
+        let wanted = [index + 1, index + 2, index - 1].filter(messages.indices.contains).map { messages[$0] }
+            .filter { bodies[$0.rowID] == nil }
+            .compactMap { message in mailbox(message.mailbox).map { (message.rowID, $0) } }
+        guard !wanted.isEmpty else { return }
+        Task { @MainActor [weak self] in
+            for (id, box) in wanted {
+                if let parsed = await Task.detached(priority: .utility, operation: { MailStore.message(root: root, mailbox: box, rowID: id) }).value {
+                    self?.remember(parsed, for: id)
+                }
+            }
         }
     }
 
@@ -175,13 +219,17 @@ final class MailModel: ObservableObject {
         guard let message = selected else { return }
         let index = messages.firstIndex { $0.rowID == message.rowID }
         if removes, let index {
+            removing[message.rowID] = Date()
             messages.remove(at: index)
             // The next message shows but stays unread until you pick it.
             select(messages.indices.contains(index) ? messages[index].rowID : messages.last?.rowID, byUser: false)
         } else if let index, let update { update(&messages[index]) }
-        Task { @MainActor [weak self] in
+        let previous = actionChain
+        actionChain = Task { @MainActor [weak self] in
+            await previous?.value
             do { try await action() }
             catch {
+                self?.removing.removeValue(forKey: message.rowID)
                 self?.banner = "Could not \(name): \(error.localizedDescription)"
                 self?.reload(keepSelection: true)
             }
@@ -204,6 +252,14 @@ final class MailModel: ObservableObject {
         guard let message = selected, let box = mailbox(message.mailbox) else { return }
         perform("delete", removes: true) { try await MailActions.delete(message, in: box) }
     }
+    /// Deletes every message in the list from the selected message's sender: for clearing out junk.
+    func deleteAllFromSender() {
+        guard let sender = selected?.senderAddress, !sender.isEmpty else { return }
+        let targets = messages.filter { $0.senderAddress.caseInsensitiveCompare(sender) == .orderedSame }
+        for message in targets { delete(message.rowID) }
+        banner = "Deleting \(targets.count) message" + (targets.count == 1 ? "" : "s") + " from \(sender)."
+    }
+    var selectedSender: String? { selected?.senderAddress }
     func toggleFlag() {
         guard let message = selected, let box = mailbox(message.mailbox) else { return }
         let flagged = !message.flagged

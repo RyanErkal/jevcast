@@ -74,57 +74,42 @@ struct MailSetupView: View {
 
 struct MailList: View {
     @ObservedObject var model: MailModel
-    @FocusState private var listFocused: Bool
+    @FocusState private var searchFocused: Bool
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
             List(selection: $model.selectedID) {
                 ForEach(model.messages) { message in
-                    MailRow(message: message, delete: { model.delete(message.rowID) }).tag(message.rowID)
+                    MailRow(message: message, delete: { model.delete(message.rowID) },
+                            deleteAll: { model.select(message.rowID, byUser: false); model.deleteAllFromSender() })
+                        .tag(message.rowID)
                 }
             }
             .listStyle(.inset)
-            .focused($listFocused)
             .overlay { if model.messages.isEmpty { Text(model.search.isEmpty ? "Inbox is empty" : "No matches").foregroundStyle(.secondary) } }
         }
-        .onAppear { listFocused = true }
-        .onKeyPress(characters: .letters.union(CharacterSet(charactersIn: "#")), phases: .down) { press in
-            // ⌘E, ⌃S, and other shortcuts are not mail keys.
-            guard press.modifiers.isDisjoint(with: [.command, .control, .option]) else { return .ignored }
-            return handle(press.characters, shift: press.modifiers.contains(.shift)) ? .handled : .ignored
-        }
-        .onKeyPress(.delete) { model.delete(); return .handled }
-    }
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Inbox").font(.title3.weight(.semibold))
-                if model.unreadInInbox > 0 { Text("\(model.unreadInInbox) unread").foregroundStyle(.secondary) }
-                Spacer()
-                Button { model.checkMail() } label: { Image(systemName: "arrow.clockwise") }.buttonStyle(.borderless).help("Check for new mail")
-                Button { model.compose() } label: { Image(systemName: "square.and.pencil") }.buttonStyle(.borderless)
-                    .keyboardShortcut("n").help("New message (⌘N)")
-            }
-            TextField("Search", text: $model.search).textFieldStyle(.roundedBorder)
-        }
-        .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 8)
+        .onChange(of: model.searching) { _, on in searchFocused = on }
     }
 
-    private func handle(_ key: String, shift: Bool) -> Bool {
-        switch key.lowercased() {
-        case "j": model.moveSelection(1)
-        case "k": model.moveSelection(-1)
-        case "e": model.archive()
-        case "#": model.delete()
-        case "r": model.reply(all: shift)
-        case "f": model.forward()
-        case "s": model.toggleFlag()
-        case "u": model.toggleRead()
-        case "c": model.compose()
-        default: return false
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Text("Inbox").font(.headline)
+                if model.unreadInInbox > 0 { Text("\(model.unreadInInbox) unread").foregroundStyle(.secondary) }
+                Spacer()
+                Button { model.searching.toggle() } label: { Image(systemName: "magnifyingglass") }.help("Search (⌘F)")
+                Button { model.checkMail() } label: { Image(systemName: "arrow.clockwise") }.help("Check for new mail")
+                Button { model.compose() } label: { Image(systemName: "square.and.pencil") }.help("New message (⌘N)")
+            }
+            .buttonStyle(.borderless)
+            if model.searching {
+                TextField("Search senders and subjects", text: $model.search)
+                    .textFieldStyle(.roundedBorder).focused($searchFocused)
+                    .onSubmit { model.searching = !model.search.isEmpty }
+            }
         }
-        return true
+        .padding(.horizontal, 12).padding(.vertical, 9)
     }
 }
 
@@ -132,6 +117,7 @@ struct MailList: View {
 struct MailRow: View {
     let message: MailSummary
     var delete: () -> Void = {}
+    var deleteAll: () -> Void = {}
     @State private var hovering = false
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
@@ -153,7 +139,10 @@ struct MailRow: View {
         .padding(.vertical, 3)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        .contextMenu { Button("Delete", role: .destructive, action: delete) }
+        .contextMenu {
+            Button("Delete", role: .destructive, action: delete)
+            Button("Delete All from \(message.sender)", role: .destructive, action: deleteAll)
+        }
     }
     static func date(_ date: Date) -> String {
         Calendar.current.isDateInToday(date) ? date.formatted(date: .omitted, time: .shortened)
@@ -190,7 +179,6 @@ struct MailReader: View {
                 Text(message.sender).fontWeight(.medium)
                 if !message.senderName.isEmpty { Text("<\(message.senderAddress)>").foregroundStyle(.secondary) }
                 Spacer()
-                Text(message.date.formatted(date: .abbreviated, time: .shortened)).foregroundStyle(.secondary)
             }
             .font(.system(size: 12)).textSelection(.enabled)
             if let to = model.detail?.header("To") { Text("To: " + to).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
@@ -209,7 +197,8 @@ struct MailReader: View {
 
     @ViewBuilder private func body(_ message: MailSummary) -> some View {
         if let detail = model.detail {
-            if let html = detail.html, detail.plainText == nil || html.utf8.count > 200 {
+            // Plain text first: it is lighter and quicker to read. HTML only when there is no text part.
+            if let html = detail.html, (detail.plainText ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 MailHTMLView(html: html).padding(.horizontal, 10)
             } else {
                 ScrollView {
@@ -229,24 +218,25 @@ struct MailReader: View {
         }
     }
 
-    /// The actions for checking mail, always visible.
+    /// The few actions checking mail needs, as icons with their keys in the tooltips.
     private var actionBar: some View {
-        HStack(spacing: 14) {
-            Button { model.delete() } label: { Label("Delete", systemImage: "trash") }.help("Delete (⌫)")
-            Button { model.archive() } label: { Label("Archive", systemImage: "archivebox") }.help("Archive (E)")
-            Button { model.reply(all: false) } label: { Label("Reply", systemImage: "arrowshape.turn.up.left") }.help("Reply (R)")
-            Button { model.toggleRead() } label: {
-                Label(model.selected?.read == false ? "Mark Read" : "Mark Unread", systemImage: "envelope.badge")
-            }.help("Read or unread (U)")
+        HStack(spacing: 16) {
+            Button { model.delete() } label: { Image(systemName: "trash") }.help("Delete (⌫)")
+            Button { model.archive() } label: { Image(systemName: "archivebox") }.help("Archive (E)")
+            Button { model.reply(all: false) } label: { Image(systemName: "arrowshape.turn.up.left") }.help("Reply (R)")
+            Button { model.toggleRead() } label: { Image(systemName: model.selected?.read == false ? "envelope.open" : "envelope.badge") }
+                .help("Mark read or unread (U)")
+            Menu {
+                Button("Delete All from \(model.selected?.sender ?? "Sender")", role: .destructive) { model.deleteAllFromSender() }
+                if model.canUseLuna { Button("Summarise with Luna") { model.summarise() }.disabled(model.detail == nil || model.lunaBusy) }
+                Button("Open in Mail (Return)") { model.openInMail() }
+            } label: { Image(systemName: "ellipsis.circle") }
+            .menuIndicator(.hidden).fixedSize()
             Spacer()
-            if model.canUseLuna {
-                Button { model.summarise() } label: { Label("Summarise", systemImage: "sparkles") }
-                    .disabled(model.detail == nil || model.lunaBusy).help("Summarise with Luna")
-            }
-            Button { model.openInMail() } label: { Label("Open in Mail", systemImage: "arrow.up.forward.app") }.help("Open this message in Apple Mail")
+            if let date = model.selected?.date { Text(date.formatted(date: .abbreviated, time: .shortened)).foregroundStyle(.secondary) }
         }
-        .buttonStyle(.borderless).labelStyle(.titleAndIcon).font(.callout)
-        .padding(.horizontal, 14).padding(.vertical, 9)
+        .buttonStyle(.borderless).font(.system(size: 14))
+        .padding(.horizontal, 14).padding(.vertical, 8)
     }
 }
 

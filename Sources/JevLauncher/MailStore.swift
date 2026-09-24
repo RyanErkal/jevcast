@@ -26,8 +26,26 @@ enum MailStore {
         try SQLiteReader(path: root + "/MailData/Envelope Index")
     }
 
+    /// One read connection, kept open and used by one caller at a time. Opening the index and
+    /// reading its schema for every refresh cost more than the queries themselves.
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var shared: (root: String, db: SQLiteReader, columns: Set<String>)?
+
+    static func withIndex<T>(_ root: String, _ body: (SQLiteReader, Set<String>) throws -> T) throws -> T {
+        lock.lock(); defer { lock.unlock() }
+        if shared?.root != root {
+            let db = try open(root)
+            shared = (root, db, db.columns("messages"))
+        }
+        do { return try body(shared!.db, shared!.columns) }
+        catch { shared = nil; throw error }
+    }
+
     static func mailboxes(root: String) throws -> [MailMailbox] {
-        let db = try open(root)
+        try withIndex(root) { db, _ in try mailboxes(db) }
+    }
+
+    private static func mailboxes(_ db: SQLiteReader) throws -> [MailMailbox] {
         let columns = db.columns("mailboxes")
         let unread = columns.contains("unread_count") ? "unread_count" : "0"
         let total = columns.contains("total_count") ? "total_count" : "0"
@@ -44,18 +62,22 @@ enum MailStore {
         var flaggedOnly = false
         var rowIDs: [Int64] = []
         var limit = 300
+        /// The preview text costs a lookup per row, so only a caller that shows it asks for it.
+        var includePreview = false
     }
 
     /// Messages in the given mailboxes, newest first. Column names adapt to the index's version.
     static func messages(root: String, _ query: Query) throws -> [MailSummary] {
-        let db = try open(root)
-        let cols = db.columns("messages")
+        try withIndex(root) { db, cols in try messages(db, cols, query) }
+    }
+
+    private static func messages(_ db: SQLiteReader, _ cols: Set<String>, _ query: Query) throws -> [MailSummary] {
         guard !query.mailboxes.isEmpty || query.flaggedOnly || query.unreadOnly || !query.rowIDs.isEmpty else { return [] }
         let read = cols.contains("read") ? "m.read" : "(m.flags & 1)"
         let flagged = cols.contains("flagged") ? "m.flagged" : "((m.flags >> 4) & 1)"
         let deleted = cols.contains("deleted") ? "m.deleted" : "((m.flags >> 1) & 1)"
         let prefix = cols.contains("subject_prefix") ? "COALESCE(m.subject_prefix, '') || " : ""
-        let summary = cols.contains("summary") ? "COALESCE((SELECT summary FROM summaries WHERE ROWID = m.summary), '')" : "''"
+        let summary = cols.contains("summary") && query.includePreview ? "COALESCE((SELECT summary FROM summaries WHERE ROWID = m.summary), '')" : "''"
         let conversation = cols.contains("conversation_id") ? "COALESCE(m.conversation_id, m.ROWID)" : "m.ROWID"
         var sql = """
         SELECT m.ROWID, m.mailbox, \(prefix)COALESCE(s.subject, ''), COALESCE(a.comment, ''), COALESCE(a.address, ''),
@@ -78,10 +100,10 @@ enum MailStore {
         if query.flaggedOnly { sql += " AND \(flagged) = 1" }
         let words = query.text.split(separator: " ").map(String.init).filter { !$0.isEmpty }
         for word in words.prefix(6) {
-            // Every word must appear in the subject, the sender, or the preview.
-            sql += " AND (s.subject LIKE ? ESCAPE '\\' OR a.address LIKE ? ESCAPE '\\' OR a.comment LIKE ? ESCAPE '\\' OR \(summary) LIKE ? ESCAPE '\\')"
+            // Every word must appear in the subject or the sender.
+            sql += " AND (s.subject LIKE ? ESCAPE '\\' OR a.address LIKE ? ESCAPE '\\' OR a.comment LIKE ? ESCAPE '\\')"
             let pattern = SQLiteReader.Value.text(SQLiteReader.likePattern(word))
-            arguments += [pattern, pattern, pattern, pattern]
+            arguments += [pattern, pattern, pattern]
         }
         sql += " ORDER BY m.date_received DESC LIMIT \(max(1, min(query.limit, 2000)))"
         return try db.rows(sql, arguments).compactMap { row in
@@ -102,10 +124,18 @@ enum MailStore {
     }
 
     /// The message's `.emlx` file, or nil when Mail has not downloaded it.
+    /// The store folders inside each mailbox folder, read once.
+    nonisolated(unsafe) private static var storeCache: [String: [String]] = [:]
+
     static func messageFile(root: String, mailbox: MailMailbox, rowID: Int64) -> String? {
         let folder = mailbox.folder(in: root)
         let relative = MailFiles.relativePaths(rowID: rowID)
-        let stores = ((try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? []).filter { !$0.hasSuffix(".mbox") && !$0.hasSuffix(".plist") }
+        let stores: [String] = lock.withLock {
+            if let cached = storeCache[folder] { return cached }
+            let found = ((try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? []).filter { !$0.hasSuffix(".mbox") && !$0.hasSuffix(".plist") }
+            storeCache[folder] = found
+            return found
+        }
         for store in [""] + stores.map({ $0 + "/" }) {
             for path in relative {
                 let candidate = folder + "/" + store + path

@@ -44,4 +44,47 @@ final class MailWindow: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) { model.stop() }
+
+    private var keyMonitor: Any?
+    func windowDidBecomeKey(_ notification: Notification) {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, event.window === self.window else { return event }
+            return self.handle(event) ? nil : event
+        }
+    }
+    func windowDidResignKey(_ notification: Notification) {
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        keyMonitor = nil
+    }
+
+    /// Keys for checking mail. Typing in the search field or a reply keeps its own keys.
+    private func handle(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection([.command, .control, .option])
+        if flags == .command, event.charactersIgnoringModifiers == "f" { model.searching = true; return true }
+        let typing = window?.firstResponder is NSTextView || model.draft != nil
+        if event.keyCode == 53 { // Escape: leave the search, then close.
+            if model.searching || !model.search.isEmpty { model.search = ""; model.searching = false; window?.makeFirstResponder(nil); return true }
+            if model.draft == nil { window?.performClose(nil); return true }
+            return false
+        }
+        guard !typing, flags.isEmpty else { return false }
+        switch event.keyCode {
+        case 125: model.moveSelection(1); return true           // ↓
+        case 126: model.moveSelection(-1); return true          // ↑
+        case 51, 117: model.delete(); return true               // ⌫ and ⌦
+        case 36, 76: model.openInMail(); return true            // Return
+        default: break
+        }
+        switch event.charactersIgnoringModifiers?.lowercased() {
+        case "j": model.moveSelection(1)
+        case "k": model.moveSelection(-1)
+        case "e": model.archive()
+        case "r": model.reply(all: event.modifierFlags.contains(.shift))
+        case "u": model.toggleRead()
+        case "/": model.searching = true
+        default: return false
+        }
+        return true
+    }
 }

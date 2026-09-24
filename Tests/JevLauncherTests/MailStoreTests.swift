@@ -49,13 +49,14 @@ final class MailStoreTests: XCTestCase {
         XCTAssertEqual(inbox.first?.sender, "Sam")
         XCTAssertEqual(inbox.first?.flagged, true)
         XCTAssertEqual(inbox.last?.read, false)
-        XCTAssertEqual(inbox.last?.snippet, "Your invoice is ready")
+        XCTAssertEqual(inbox.last?.snippet, "", "The list does not load previews.")
+        XCTAssertEqual(try MailStore.messages(root: root, .init(mailboxes: [1], includePreview: true)).last?.snippet, "Your invoice is ready")
     }
 
     func testFiltersAndSearch() throws {
         XCTAssertEqual(try MailStore.messages(root: root, .init(mailboxes: [1], unreadOnly: true)).map(\.rowID), [1001])
         XCTAssertEqual(try MailStore.messages(root: root, .init(mailboxes: [], flaggedOnly: true)).map(\.rowID), [1002])
-        XCTAssertEqual(try MailStore.messages(root: root, .init(mailboxes: [1], text: "sam friday")).map(\.rowID), [1002])
+        XCTAssertEqual(try MailStore.messages(root: root, .init(mailboxes: [1], text: "sam lunch")).map(\.rowID), [1002])
         XCTAssertEqual(try MailStore.messages(root: root, .init(mailboxes: [1], text: "50%")).map(\.rowID), [1001], "% matches literally.")
         XCTAssertEqual(try MailStore.messages(root: root, .init(mailboxes: [1], text: "5_%")).map(\.rowID), [])
     }

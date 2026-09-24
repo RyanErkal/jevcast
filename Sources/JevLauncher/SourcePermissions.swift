@@ -10,12 +10,15 @@ enum Permissions {
 
     static func request(_ access: SourceAccess) async {
         switch access {
+        // A store made before access was granted can miss calendars until it is reset.
         case .calendars:
-            if EKEventStore.authorizationStatus(for: .event) == .notDetermined { _ = try? await events.requestFullAccessToEvents() }
-            else { open("Privacy_Calendars") }
+            if EKEventStore.authorizationStatus(for: .event) == .notDetermined {
+                if (try? await events.requestFullAccessToEvents()) == true { events.reset() }
+            } else { open("Privacy_Calendars") }
         case .reminders:
-            if EKEventStore.authorizationStatus(for: .reminder) == .notDetermined { _ = try? await events.requestFullAccessToReminders() }
-            else { open("Privacy_Reminders") }
+            if EKEventStore.authorizationStatus(for: .reminder) == .notDetermined {
+                if (try? await events.requestFullAccessToReminders()) == true { events.reset() }
+            } else { open("Privacy_Reminders") }
         case .contacts:
             if CNContactStore.authorizationStatus(for: .contacts) == .notDetermined { _ = try? await CNContactStore().requestAccess(for: .contacts) }
             else { open("Privacy_Contacts") }

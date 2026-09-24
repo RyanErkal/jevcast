@@ -27,10 +27,13 @@ extension LauncherModel {
         return kind == .event ? "\(day) \(time)–\(start.addingTimeInterval(3600).formatted(date: .omitted, time: .shortened))" : "\(day) \(time)"
     }
 
-    /// An event on a day with no time starts at 09:00.
-    static func createStart(_ date: Date, hasTime: Bool, kind: CreateQuery.Kind) -> Date {
+    /// An event on a day with no time starts at 09:00, or at the next full hour when 09:00 has passed.
+    static func createStart(_ date: Date, hasTime: Bool, kind: CreateQuery.Kind, now: Date = Date()) -> Date {
         guard !hasTime, kind == .event else { return date }
-        return Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: date) ?? date
+        let cal = Calendar.current
+        let nine = cal.date(bySettingHour: 9, minute: 0, second: 0, of: date) ?? date
+        guard nine < now, let hour = cal.dateInterval(of: .hour, for: now)?.end else { return nine }
+        return hour
     }
 
     static func addReminder(_ create: CreateQuery, url: URL? = nil) async throws {

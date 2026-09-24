@@ -28,7 +28,10 @@ final class CalendarSource: ThingSource {
         default: end = cal.date(byAdding: .day, value: 30, to: today)!; text = filter
         }
         let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
-        let events = store.events(matching: predicate).sorted { $0.startDate < $1.startDate }
+        // Cancelled events and invitations the user declined are not on their day.
+        let events = store.events(matching: predicate).filter { event in
+            event.status != .canceled && !(event.attendees ?? []).contains { $0.isCurrentUser && $0.participantStatus == .declined }
+        }.sorted { $0.startDate < $1.startDate }
         let matching = text.isEmpty ? events : events.filter { SearchRanking.score(query: text, title: $0.title ?? "") != nil }
         return matching.prefix(60).enumerated().map { index, event in row(event, score: 3000 - Double(index)) }
     }
@@ -39,17 +42,23 @@ final class CalendarSource: ThingSource {
         if let location = event.location, !location.isEmpty { parts.append(location) }
         let link = MeetingLink.find(in: [event.url?.absoluteString, event.location, event.notes])
         if link != nil { parts.append("video call") }
-        let id = event.eventIdentifier ?? UUID().uuidString
+        let eventID = event.eventIdentifier
+        let id = eventID ?? UUID().uuidString
         var verbs: [Verb] = []
         if let link { verbs.append(Verb(title: "Join Call") { NSWorkspace.shared.open(link); return nil }) }
         verbs.append(Verb(title: "Open in Calendar") {
-            let url = URL(string: "ical://ekevent/\(id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id)?method=show&options=more")
+            // ical://ekevent is not documented. Without an identifier, open Calendar itself.
+            let url = eventID.flatMap { URL(string: "ical://ekevent/\($0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? $0)?method=show&options=more") }
             if url.map({ NSWorkspace.shared.open($0) }) != true { Self.openApp("com.apple.iCal") }
             return nil
         })
-        if !event.isAllDay && event.calendar?.allowsContentModifications == true {
+        // Only the organizer's own events move. Moving an invitation makes a local change the server may undo.
+        let ownEvent = event.organizer == nil || event.organizer?.isCurrentUser == true
+        if !event.isAllDay && ownEvent && event.calendar?.allowsContentModifications == true {
             for (title, minutes) in [("Move 15 Minutes Later", 15), ("Move 1 Hour Later", 60)] {
                 verbs.append(Verb(title: title, after: .stay) { [store] in
+                    // The event may have changed in Calendar since the list loaded.
+                    guard event.refresh() else { throw LauncherError("This event changed or was deleted. The list is up to date now.") }
                     event.startDate = event.startDate.addingTimeInterval(Double(minutes) * 60)
                     event.endDate = event.endDate.addingTimeInterval(Double(minutes) * 60)
                     try store.save(event, span: .thisEvent, commit: true)
@@ -136,6 +145,7 @@ final class RemindersSource: ThingSource {
         let id = reminder.calendarItemIdentifier
         let verbs = [
             Verb(title: "Complete", after: .stay) { [store] in
+                guard reminder.refresh() else { throw LauncherError("This reminder changed or was deleted.") }
                 reminder.isCompleted = true
                 try store.save(reminder, commit: true)
                 return "Completed \(reminder.title ?? "the reminder")."
@@ -149,9 +159,16 @@ final class RemindersSource: ThingSource {
                 let tomorrow = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: Date()))!
                 var components = cal.dateComponents([.year, .month, .day], from: tomorrow)
                 if let old = reminder.dueDateComponents, let hour = old.hour { components.hour = hour; components.minute = old.minute ?? 0 }
+                guard reminder.refresh() else { throw LauncherError("This reminder changed or was deleted.") }
+                let oldDue = reminder.dueDateComponents.flatMap { cal.date(from: $0) }
                 reminder.dueDateComponents = components
-                reminder.alarms?.forEach { reminder.removeAlarm($0) }
-                if components.hour != nil, let date = cal.date(from: components) { reminder.addAlarm(EKAlarm(absoluteDate: date)) }
+                // Time alarms move with the reminder. Location and relative alarms stay as they are.
+                if let oldDue, let newDue = cal.date(from: components) {
+                    let shift = newDue.timeIntervalSince(oldDue)
+                    for alarm in reminder.alarms ?? [] where alarm.absoluteDate != nil {
+                        alarm.absoluteDate = alarm.absoluteDate?.addingTimeInterval(shift)
+                    }
+                } else if components.hour != nil, let date = cal.date(from: components) { reminder.addAlarm(EKAlarm(absoluteDate: date)) }
                 try store.save(reminder, commit: true)
                 return "Moved \(reminder.title ?? "the reminder") to tomorrow."
             },
@@ -162,7 +179,7 @@ final class RemindersSource: ThingSource {
     }
 }
 
-/// People from Contacts, by name, company, email, or phone. Return writes an email when there is an address.
+/// People from Contacts, by name, then by email or phone number. Return writes an email when there is an address.
 @MainActor
 final class ContactsSource: ThingSource {
     let section = "Contacts"
@@ -191,6 +208,10 @@ final class ContactsSource: ThingSource {
         var found: [CNContact] = (try? store.unifiedContacts(matching: CNContact.predicateForContacts(matchingName: text), keysToFetch: keys)) ?? []
         if found.isEmpty, text.contains("@") {
             found = (try? store.unifiedContacts(matching: CNContact.predicateForContacts(matchingEmailAddress: text), keysToFetch: keys)) ?? []
+        }
+        if found.isEmpty, text.filter(\.isNumber).count >= 4 {
+            let number = CNPhoneNumber(stringValue: text)
+            found = (try? store.unifiedContacts(matching: CNContact.predicateForContacts(matching: number), keysToFetch: keys)) ?? []
         }
         return found.map { contact in
             let name = CNContactFormatter.string(from: contact, style: .fullName) ?? contact.organizationName

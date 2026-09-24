@@ -61,6 +61,15 @@ final class LauncherPanel: NSPanel {
     override func makeKeyAndOrderFront(_ sender: Any?) {
         if !isVisible { shownAt = CACurrentMediaTime() }
         super.makeKeyAndOrderFront(sender)
+        refreshShadowSoon()
+    }
+    /// The shadow is taken from the drawn shape. A shadow taken before the glass drew is square, so
+    /// it is taken again once the first frame is on screen.
+    func refreshShadowSoon() {
+        DispatchQueue.main.async { [weak self] in
+            self?.displayIfNeeded(); self?.invalidateShadow()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { self?.invalidateShadow() }
+        }
     }
     override func orderFrontRegardless() {
         if !isVisible { shownAt = CACurrentMediaTime() }
@@ -87,10 +96,10 @@ final class LauncherPanel: NSPanel {
                     context.duration = Self.resizeDuration
                     context.timingFunction = CAMediaTimingFunction(name: .easeOut)
                     self.animator().setFrame(next, display: true)
-                } completionHandler: { [weak self] in self?.invalidateShadow() }
+                } completionHandler: { [weak self] in self?.refreshShadowSoon() }
             } else {
                 self.setFrame(next, display: true, animate: false)
-                self.invalidateShadow()
+                self.refreshShadowSoon()
             }
             if CommandLine.arguments.contains("--trace-interaction") {
                 print("[Jev interaction] resized size=\(Int(next.width))x\(Int(next.height))"); fflush(stdout)
@@ -160,6 +169,12 @@ private final class PanelSurface: NSView {
         border.layer?.borderWidth = LauncherMetrics.panelBorderWidth
         fill(self, with: background)
         fill(self, with: border)
+        // The whole surface clips to the rounded shape, so nothing square is ever drawn. The window
+        // shadow, and its light rim in Dark Mode, follow what is drawn, so they stay rounded too.
+        wantsLayer = true
+        layer?.cornerRadius = LauncherMetrics.panelRadius
+        layer?.cornerCurve = .continuous
+        layer?.masksToBounds = true
         updateBorder()
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

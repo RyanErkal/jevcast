@@ -27,7 +27,13 @@ struct ResultList: NSViewRepresentable {
         table.delegate = context.coordinator
         table.dataSource = context.coordinator
         table.target = context.coordinator
-        table.doubleAction = #selector(Coordinator.runRow)
+        // One click runs a row, as in Spotlight. Hovering highlights the row under the pointer.
+        table.action = #selector(Coordinator.runRow)
+        table.hoverAction = { [weak coordinator = context.coordinator] row in
+            guard let coordinator, let result = coordinator.result(at: row), result.isCurrent,
+                  coordinator.model.selectedID != result.id else { return }
+            coordinator.model.select(result.id)
+        }
         table.setAccessibilityLabel("Search Results")
         table.setAccessibilityIdentifier("launcher-results")
         let scroll = NSScrollView()
@@ -110,7 +116,8 @@ struct ResultList: NSViewRepresentable {
             model.select(result.id)
         }
         @objc func runRow() {
-            guard let table, let result = result(at: table.clickedRow), result.isCurrent else { return }
+            // A click on a section label or empty space does nothing.
+            guard let table, table.clickedRow >= 0, let result = result(at: table.clickedRow), result.isCurrent else { return }
             model.select(result.id); model.execute()
         }
     }
@@ -118,7 +125,24 @@ struct ResultList: NSViewRepresentable {
 
 private final class ResultsTable: NSTableView {
     var contextAction: ((Int) -> Void)?
+    var hoverAction: ((Int) -> Void)?
+    private var hoverArea: NSTrackingArea?
     override var acceptsFirstResponder: Bool { false }
+    /// The first click works even when the panel was not key.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeAlways, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+    /// Only real pointer movement selects, so a resting pointer never fights the arrow keys.
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        let row = row(at: convert(event.locationInWindow, from: nil))
+        if row >= 0 { hoverAction?(row) }
+    }
     override func menu(for event: NSEvent) -> NSMenu? {
         let row = row(at: convert(event.locationInWindow, from: nil))
         if row >= 0 { contextAction?(row) }

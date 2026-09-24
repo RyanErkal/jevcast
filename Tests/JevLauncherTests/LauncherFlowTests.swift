@@ -274,21 +274,14 @@ final class LauncherFlowTests: XCTestCase {
             XCTAssertNil(model.primaryActionTitle)
         }
     }
-    @MainActor func testEmptyQueryShowsFavouritesThenRecentOnly() {
+    @MainActor func testEmptyQueryShowsOnlyTheSearchBar() {
         withModel { model in
             let preferences = model.preferences
             preferences.record("window:left-half", query: "left")
-            preferences.record("quicklink:gh", query: "gh")
-            preferences.record("window:right-half", query: "right")
-            preferences.favourites = ["window:right-half", "app:/Missing/Gone.app"]
+            preferences.favourites = ["window:left-half"]
             model.rebuild()
-            XCTAssertEqual(model.results.map(\.id), ["window:right-half", "quicklink:gh", "window:left-half"])
-            XCTAssertEqual(model.rows.map(\.id), ["section:Favourites", "window:right-half", "section:Recent", "quicklink:gh", "window:left-half"])
-            XCTAssertEqual(model.selected?.id, "window:right-half")
-            XCTAssertFalse(model.isCollapsed)
-            preferences.favourites = []
-            model.rebuild()
-            XCTAssertEqual(model.rows.map(\.id), ["window:right-half", "quicklink:gh", "window:left-half"], "One group has no label.")
+            XCTAssertTrue(model.rows.isEmpty, "No favourites or recent items under an empty query.")
+            XCTAssertTrue(model.isCollapsed)
         }
     }
     @MainActor func testMixedSearchGroupsTopHitFirstAndCapsFiles() async throws {

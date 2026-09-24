@@ -380,8 +380,9 @@ final class LauncherModel: ObservableObject {
             return
         }
         let running = Set(catalogue.runningApplications.compactMap(\.bundleURL).map(\.path))
+        // An empty query is the search bar alone: no favourites or recent items.
         if q.isEmpty && !isFileSearch {
-            publish(suggestions(running: running), start: start)
+            publish([], start: start)
             return
         }
         let aliasesByApp = self.aliasesByApp
@@ -449,44 +450,6 @@ final class LauncherModel: ObservableObject {
     }
     static let maxBoost = 9.0
     static let interpreting = "Understanding…"
-    /// Most recent items an empty query shows under the favourites.
-    static let recentLimit = 5
-    /// A recent item whose decayed use falls below this is no longer suggested.
-    static let recentThreshold = 0.1
-    /// Favourites, then recent items still backed by use, for an empty query. Nothing else.
-    private func suggestions(running: Set<String>) -> [LauncherResult] {
-        let favourites = preferences.favourites
-        var rows = favourites.compactMap { resolve($0, running: running) }.map { row -> LauncherResult in
-            var row = row; row.section = .favourites; return row
-        }
-        let now = Date(), frecency = preferences.frecency
-        let recent = preferences.recentIDs.lazy
-            .filter { !favourites.contains($0) && frecency.score($0, now: now) >= Self.recentThreshold }
-            .compactMap { self.resolve($0, running: running) }
-            .prefix(Self.recentLimit)
-        rows += recent.map { row -> LauncherResult in var row = row; row.section = .recent; return row }
-        // Descending scores keep this order through the ranked sort.
-        return rows.enumerated().map { index, row in var row = row; row.score = 1000 - Double(index); return row }
-    }
-    /// The row for a remembered ID, or nil when its app, file, or keyword is gone.
-    private func resolve(_ id: String, running: Set<String>) -> LauncherResult? {
-        if id.hasPrefix("window:") {
-            return WindowAction(rawValue: String(id.dropFirst("window:".count))).map { windowRow($0, target: nil, score: 0) }
-        }
-        if id.hasPrefix("quicklink:") {
-            guard let link = preferences.quicklinks.first(where: { "quicklink:" + $0.id == id }), let url = link.url(for: "") else { return nil }
-            return LauncherResult(id: id, title: "Search " + link.name, detail: Self.hostDetail(url), symbol: "link", action: .url(url), score: 0)
-        }
-        if let row = commandRow(id: id, score: 0) ?? extraRow(id: id) { return row }
-        if id.hasPrefix("file:") {
-            let path = String(id.dropFirst("file:".count))
-            var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) else { return nil }
-            let file = FileEntry(path: path, name: (path as NSString).lastPathComponent, isDirectory: isDirectory.boolValue)
-            return Self.fileRow(file, score: 0, isCurrent: true)
-        }
-        return catalogue.entries.first { $0.id == id }.map { Self.appRow($0, running: running.contains($0.path), score: 0) }
-    }
     private func publish(_ unsorted: [LauncherResult], start: CFAbsoluteTime) {
         var unsorted = unsorted
         if let jevPick, let index = unsorted.firstIndex(where: { $0.id == jevPick.id }) {

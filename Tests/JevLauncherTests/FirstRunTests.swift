@@ -48,6 +48,26 @@ final class FirstRunTests: XCTestCase {
         }
     }
 
+    func testWelcomePagesRunInOrder() {
+        XCTAssertEqual(WelcomePage.allCases, [.welcome, .shortcut, .tour, .permissions, .ai, .finish])
+        XCTAssertNil(WelcomePage.welcome.previous)
+        XCTAssertNil(WelcomePage.finish.next, "The last step shows Done.")
+        for page in WelcomePage.allCases.dropLast() { XCTAssertEqual(page.next?.previous, page) }
+    }
+
+    @MainActor func testAllowAllAsksOnlyWhereMacOSStillPrompts() {
+        XCTAssertEqual(WelcomePermissions.promptable { _ in true }, [.calendars, .reminders, .contacts],
+                       "Full Disk Access and Automation have no prompt, so they are not asked.")
+        XCTAssertEqual(WelcomePermissions.promptable { $0 == .contacts }, [.contacts], "A refused or granted permission is left alone.")
+        XCTAssertFalse(SourcePermissionRowKind.fullDiskAccess.isUndetermined)
+    }
+
+    func testWelcomeExamplesAreDistinctAndTyped() {
+        let queries = WelcomeExample.all.map(\.query)
+        XCTAssertEqual(Set(queries).count, queries.count)
+        XCTAssertFalse(queries.contains { $0.trimmingCharacters(in: .whitespaces).isEmpty })
+    }
+
     @MainActor private func withDefaults(_ body: (UserDefaults) -> Void) {
         let suite = "JevLauncherTests." + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!

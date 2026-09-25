@@ -53,6 +53,15 @@ enum SourcePermissionRowKind: CaseIterable, Identifiable {
         case .fullDiskAccess, .automation: return nil
         }
     }
+    /// True before the first request, while macOS can still show its prompt.
+    @MainActor var isUndetermined: Bool {
+        switch self {
+        case .calendars: return EKEventStore.authorizationStatus(for: .event) == .notDetermined
+        case .reminders: return EKEventStore.authorizationStatus(for: .reminder) == .notDetermined
+        case .contacts: return CNContactStore.authorizationStatus(for: .contacts) == .notDetermined
+        case .fullDiskAccess, .automation: return false
+        }
+    }
     var access: SourceAccess {
         switch self {
         case .calendars: return .calendars; case .reminders: return .reminders; case .contacts: return .contacts

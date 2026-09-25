@@ -224,15 +224,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
                 }))
             }
         }
-        steps.append(("welcome", 0.9, { [weak self] in self?.welcome?.window?.contentView }, { [weak self] in
-            guard let self else { return }
-            for (key, value) in zip(partKeys, storedParts) { UserDefaults.standard.set(value, forKey: key) }
-            self.settings?.window?.orderOut(nil)
-            self.welcome = WelcomeWindow(preferences: shownPreferences, model: shownModel, status: self.status, changed: {}, openSettings: {})
-            self.welcome?.window?.alphaValue = 0
-            self.welcome?.window?.ignoresMouseEvents = true
-            self.welcome?.window?.orderFrontRegardless()
-        }))
+        for page in WelcomePage.allCases {
+            steps.append(("welcome-" + page.rawValue, 0.9, { [weak self] in self?.welcome?.window?.contentView }, { [weak self] in
+                guard let self else { return }
+                for (key, value) in zip(partKeys, storedParts) { UserDefaults.standard.set(value, forKey: key) }
+                self.settings?.window?.orderOut(nil)
+                self.welcome?.close()
+                self.welcome = WelcomeWindow(preferences: shownPreferences, model: shownModel, status: self.status, page: page,
+                                             changed: {}, openSettings: { _ in }, tryQuery: { _ in })
+                self.welcome?.window?.alphaValue = 0
+                self.welcome?.window?.ignoresMouseEvents = true
+                self.welcome?.window?.orderFrontRegardless()
+            }))
+        }
         func run(_ index: Int) {
             guard index < steps.count else { rig.removePreferences(); NSApp.terminate(nil); return }
             let step = steps[index]
@@ -445,13 +449,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     @objc func showWelcome() {
         hide(restoreFocus: false)
         preferences.welcomeShown = true
-        if welcome == nil {
-            welcome = WelcomeWindow(preferences: preferences, model: model, status: status,
-                                    changed: { [weak self] in self?.configureHotkeys() },
-                                    openSettings: { [weak self] in self?.showSettings() })
-        }
+        // A new window each time, so Help › Welcome Guide starts at the first step.
+        welcome?.close()
+        welcome = WelcomeWindow(preferences: preferences, model: model, status: status,
+                                changed: { [weak self] in self?.configureHotkeys() },
+                                openSettings: { [weak self] tab in self?.showSettings(tab: tab) },
+                                tryQuery: { [weak self] text in self?.tryQuery(text) })
         NSApp.activate()
         welcome?.showWindow(nil)
+    }
+    /// Opens the launcher with a welcome-guide example typed in.
+    private func tryQuery(_ text: String) {
+        show()
+        // Typed, so a voice transcript does not replace the example.
+        model.updateQuery(text, typed: true)
     }
     @objc func checkForUpdates() { updates.checkAndReport() }
     @objc func openMailWindow() { showView(.mail) }

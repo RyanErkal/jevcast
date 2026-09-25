@@ -2,6 +2,12 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.5.1] - 2026-09-25
+
+### Fixed
+
+- **Faster Calendar.** Month and week views fetch the months either side in the background and keep them after the view closes, so ↑, ↓, and switching to Week show at once. The List view and calendar search read events off the main thread, and Copy Details no longer reloads the list.
+
 ## [1.5.0] - 2026-09-24
 
 ### Added

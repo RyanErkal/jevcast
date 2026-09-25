@@ -27,20 +27,27 @@ final class CalendarSource: ThingSource {
         case "week", "this week", "next 7 days": end = cal.date(byAdding: .day, value: 7, to: today)!
         default: end = cal.date(byAdding: .day, value: 30, to: today)!; text = filter
         }
-        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
-        // Cancelled events and invitations the user declined are not on their day.
-        let events = store.events(matching: predicate).filter { event in
-            event.status != .canceled && !(event.attendees ?? []).contains { $0.isCurrentUser && $0.participantStatus == .declined }
-        }.sorted { $0.startDate < $1.startDate }
-        let matching = text.isEmpty ? events : events.filter { SearchRanking.score(query: text, title: $0.title ?? "") != nil }
-        return matching.prefix(60).enumerated().map { index, event in row(event, score: 3000 - Double(index)) }
+        // EventKit reads, filtering, and link detection run off the main thread; rows are built here.
+        nonisolated(unsafe) let store = store
+        let found = await Task.detached(priority: .userInitiated) { () -> [Found] in
+            let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
+            // Cancelled events and invitations the user declined are not on their day.
+            let events = store.events(matching: predicate).filter { event in
+                event.status != .canceled && !(event.attendees ?? []).contains { $0.isCurrentUser && $0.participantStatus == .declined }
+            }.sorted { $0.startDate < $1.startDate }
+            let matching = text.isEmpty ? events : events.filter { SearchRanking.score(query: text, title: $0.title ?? "") != nil }
+            return matching.prefix(60).map { Found(event: $0, link: MeetingLink.find(in: [$0.url?.absoluteString, $0.location, $0.notes])) }
+        }.value
+        try Task.checkCancellation()
+        return found.enumerated().map { index, item in row(item.event, link: item.link, score: 3000 - Double(index)) }
     }
 
-    private func row(_ event: EKEvent, score: Double) -> LauncherResult {
+    private struct Found: @unchecked Sendable { let event: EKEvent; let link: URL? }
+
+    private func row(_ event: EKEvent, link: URL?, score: Double) -> LauncherResult {
         var parts = [Self.when(event)]
         if let name = event.calendar?.title { parts.append(name) }
         if let location = event.location, !location.isEmpty { parts.append(location) }
-        let link = MeetingLink.find(in: [event.url?.absoluteString, event.location, event.notes])
         if link != nil { parts.append("video call") }
         let eventID = event.eventIdentifier
         let id = eventID ?? UUID().uuidString
@@ -66,7 +73,7 @@ final class CalendarSource: ThingSource {
                 })
             }
         }
-        verbs.append(Verb(title: "Copy Details", after: .stay) {
+        verbs.append(Verb(title: "Copy Details", after: .keepOpen) {
             var text = (event.title ?? "") + "\n" + Self.when(event)
             if let location = event.location, !location.isEmpty { text += "\n" + location }
             if let link { text += "\n" + link.absoluteString }

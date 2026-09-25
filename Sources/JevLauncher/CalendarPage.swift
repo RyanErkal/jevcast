@@ -31,10 +31,14 @@ final class CalendarPage: ObservableObject, LauncherPage {
     private var events: [Event] = []
     private var filterText = ""
     private var work: Task<Void, Never>?
+    private var fetchTask: Task<[Event], Never>?
     private var changeObserver: NSObjectProtocol?
     private var changeWork: Task<Void, Never>?
-    /// Fetched ranges, so going back to a month or week shows at once. Cleared when Calendar changes.
-    private var cache: [DateInterval: [Event]] = [:]
+    /// Fetched windows, newest last, kept across openings so the view shows at once. Each window covers
+    /// the month on screen and the months either side, so ↑ and ↓ and a week inside it need no fetch.
+    /// Cleared when Calendar changes.
+    private static var cache: [(range: DateInterval, events: [Event])] = []
+    private static var cacheObserver: NSObjectProtocol?
     private var listOpened = false
     private var calendar: Calendar { Calendar.current }
 
@@ -46,7 +50,8 @@ final class CalendarPage: ObservableObject, LauncherPage {
     func popOut() { list.popOut() }
 
     func opened() {
-        mode = .month; anchor = Date(); cache = [:]; listOpened = false
+        mode = .month; anchor = Date(); listOpened = false
+        Self.watchStore()
         load()
         // Changes made in Calendar show while the view is open. A burst of changes reloads once.
         changeObserver = NotificationCenter.default.addObserver(forName: .EKEventStoreChanged, object: nil, queue: .main) { [weak self] _ in
@@ -56,22 +61,23 @@ final class CalendarPage: ObservableObject, LauncherPage {
                 self.changeWork = Task { @MainActor [weak self] in
                     try? await Task.sleep(nanoseconds: 400_000_000)
                     guard !Task.isCancelled, let self else { return }
-                    self.cache = [:]; self.load()
+                    Self.cache = []; self.load()
                 }
             }
         }
     }
     func closed(handingOff: Bool) {
         if listOpened { list.closed(handingOff: handingOff) }
-        work?.cancel(); changeWork?.cancel()
+        work?.cancel(); fetchTask?.cancel(); changeWork?.cancel()
         if let changeObserver { NotificationCenter.default.removeObserver(changeObserver) }
         changeObserver = nil
     }
 
     func filter(_ text: String) {
+        guard text != filterText else { return }
         filterText = text
         list.filter(text)
-        group()
+        if mode != .list { group() }
     }
 
     func handle(_ key: PageKey) -> Bool {
@@ -137,6 +143,7 @@ final class CalendarPage: ObservableObject, LauncherPage {
         let words = filterText.trimmingCharacters(in: .whitespaces).lowercased()
         var result: [Date: [Event]] = [:]
         guard let first = days.first, let last = days.last else { byDay = [:]; return }
+        let calendar = calendar
         for event in events where words.isEmpty || event.title.lowercased().contains(words) {
             var day = max(calendar.startOfDay(for: event.start), first)
             // An event that ends exactly at midnight does not show on the next day.
@@ -152,7 +159,7 @@ final class CalendarPage: ObservableObject, LauncherPage {
     func inMonth(_ day: Date) -> Bool { mode == .week || calendar.isDate(day, equalTo: anchor, toGranularity: .month) }
 
     private func load() {
-        guard mode != .list else { return }
+        guard mode != .list else { work?.cancel(); fetchTask?.cancel(); return }
         days = computeDays()
         guard readsEvents else { events = Self.demoEvents(around: anchor); group(); return }
         guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else {
@@ -163,16 +170,49 @@ final class CalendarPage: ObservableObject, LauncherPage {
         problem = nil
         guard let start = days.first, let last = days.last, let end = calendar.date(byAdding: .day, value: 1, to: last) else { return }
         let range = DateInterval(start: start, end: end)
-        work?.cancel()
-        if let cached = cache[range] { events = cached; group(); return }
-        // Keep the old events on screen until the new range arrives, so the grid never flashes empty.
+        let window = fetchWindow(covering: range)
+        work?.cancel(); fetchTask?.cancel()
+        let shown = Self.cached(range)
+        if let shown { events = shown; group() }
+        // A cached range shows at once. The wider window is fetched in the background when missing,
+        // so the next step is cached too. On a miss the old events stay until the fetch arrives.
+        if shown != nil, Self.cached(window) != nil { return }
         nonisolated(unsafe) let store = Permissions.events
+        let task = Task.detached(priority: shown == nil ? .userInitiated : .utility) { Self.fetch(store, window) }
+        fetchTask = task
         work = Task { @MainActor [weak self] in
-            let found = await Task.detached(priority: .userInitiated) { Self.fetch(store, range) }.value
+            let found = await task.value
             guard !Task.isCancelled, let self else { return }
-            self.cache[range] = found
-            self.events = found
-            self.group()
+            Self.store(window, found)
+            let visible = Self.cached(range) ?? found
+            self.events = visible; self.group()
+        }
+    }
+    /// The month on screen with a month either side, in whole weeks.
+    private func fetchWindow(covering range: DateInterval) -> DateInterval {
+        guard let month = calendar.dateInterval(of: .month, for: anchor),
+              let before = calendar.date(byAdding: .month, value: -1, to: month.start),
+              let after = calendar.date(byAdding: .month, value: 2, to: month.start),
+              let first = calendar.dateInterval(of: .weekOfYear, for: before),
+              let last = calendar.dateInterval(of: .weekOfYear, for: after) else { return range }
+        return DateInterval(start: min(first.start, range.start), end: max(last.end, range.end))
+    }
+    /// Events in `range` from a cached window that covers it, in the fetched order.
+    private static func cached(_ range: DateInterval) -> [Event]? {
+        guard let hit = cache.last(where: { $0.range.start <= range.start && $0.range.end >= range.end }) else { return nil }
+        if hit.range == range { return hit.events }
+        return hit.events.filter { $0.start < range.end && ($0.end > range.start || $0.start >= range.start) }
+    }
+    private static func store(_ range: DateInterval, _ events: [Event]) {
+        cache.removeAll { $0.range == range }
+        cache.append((range, events))
+        if cache.count > 6 { cache.removeFirst(cache.count - 6) }
+    }
+    /// Clears the cache when Calendar changes, also while the view is closed.
+    private static func watchStore() {
+        guard cacheObserver == nil else { return }
+        cacheObserver = NotificationCenter.default.addObserver(forName: .EKEventStoreChanged, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { cache = [] }
         }
     }
     /// Reads EventKit off the main thread. Cancelled events and declined invitations are left out.
@@ -230,11 +270,7 @@ private struct CalendarPageView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            switch page.mode {
-            case .list: list.content()
-            case .month: grid(columns: 7, tall: false)
-            case .week: grid(columns: 7, tall: true)
-            }
+            if page.mode == .list { list.content() } else { grid(tall: page.mode == .week) }
         }
     }
 
@@ -258,7 +294,7 @@ private struct CalendarPageView: View {
         .padding(.horizontal, 14).padding(.vertical, 8)
     }
 
-    @ViewBuilder private func grid(columns: Int, tall: Bool) -> some View {
+    @ViewBuilder private func grid(tall: Bool) -> some View {
         if let problem = page.problem {
             VStack(spacing: 10) {
                 Text(problem.text).foregroundStyle(.secondary)
@@ -301,10 +337,9 @@ private struct DayCell: View {
     let dimmed: Bool
     let limit: Int
     let tall: Bool
-    private var isToday: Bool { Calendar.current.isDateInToday(day) }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        let isToday = Calendar.current.isDateInToday(day)
+        return VStack(alignment: .leading, spacing: 2) {
             HStack {
                 Spacer()
                 Text(day.formatted(.dateTime.day()))

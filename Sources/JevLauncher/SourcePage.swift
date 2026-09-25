@@ -38,7 +38,10 @@ final class SourcePage: ObservableObject, LauncherPage {
     }
 
     var selected: LauncherResult? { rows.first { $0.id == selectedID } }
-    var detail: LauncherResult? { rows.first { $0.id == detailID } ?? all.first { $0.id == detailID } }
+    var detail: LauncherResult? {
+        guard let detailID else { return nil }
+        return rows.first { $0.id == detailID } ?? all.first { $0.id == detailID }
+    }
     var canPopOut: Bool { popOutAction != nil }
     func popOut() { popOutAction?() }
     func opened() { reload() }

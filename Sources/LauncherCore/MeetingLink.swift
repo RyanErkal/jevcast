@@ -12,12 +12,17 @@ public enum MeetingLink {
     public static func find(in texts: [String?]) -> URL? {
         guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return nil }
         for text in texts.compactMap({ $0 }) where !text.isEmpty {
-            for match in detector.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
-                guard let url = match.url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { continue }
-                guard let host = url.host?.lowercased() else { continue }
+            var found: URL?
+            // Stops at the first call link instead of collecting every link in long notes.
+            detector.enumerateMatches(in: text, range: NSRange(text.startIndex..., in: text)) { match, _, stop in
+                guard let url = match?.url, ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+                      let host = url.host?.lowercased() else { return }
                 let path = url.path.lowercased()
-                if services.contains(where: { (host == $0.host || host.hasSuffix("." + $0.host)) && path.hasPrefix($0.path) && path.count > 1 }) { return url }
+                if services.contains(where: { (host == $0.host || host.hasSuffix("." + $0.host)) && path.hasPrefix($0.path) && path.count > 1 }) {
+                    found = url; stop.pointee = true
+                }
             }
+            if let found { return found }
         }
         return nil
     }

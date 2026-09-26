@@ -47,15 +47,15 @@ public enum FunctionCatalog {
     public static let views: [FunctionEntry] = [
         FunctionEntry(id: "view:mail", title: "Mail", keywords: ["inbox", "email"], summary: "Read and clear your Apple Mail inbox", symbol: "envelope", group: .views),
         FunctionEntry(id: "view:calendar", title: "Calendar", keywords: ["agenda", "events", "meetings", "my day"], summary: "Today's and upcoming events", symbol: "calendar", group: .views),
-        FunctionEntry(id: "view:tasks", title: "Luna Tasks", keywords: ["scheduled luna", "task results", "luna"], summary: "Scheduled Luna tasks and what they wrote", symbol: "sparkles", group: .views),
+        FunctionEntry(id: "view:tasks", title: "Quill Tasks", keywords: ["scheduled quill", "task results", "quill"], summary: "Scheduled Quill tasks and what they wrote", symbol: "sparkles", group: .views),
         FunctionEntry(id: "view:clipboard", title: "Clipboard", keywords: ["clip", "clipboard history", "paste"], summary: "Text you copied earlier", symbol: "doc.on.clipboard", group: .views),
         FunctionEntry(id: "view:cleanup", title: "Clean Up", keywords: ["cleanup", "free memory", "cool down"], summary: "Quit or stop background work you choose", symbol: "leaf", group: .views)
     ]
 
     /// Source lists that have no view of their own.
     public static let lists: [FunctionEntry] = [
-        FunctionEntry(id: "source:scheduled", title: "Scheduled Tasks", keywords: ["automations", "launchd", "cron", "login items"], summary: "Launch agents, cron jobs, timers, and Luna tasks", symbol: "clock.arrow.circlepath", group: .lists),
-        FunctionEntry(id: "source:taskRuns", title: "Task Results", keywords: ["luna results", "task log"], summary: "What scheduled Luna tasks wrote", symbol: "doc.text.magnifyingglass", group: .lists),
+        FunctionEntry(id: "source:scheduled", title: "Scheduled Tasks", keywords: ["automations", "launchd", "cron", "login items"], summary: "Launch agents, cron jobs, timers, and Quill tasks", symbol: "clock.arrow.circlepath", group: .lists),
+        FunctionEntry(id: "source:taskRuns", title: "Task Results", keywords: ["quill results", "task log"], summary: "What scheduled Quill tasks wrote", symbol: "doc.text.magnifyingglass", group: .lists),
         FunctionEntry(id: "source:reminders", title: "Reminders", keywords: ["todo", "to do", "tasks"], summary: "Open reminders", symbol: "checklist", group: .lists),
         FunctionEntry(id: "source:contacts", title: "Contacts", keywords: ["people"], summary: "Find a contact", symbol: "person.crop.circle", group: .lists),
         FunctionEntry(id: "source:tabs", title: "Browser Tabs", keywords: ["tabs", "open tabs"], summary: "Switch to an open browser tab", symbol: "safari", group: .lists),
@@ -69,7 +69,7 @@ public enum FunctionCatalog {
         ("library", "Library", "Your commands, workflows, and snippets", "books.vertical", ["commands", "workflows", "snippets"]),
         ("windows", "Windows", "Window gaps and shortcuts", "macwindow", ["gaps", "snapping"]),
         ("voice", "Voice", "Speech input", "waveform", ["microphone", "dictation"]),
-        ("ai", "AI", "Jev, Luna, and usage", "sparkles", ["jev", "luna", "openrouter", "usage", "key"]),
+        ("ai", "AI", "Jev, Quill, and usage", "sparkles", ["jev", "quill", "openrouter", "usage", "key"]),
         ("mail", "Mail", "Mail window options", "envelope", ["inbox"])
     ].map { id, title, summary, symbol, keywords in
         FunctionEntry(id: "settings:" + id, title: title + " Settings", keywords: keywords, summary: summary, symbol: symbol, group: .settings)

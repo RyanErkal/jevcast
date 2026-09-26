@@ -128,7 +128,7 @@ final class DictationController: ObservableObject {
             do {
                 let raw = try await session.value
                 // Another app came forward, as after ⌘Tab, whose Tab key the monitors do not see.
-                // Checked before Luna and again before the paste, so text never goes to the wrong app.
+                // Checked before Quill and again before the paste, so text never goes to the wrong app.
                 guard self.isFront(target) else { self.notPasted(raw); return }
                 let cleaned = await self.model.cleanDictation(raw)
                 guard !cleaned.text.isEmpty else { self.overlay.show(.message("No speech heard.")); return }
@@ -138,7 +138,7 @@ final class DictationController: ObservableObject {
                 case .onClipboard: self.overlay.show(.message("Copied. Allow Accessibility to paste."))
                 }
                 let entry = Transcript(text: cleaned.text, date: Date(), duration: duration, target: target,
-                                       engine: engine.name + (cleaned.usedLuna ? "+luna" : ""))
+                                       engine: engine.name + (cleaned.usedQuill ? QuillStorageKeys.transcriptEngineSuffix : ""))
                 try? self.store.append(entry, retention: self.preferences.dictationRetention)
                 self.store.prune(self.preferences.dictationRetention)
             } catch is CancellationError {

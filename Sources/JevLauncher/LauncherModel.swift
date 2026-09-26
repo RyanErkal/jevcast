@@ -119,7 +119,7 @@ final class LauncherModel: ObservableObject {
     var loadingStatus: String? {
         if isSearchingFiles { return "Searching files…" }
         if aiStatus == Self.interpreting { return "Thinking…" }
-        if lunaAnswer?.isLoading == true { return "Luna is writing…" }
+        if quillAnswer?.isLoading == true { return "Quill is writing…" }
         if catalogue.scanning && catalogue.entries.isEmpty && !isFileSearch && !isClipboardSearch { return "Finding apps…" }
         return nil
     }
@@ -149,7 +149,7 @@ final class LauncherModel: ObservableObject {
     }
     /// What Return does with the selected result, for the footer.
     var primaryActionTitle: String? {
-        if lunaAnswer != nil { return lunaPrimaryTitle }
+        if quillAnswer != nil { return quillPrimaryTitle }
         guard let selected else { return nil }
         switch selected.action {
         case .app(let app): return app.launchURL != nil ? "Open Settings" : "Open Application"
@@ -243,21 +243,21 @@ final class LauncherModel: ObservableObject {
     /// Changes each time the launcher opens, so late work from an earlier opening is dropped.
     var visibleSession = UUID()
     var sourceTask: Task<Void, Never>?
-    /// Luna's answer in the panel, while it is written and after.
-    @Published var lunaAnswer: LunaAnswer?
-    var lunaWork: Task<Void, Never>?
-    let luna: LunaWriting
-    let lunaKeys: JevKeyCache
-    let lunaLog: LunaActivityLog
-    /// Scheduled Luna tasks. Made on first use; the app starts its clock at launch.
-    lazy var lunaTasks = LunaTaskCenter(defaults: preferences.storage, send: { [weak self] request in
+    /// Quill's answer in the panel, while it is written and after.
+    @Published var quillAnswer: QuillAnswer?
+    var quillWork: Task<Void, Never>?
+    let quill: QuillWriting
+    let quillKeys: JevKeyCache
+    let quillLog: QuillActivityLog
+    /// Scheduled Quill tasks. Made on first use; the app starts its clock at launch.
+    lazy var quillTasks = QuillTaskCenter(defaults: preferences.storage, send: { [weak self] request in
         guard let self else { throw CancellationError() }
-        return try await self.sendLuna(request)
-    }, allowed: { [weak self] in self?.allowedLunaContext ?? [] })
+        return try await self.sendQuill(request)
+    }, allowed: { [weak self] in self?.allowedQuillContext ?? [] })
     /// Opens a task result window, set by the app.
-    var openTaskRun: ((LunaTaskRun) -> Void)?
-    /// Opens Settings › AI › Luna, set by the app.
-    var openLunaSettings: (() -> Void)?
+    var openTaskRun: ((QuillTaskRun) -> Void)?
+    /// Opens Settings › AI › Quill, set by the app.
+    var openQuillSettings: (() -> Void)?
     /// Opens a Settings tab by its raw name, such as "ai", set by the app.
     var openSettingsTab: ((String) -> Void)?
     /// Shows a view in the panel, such as "mail", "calendar", or "tasks". Nil until the app has views.
@@ -277,9 +277,9 @@ final class LauncherModel: ObservableObject {
 
     init(preferences: Preferences, catalogue: AppCatalogue, files: FileSearching? = nil,
          jev: JevChoosing = JevService(), keys: JevKeyCache? = nil, clipboard: ClipboardHistory? = nil, usage: JevUsageLog? = nil,
-         luna: LunaWriting = LunaService(), lunaKeys: JevKeyCache? = nil, lunaLog: LunaActivityLog? = nil) {
+         quill: QuillWriting = QuillService(), quillKeys: JevKeyCache? = nil, quillLog: QuillActivityLog? = nil) {
         self.preferences = preferences; self.catalogue = catalogue
-        self.luna = luna; self.lunaKeys = lunaKeys ?? .luna; self.lunaLog = lunaLog ?? .shared
+        self.quill = quill; self.quillKeys = quillKeys ?? .quill; self.quillLog = quillLog ?? .shared
         self.files = files ?? FileSearch()
         self.jev = jev
         self.usage = usage
@@ -308,7 +308,7 @@ final class LauncherModel: ObservableObject {
         previousFileResults = []; fileResults = []; promotedID = nil; semanticResult = nil; revision = UUID()
         portQuery = nil; listeners = []; portDetails = [:]; stoppedNotice = nil; isLoadingPorts = false; pendingConfirmID = nil
         sourceQuery = nil; sourceRows = []; sourceProblem = nil; sourceNote = nil; isLoadingSource = false
-        jevPick = nil; menuCommands = []; frontContext = nil; visibleSession = UUID(); dismissLuna()
+        jevPick = nil; menuCommands = []; frontContext = nil; visibleSession = UUID(); dismissQuill()
         contextApp = targetApp; contextState = .none
         rebuild()
         ShortcutsCatalogue.shared.refreshIfStale()
@@ -336,7 +336,7 @@ final class LauncherModel: ObservableObject {
         if !speech.isStarting && !speech.isListening { voiceError = speech.status }
     }
     func end() {
-        visible = false; revision = UUID(); sourceTask?.cancel(); dismissLuna()
+        visible = false; revision = UUID(); sourceTask?.cancel(); dismissQuill()
         startWork?.cancel(); speech.stop(); work?.cancel(); aiWork?.cancel(); files.stop()
         aiStatus = ""; aiError = nil
     }
@@ -344,7 +344,7 @@ final class LauncherModel: ObservableObject {
         guard visible else { return }
         if typed { acceptsSpeech = false; speech.stop() }
         guard text != query else { return }
-        dismissLuna()
+        dismissQuill()
         let wasFileSearch = isFileSearch
         // "/cal" lists functions, not files under "/cal".
         parsedFileQuery = FileSearchQuery(text: Self.prefix(for: text) == nil ? text : ""); fileStatus = ""
@@ -606,7 +606,7 @@ final class LauncherModel: ObservableObject {
     }
     var selected: LauncherResult? { results.first { $0.id == selectedID && $0.isCurrent } }
     func execute(paste: Bool = false) {
-        if lunaAnswer != nil { finishLunaAnswer(paste: paste); return }
+        if quillAnswer != nil { finishQuillAnswer(paste: paste); return }
         guard let result = selected else { message = "Choose an action first."; return }
         if result.needsConfirmation && pendingConfirmID != result.id { pendingConfirmID = result.id; return }
         pendingConfirmID = nil

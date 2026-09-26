@@ -58,10 +58,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     private var settings: SettingsWindow?
     private var mail: MailWindow?
     /// One mail model for the Mail view and the mail window, so ⌘O keeps your place.
-    private lazy var mailModel = MailModel(luna: { [unowned self] in try await self.model.sendLuna($0) },
-                                           lunaAllowed: { [unowned self] in self.model.allowedLunaContext.contains(.mailMessage) })
+    private lazy var mailModel = MailModel(quill: { [unowned self] in try await self.model.sendQuill($0) },
+                                           quillAllowed: { [unowned self] in self.model.allowedQuillContext.contains(.mailMessage) })
     private var viewSizeWatch: AnyCancellable?
-    private var resultWindow: LunaResultWindow?
+    private var resultWindow: QuillResultWindow?
     private var statusMenu: StatusMenu?
     private var keyMonitor: Any?
     private var wasVisible = false
@@ -77,7 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         panel.host(content)
         panel.delegate = self
         model.onClose = { [weak self] restore in self?.hide(restoreFocus: restore) }
-        model.openLunaSettings = { [weak self] in self?.showSettings(tab: .ai, aiPart: .luna) }
+        model.openQuillSettings = { [weak self] in self?.showSettings(tab: .ai, aiPart: .quill) }
         model.openSettingsTab = { [weak self] name in
             if let tab = SettingsWindow.Tab(rawValue: name) { self?.showSettings(tab: tab) }
         }
@@ -93,14 +93,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         viewSizeWatch = model.$page.map { $0 != nil }.removeDuplicates().sink { [weak self] wide in self?.panel.setViewSize(wide) }
         UNUserNotificationCenter.current().delegate = self
         // Snapshot runs never run tasks.
-        if UISnapshots.directory == nil { model.lunaTasks.start() }
+        if UISnapshots.directory == nil { model.quillTasks.start() }
         model.composeMail = { [weak self] address in self?.showMail(compose: address) }
         model.onFailure = { [weak self] text in
             guard let self else { return }
             self.show(); self.model.message = text
         }
         AppMenus.install(commands: self)
-        statusMenu = StatusMenu(preferences: preferences, updates: updates, commands: self, tasks: model.lunaTasks,
+        statusMenu = StatusMenu(preferences: preferences, updates: updates, commands: self, tasks: model.quillTasks,
                                 isOpen: { [weak self] in self?.wasVisible ?? false }, toggle: { [weak self] in self?.toggle() },
                                 openSettings: { [weak self] tab in self?.showSettings(tab: tab) })
         // Snapshot runs leave global shortcuts to the running copy of the app.
@@ -118,10 +118,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             if let editor = self.panel.firstResponder as? NSTextView, editor.hasMarkedText() { return event }
             // A view such as Mail takes ↑↓, Return, ⌫, Escape, and ⌘O; other keys type in the filter.
             if self.model.page != nil { return self.model.handleViewKey(event) ? nil : event }
-            // With Luna's answer showing, Escape goes back to the rows and row keys do nothing.
-            if self.model.lunaAnswer != nil {
+            // With Quill's answer showing, Escape goes back to the rows and row keys do nothing.
+            if self.model.quillAnswer != nil {
                 switch event.keyCode {
-                case 53: self.model.dismissLuna(); return nil
+                case 53: self.model.dismissQuill(); return nil
                 case 36, 76: self.model.execute(paste: event.modifierFlags.contains(.shift)); return nil
                 case 125, 126, 51: return event.keyCode == 51 ? event : nil
                 default: if event.modifierFlags.contains(.command) { return event.charactersIgnoringModifiers == "c" ? event : nil }
@@ -388,9 +388,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         hide()
     }
     /// A scheduled task's result.
-    func showRun(_ run: LunaTaskRun) {
+    func showRun(_ run: QuillTaskRun) {
         hide(restoreFocus: false)
-        resultWindow = LunaResultWindow(run: run)
+        resultWindow = QuillResultWindow(run: run)
         resultWindow?.show()
     }
     /// Shows task results while Jevcast is in front too.
@@ -399,9 +399,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     }
     /// A click on a task's notification opens its result.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        guard let id = response.notification.request.content.userInfo["lunaRun"] as? String else { return }
+        guard let id = response.notification.request.content.userInfo[QuillStorageKeys.notificationRunKey] as? String else { return }
         await MainActor.run {
-            if let run = self.model.lunaTasks.runs.first(where: { $0.id == id }) { self.showRun(run) }
+            if let run = self.model.quillTasks.runs.first(where: { $0.id == id }) { self.showRun(run) }
         }
     }
     /// The Jevcast mail window, made on first use.
@@ -420,9 +420,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         showView(.mail)
         if let rowID { (model.page as? MailPage)?.show(rowID) }
     }
-    private func showRunView(_ run: LunaTaskRun) {
+    private func showRunView(_ run: QuillTaskRun) {
         showView(.tasks)
-        (model.page as? SourcePage)?.showDetail("lunarun:" + run.id)
+        (model.page as? SourcePage)?.showDetail(QuillStorageKeys.runRowPrefix + run.id)
     }
     /// What views open outside the panel. ⌘O on Mail keeps the list's selection in the mail window.
     private var pageLinks: LauncherPages.Links {

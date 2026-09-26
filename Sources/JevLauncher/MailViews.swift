@@ -55,7 +55,7 @@ struct MailSetupView: View {
                     Text("4. Click Restart Jevcast. macOS applies the access only to a new start.")
                 }
                 .font(.callout).frame(maxWidth: 460, alignment: .leading)
-                Text("Nothing leaves your Mac unless you use Luna on a message.").font(.caption).foregroundStyle(.secondary)
+                Text("Nothing leaves your Mac unless you use Quill on a message.").font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("Open Full Disk Access") { Permissions.open("Privacy_AllFiles") }
                     Button("Show Jevcast in Finder") { Frontmost.reveal([Bundle.main.bundleURL]) }
@@ -162,7 +162,7 @@ struct MailReader: View {
                 Divider()
                 if let summary = model.summary {
                     GroupBox { Text(summary).font(.system(size: 12)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
-                        label: { Label("Luna summary", systemImage: "sparkles") }
+                        label: { Label("Quill summary", systemImage: "sparkles") }
                         .padding(12)
                 }
                 body(message)
@@ -228,7 +228,7 @@ struct MailReader: View {
                 .help("Mark read or unread (U)")
             Menu {
                 Button("Delete All from \(model.selected?.sender ?? "Sender")", role: .destructive) { model.deleteAllFromSender() }
-                if model.canUseLuna { Button("Summarise with Luna") { model.summarise() }.disabled(model.detail == nil || model.lunaBusy) }
+                if model.canUseQuill { Button("Summarise with Quill") { model.summarise() }.disabled(model.detail == nil || model.quillBusy) }
                 Toggle("Load Images from the Web", isOn: $model.loadsImages)
                 Button("Open in Mail (Return)") { model.openInMail() }
             } label: { Image(systemName: "ellipsis.circle") }
@@ -260,11 +260,11 @@ struct ComposeView: View {
                 } else {
                     Text(binding.wrappedValue.subject).foregroundStyle(.secondary).lineLimit(1)
                 }
-                if model.canUseLuna {
+                if model.canUseQuill {
                     HStack {
-                        TextField("Tell Luna what to write, such as “yes, but next week”", text: binding.instruction)
-                            .textFieldStyle(.roundedBorder).onSubmit { model.draftWithLuna() }
-                        Button(model.lunaBusy ? "Writing…" : "Draft with Luna") { model.draftWithLuna() }.disabled(model.lunaBusy)
+                        TextField("Tell Quill what to write, such as “yes, but next week”", text: binding.instruction)
+                            .textFieldStyle(.roundedBorder).onSubmit { model.draftWithQuill() }
+                        Button(model.quillBusy ? "Writing…" : "Draft with Quill") { model.draftWithQuill() }.disabled(model.quillBusy)
                     }
                 }
                 TextEditor(text: binding.body).font(.system(size: 13)).frame(minHeight: 220).focused($bodyFocused)

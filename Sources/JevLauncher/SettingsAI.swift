@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Settings › AI: Jev, Luna, and what they cost, one part at a time.
+/// Settings › AI: Jev, Quill, and what they cost, one part at a time.
 struct AISettings: View {
-    enum Part: String, CaseIterable { case jev = "Jev", luna = "Luna", usage = "Usage" }
+    enum Part: String, CaseIterable { case jev = "Jev", quill = "Quill", usage = "Usage" }
     @ObservedObject var preferences: Preferences
     let model: LauncherModel
     let resized: () -> Void
@@ -12,8 +12,8 @@ struct AISettings: View {
         Form {
             Section { PaneSections(selection: $part) }
             switch part {
-            case .jev: JevSettings(preferences: preferences, keys: model.keys, lunaKeys: model.lunaKeys)
-            case .luna: LunaSettings(preferences: preferences, log: model.lunaLog, jevKeys: model.keys, lunaKeys: model.lunaKeys, tasks: model.lunaTasks)
+            case .jev: JevSettings(preferences: preferences, keys: model.keys, quillKeys: model.quillKeys)
+            case .quill: QuillSettings(preferences: preferences, log: model.quillLog, jevKeys: model.keys, quillKeys: model.quillKeys, tasks: model.quillTasks)
             case .usage: UsageSettings(preferences: preferences, usage: JevUsageLog.shared)
             }
         }
@@ -42,11 +42,11 @@ struct MailSettings: View {
                 Text("Reading needs Full Disk Access. Delete, move, and send go through Apple Mail, which needs Automation.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section("Luna") {
-                Toggle("Luna may read messages for summaries and replies", isOn: $preferences.lunaSendsMail)
-                    .disabled(!preferences.lunaEnabled)
-                if !preferences.lunaEnabled {
-                    Text("Turn on Luna in Settings › AI first.").font(.caption).foregroundStyle(.secondary)
+            Section("Quill") {
+                Toggle("Quill may read messages for summaries and replies", isOn: $preferences.quillSendsMail)
+                    .disabled(!preferences.quillEnabled)
+                if !preferences.quillEnabled {
+                    Text("Turn on Quill in Settings › AI first.").font(.caption).foregroundStyle(.secondary)
                 }
             }
         }

@@ -4,13 +4,13 @@ import LauncherCore
 
 /// One task result, opened from its notification or the launcher.
 @MainActor
-final class LunaResultWindow: NSWindowController {
-    init(run: LunaTaskRun) {
+final class QuillResultWindow: NSWindowController {
+    init(run: QuillTaskRun) {
         let text = run.file.flatMap { try? String(contentsOfFile: $0, encoding: .utf8) } ?? run.preview
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 520), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         window.title = run.taskName
         window.isReleasedWhenClosed = false
-        window.contentViewController = NSHostingController(rootView: LunaResultView(run: run, text: text))
+        window.contentViewController = NSHostingController(rootView: QuillResultView(run: run, text: text))
         window.center()
         super.init(window: window)
     }
@@ -18,8 +18,8 @@ final class LunaResultWindow: NSWindowController {
     func show() { showWindow(nil); if let window { Frontmost.show(window) } }
 }
 
-struct LunaResultView: View {
-    let run: LunaTaskRun
+struct QuillResultView: View {
+    let run: QuillTaskRun
     let text: String
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -43,9 +43,9 @@ struct LunaResultView: View {
     }
 }
 
-/// Settings › AI › Luna: the scheduled tasks and their last results.
-struct LunaTaskSettings: View {
-    @ObservedObject var center: LunaTaskCenter
+/// Settings › AI › Quill: the scheduled tasks and their last results.
+struct QuillTaskSettings: View {
+    @ObservedObject var center: QuillTaskCenter
     var body: some View {
         if center.tasks.isEmpty {
             Text("No scheduled tasks. Type one in the launcher, such as “every weekday at 8am brief me on my meetings and unread email”.")
@@ -64,12 +64,12 @@ struct LunaTaskSettings: View {
             }
         }
         Button("Open Results Folder") {
-            try? FileManager.default.createDirectory(at: LunaTaskCenter.folder, withIntermediateDirectories: true)
-            Frontmost.open(LunaTaskCenter.folder)
+            try? FileManager.default.createDirectory(at: QuillTaskCenter.folder, withIntermediateDirectories: true)
+            Frontmost.open(QuillTaskCenter.folder)
         }
         .controlSize(.small)
     }
-    private func details(_ task: LunaTask) -> String {
+    private func details(_ task: QuillTask) -> String {
         var parts = [task.schedule.summary]
         if !task.contexts.isEmpty { parts.append("reads " + task.contexts.map(\.title).joined(separator: ", ").lowercased()) }
         let refused = center.refused(task)

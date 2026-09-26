@@ -45,7 +45,7 @@ struct GeneralSettings: View {
                 Toggle("Jev natural-language matching", isOn: Binding(
                     get: { keys.hasKey && preferences.jevEnabled }, set: { preferences.jevEnabled = $0 }
                 )).disabled(!keys.hasKey)
-                Toggle("Luna answers and writing", isOn: $preferences.lunaEnabled)
+                Toggle("Quill answers and writing", isOn: $preferences.quillEnabled)
                 HStack {
                     Text(updateStatus).font(.caption).foregroundStyle(.secondary)
                     Spacer()
@@ -57,7 +57,7 @@ struct GeneralSettings: View {
                 }
             } header: { Text("Network") } footer: {
                 InfoCaption("These, and web images in mail, are the only network use.",
-                            detail: "HTML mail loads web images, fonts, and styles unless you turn that off in Settings › Mail. The update check asks GitHub for the newest version and sends nothing else. Jev gets request text and candidate names. Luna gets only what Settings › AI › Luna allows. File paths, clipboard history, and audio are never sent.")
+                            detail: "HTML mail loads web images, fonts, and styles unless you turn that off in Settings › Mail. The update check asks GitHub for the newest version and sends nothing else. Jev gets request text and candidate names. Quill gets only what Settings › AI › Quill allows. File paths, clipboard history, and audio are never sent.")
             }
             if !preferences.cleanupIgnored.isEmpty {
                 Section("Ignored by Clean Up") {

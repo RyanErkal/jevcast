@@ -65,10 +65,10 @@ final class LauncherSnapshotRig {
             LauncherModel.displayHome = DemoData.home
             preferences.fileFolders = ["Documents", "Downloads", "Desktop"].map { NSHomeDirectory() + "/" + $0 }
         }
-        // Fresh Luna state, so captures never show this Mac's key or activity.
+        // Fresh Quill state, so captures never show this Mac's key or activity.
         model = LauncherModel(preferences: preferences, catalogue: catalogue, files: files, keys: JevKeyCache(key: nil),
-                              clipboard: ClipboardHistory(pasteboard: pasteboard), lunaKeys: JevKeyCache(key: nil),
-                              lunaLog: LunaActivityLog(defaults: defaults))
+                              clipboard: ClipboardHistory(pasteboard: pasteboard), quillKeys: JevKeyCache(key: nil),
+                              quillLog: QuillActivityLog(defaults: defaults))
         panel.acceptsKey = false; panel.alphaValue = 0; panel.ignoresMouseEvents = true
         panel.host(LauncherView(model: model, speech: model.speech, catalogue: catalogue, actions: {}))
         model.makePage = { [unowned model] id in LauncherPages.make(id, model: model, links: .init(), snapshot: true) }

@@ -54,10 +54,10 @@ final class MailModel: ObservableObject {
     @Published var draft: Draft?
     @Published private(set) var sending = false
     @Published private(set) var summary: String?
-    @Published private(set) var lunaBusy = false
+    @Published private(set) var quillBusy = false
 
-    private let luna: (LunaRequest) async throws -> LunaReply
-    private let lunaAllowed: () -> Bool
+    private let quill: (QuillRequest) async throws -> QuillReply
+    private let quillAllowed: () -> Bool
     private var root: String? { if case .ready(let root) = status { return root }; return nil }
     private var fingerprint = ""
     private var poll: Task<Void, Never>?
@@ -72,8 +72,8 @@ final class MailModel: ObservableObject {
     /// Mail actions run one after another, so quick deletes never race each other.
     private var actionChain: Task<Void, Never>?
 
-    init(luna: @escaping (LunaRequest) async throws -> LunaReply, lunaAllowed: @escaping () -> Bool) {
-        self.luna = luna; self.lunaAllowed = lunaAllowed
+    init(quill: @escaping (QuillRequest) async throws -> QuillReply, quillAllowed: @escaping () -> Bool) {
+        self.quill = quill; self.quillAllowed = quillAllowed
         // Settings › Mail writes the same default; follow it while this window exists.
         defaultsObserver = NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .receive(on: DispatchQueue.main)
@@ -89,7 +89,7 @@ final class MailModel: ObservableObject {
     var inboxes: [MailMailbox] { mailboxes.filter { $0.role == .inbox } }
     var accounts: [String] { Array(Set(mailboxes.map(\.accountID))).sorted() }
     var unreadInInbox: Int { inboxes.map(\.unread).reduce(0, +) }
-    var canUseLuna: Bool { lunaAllowed() }
+    var canUseQuill: Bool { quillAllowed() }
 
     // MARK: Loading
 
@@ -425,7 +425,7 @@ final class MailModel: ObservableObject {
         }
     }
 
-    // MARK: Luna
+    // MARK: Quill
 
     private var messageText: String? {
         guard let detail, let message = selected else { return nil }
@@ -433,13 +433,13 @@ final class MailModel: ObservableObject {
     }
 
     func summarise() {
-        guard let text = messageText, !lunaBusy else { return }
-        lunaBusy = true
+        guard let text = messageText, !quillBusy else { return }
+        quillBusy = true
         let id = selectedID
         Task { @MainActor [weak self] in
-            defer { self?.lunaBusy = false }
+            defer { self?.quillBusy = false }
             do {
-                let reply = try await self?.luna(.summarise(message: text))
+                let reply = try await self?.quill(.summarise(message: text))
                 guard self?.selectedID == id else { return }
                 self?.summary = reply?.text
             } catch { self?.banner = error.localizedDescription }
@@ -447,16 +447,16 @@ final class MailModel: ObservableObject {
     }
 
     /// Writes the reply body from the instruction in the draft, such as "yes, but next week".
-    func draftWithLuna() {
-        guard var current = draft, !lunaBusy else { return }
+    func draftWithQuill() {
+        guard var current = draft, !quillBusy else { return }
         let source: String
         if let text = messageText, current.original?.rowID == selectedID { source = text } else { source = "(No original message.)\nSubject: " + current.subject }
-        lunaBusy = true
+        quillBusy = true
         let instruction = current.instruction
         Task { @MainActor [weak self] in
-            defer { self?.lunaBusy = false }
+            defer { self?.quillBusy = false }
             do {
-                guard let reply = try await self?.luna(.reply(message: source, instruction: instruction)) else { return }
+                guard let reply = try await self?.quill(.reply(message: source, instruction: instruction)) else { return }
                 current = self?.draft ?? current
                 current.body = reply.text
                 self?.draft = current

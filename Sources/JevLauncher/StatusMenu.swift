@@ -8,14 +8,14 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var item: NSStatusItem?
     private let preferences: Preferences
     private let updates: UpdateChecker
-    private let tasks: LunaTaskCenter
+    private let tasks: QuillTaskCenter
     private weak var commands: AppCommands?
     private let isOpen: () -> Bool
     private let toggle: () -> Void
     private let openSettings: (SettingsWindow.Tab) -> Void
     private var subscription: AnyCancellable?
 
-    init(preferences: Preferences, updates: UpdateChecker, commands: AppCommands, tasks: LunaTaskCenter,
+    init(preferences: Preferences, updates: UpdateChecker, commands: AppCommands, tasks: QuillTaskCenter,
          isOpen: @escaping () -> Bool, toggle: @escaping () -> Void, openSettings: @escaping (SettingsWindow.Tab) -> Void) {
         self.preferences = preferences; self.updates = updates; self.commands = commands; self.tasks = tasks
         self.isOpen = isOpen; self.toggle = toggle; self.openSettings = openSettings
@@ -62,7 +62,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(AppMenus.item("Clean Up…", #selector(AppCommands.showCleanup), commands))
         if !tasks.tasks.isEmpty || !tasks.runs.isEmpty {
             let running = tasks.running.count
-            menu.addItem(AppMenus.item(running > 0 ? "Luna Tasks (\(running) running)" : "Luna Task Results",
+            menu.addItem(AppMenus.item(running > 0 ? "Quill Tasks (\(running) running)" : "Quill Task Results",
                                        #selector(AppCommands.showTaskResults), commands))
         }
         menu.addItem(.separator())

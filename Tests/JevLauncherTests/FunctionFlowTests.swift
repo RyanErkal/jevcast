@@ -28,14 +28,14 @@ import LauncherCore
         XCTAssertEqual(files.searches, 0)
     }
 
-    func testTodoFindsRemindersAndTasksOpensLunaTasksView() {
+    func testTodoFindsRemindersAndTasksOpensQuillTasksView() {
         let model = makeModel(); defer { model.end() }
         var opened: [String] = []
         model.openView = { opened.append($0) }
         model.updateQuery("/todo", typed: true)
         XCTAssertEqual(model.selected?.id, "source:reminders")
         if case .route(let text) = model.selected?.action { XCTAssertTrue(text.hasPrefix("reminders")) } else { XCTFail("Reminders routes to its list") }
-        model.updateQuery("/luna tasks", typed: true)
+        model.updateQuery("/quill tasks", typed: true)
         XCTAssertEqual(model.selected?.id, "view:tasks")
         model.execute()
         XCTAssertEqual(opened, ["tasks"])

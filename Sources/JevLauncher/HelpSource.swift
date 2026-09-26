@@ -8,7 +8,7 @@ final class HelpSource: ThingSource {
     static let features: [(title: String, words: String, query: String, symbol: String)] = [
         ("Mail", "show mail · inbox · mail <words>", "show mail", "envelope"),
         ("Scheduled tasks and automations", "scheduled tasks · automations · what runs at login", "automations", "clock.arrow.circlepath"),
-        ("Schedule a Luna task", "every weekday at 8am brief me on my meetings", "every weekday at 8am brief me on my meetings", "calendar.badge.clock"),
+        ("Schedule a Quill task", "every weekday at 8am brief me on my meetings", "every weekday at 8am brief me on my meetings", "calendar.badge.clock"),
         ("Task results", "task results", "task results", "doc.text"),
         ("Calendar", "calendar · my day · calendar week", "calendar", "calendar"),
         ("Reminders", "reminders · remind me to … at 5pm", "reminders", "checklist"),
@@ -17,7 +17,7 @@ final class HelpSource: ThingSource {
         ("Browser tabs", "tabs · tabs <words>", "tabs", "safari"),
         ("Browser history", "history <words>", "history ", "clock"),
         ("This page, file, or selection", "this · copy link", "this", "hand.point.up.left"),
-        ("Ask Luna", "ask <question>", "ask ", "sparkles"),
+        ("Ask Quill", "ask <question>", "ask ", "sparkles"),
         ("Clean up background work", "cleanup · cool down", "cleanup", "leaf"),
         ("Ports and servers", "ports · port 3000", "ports", "server.rack"),
         ("Clipboard history", "clip", "clip", "doc.on.clipboard"),

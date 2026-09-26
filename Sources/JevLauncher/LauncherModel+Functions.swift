@@ -100,7 +100,7 @@ extension LauncherModel {
         }
     }
 
-    private static let viewRoutes = ["calendar": "calendar", "tasks": "luna tasks", "clipboard": "clip ", "cleanup": "clean up"]
+    private static let viewRoutes = ["calendar": "calendar", "tasks": "quill tasks", "clipboard": "clip ", "cleanup": "clean up"]
     private static let sourceRoutes = ["reminders": "reminders ", "scheduled": "scheduled tasks", "taskRuns": "task results", "contacts": "contacts ", "tabs": "tabs ", "history": "browser history ", "help": "help"]
 
     private func verbRow(_ entry: FunctionEntry, _ title: String, run: @escaping @MainActor () async throws -> String?) -> LauncherResult {

@@ -34,16 +34,16 @@ struct VoiceSettings: View {
 struct JevSettings: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var keys: JevKeyCache
-    @ObservedObject var lunaKeys: JevKeyCache
+    @ObservedObject var quillKeys: JevKeyCache
     @State private var key = ""
     @State private var keyMessage = ""
     @State private var testing = false
     private var trimmedKey: String { key.trimmingCharacters(in: .whitespacesAndNewlines) }
-    /// Luna borrows an OpenRouter Jev key when it has none of its own.
-    private var sharedWithLuna: Bool { keys.provider == .openRouter && !lunaKeys.hasKey }
+    /// Quill borrows an OpenRouter Jev key when it has none of its own.
+    private var sharedWithQuill: Bool { keys.provider == .openRouter && !quillKeys.hasKey }
 
     var body: some View {
-        Group { sections }.task { await keys.load(); await lunaKeys.load() }
+        Group { sections }.task { await keys.load(); await quillKeys.load() }
     }
     @ViewBuilder private var sections: some View {
         Section {
@@ -60,8 +60,8 @@ struct JevSettings: View {
                 .font(.caption)
             }
         } header: { Text("Jev") } footer: {
-            InfoCaption(sharedWithLuna ? "Used by Jev and Luna." : "Optional. A TypeSafe or OpenRouter key.",
-                        detail: "Jev, a model from TypeSafe, matches loose requests such as “make this window bigger”. Use a TypeSafe key, or an OpenRouter key (sk-or-…) to run Jev through OpenRouter. Luna uses an OpenRouter Jev key when it has no key of its own.")
+            InfoCaption(sharedWithQuill ? "Used by Jev and Quill." : "Optional. A TypeSafe or OpenRouter key.",
+                        detail: "Jev, a model from TypeSafe, matches loose requests such as “make this window bigger”. Use a TypeSafe key, or an OpenRouter key (sk-or-…) to run Jev through OpenRouter. Quill uses an OpenRouter Jev key when it has no key of its own.")
         }
         Section("Natural language") {
             // Without a key the toggle reads off, whatever the stored preference is.

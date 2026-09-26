@@ -10,16 +10,20 @@ final class Preferences: ObservableObject {
     @Published var jevEnabled: Bool { didSet { defaults.set(jevEnabled, forKey: "jevEnabled") } }
     /// Jev also names the kind of request, and chooses again within that kind when the two differ.
     @Published var jevLayered: Bool { didSet { defaults.set(jevLayered, forKey: "jevLayered") } }
-    /// Luna writes and reads text when a request needs it. Off until the user turns it on.
-    @Published var lunaEnabled: Bool { didSet { defaults.set(lunaEnabled, forKey: "lunaEnabled") } }
-    @Published var lunaEffort: LunaEffort { didSet { defaults.set(lunaEffort.rawValue, forKey: "lunaEffort") } }
-    /// Each kind of context Luna may receive. What the user types is always allowed once Luna is on.
-    @Published var lunaSendsSelection: Bool { didSet { defaults.set(lunaSendsSelection, forKey: "lunaSendsSelection") } }
-    @Published var lunaSendsMail: Bool { didSet { defaults.set(lunaSendsMail, forKey: "lunaSendsMail") } }
-    @Published var lunaSendsCalendar: Bool { didSet { defaults.set(lunaSendsCalendar, forKey: "lunaSendsCalendar") } }
-    @Published var lunaSendsUnreadMail: Bool { didSet { defaults.set(lunaSendsUnreadMail, forKey: "lunaSendsUnreadMail") } }
-    /// Luna cleans dictation transcripts. Off until the user turns it on.
-    @Published var lunaSendsDictation: Bool { didSet { defaults.set(lunaSendsDictation, forKey: "lunaSendsDictation") } }
+    /// Quill writes and reads text when a request needs it. Off until the user turns it on.
+    @Published var quillEnabled: Bool { didSet { defaults.set(quillEnabled, forKey: QuillStorageKeys.enabled) } }
+    @Published var quillEffort: ReasoningEffort { didSet { defaults.set(quillEffort.rawValue, forKey: QuillStorageKeys.effort) } }
+    /// Fast asks OpenRouter for the priority service tier. Off by default.
+    @Published var quillFast: Bool { didSet { defaults.set(quillFast, forKey: QuillStorageKeys.fast) } }
+    /// The OpenRouter model ID Quill sends.
+    @Published var quillModel: String { didSet { defaults.set(quillModel, forKey: QuillStorageKeys.model) } }
+    /// Each kind of context Quill may receive. What the user types is always allowed once Quill is on.
+    @Published var quillSendsSelection: Bool { didSet { defaults.set(quillSendsSelection, forKey: QuillStorageKeys.sendsSelection) } }
+    @Published var quillSendsMail: Bool { didSet { defaults.set(quillSendsMail, forKey: QuillStorageKeys.sendsMail) } }
+    @Published var quillSendsCalendar: Bool { didSet { defaults.set(quillSendsCalendar, forKey: QuillStorageKeys.sendsCalendar) } }
+    @Published var quillSendsUnreadMail: Bool { didSet { defaults.set(quillSendsUnreadMail, forKey: QuillStorageKeys.sendsUnreadMail) } }
+    /// Quill cleans dictation transcripts. Off until the user turns it on.
+    @Published var quillSendsDictation: Bool { didSet { defaults.set(quillSendsDictation, forKey: QuillStorageKeys.sendsDictation) } }
     /// Hold Right Command to dictate into the front app. Off until the user turns it on.
     @Published var dictationEnabled: Bool { didSet { defaults.set(dictationEnabled, forKey: "dictationEnabled") } }
     @Published var dictationRetention: DictationRetention { didSet { defaults.set(dictationRetention.rawValue, forKey: "dictationRetention") } }
@@ -70,13 +74,17 @@ final class Preferences: ObservableObject {
         welcomeShown = d.object(forKey: "welcomeShown") as? Bool ?? existingInstall
         jevEnabled = d.bool(forKey: "jevEnabled")
         jevLayered = d.object(forKey: "jevLayered") as? Bool ?? true
-        lunaEnabled = d.bool(forKey: "lunaEnabled")
-        lunaEffort = d.string(forKey: "lunaEffort").flatMap(LunaEffort.init(rawValue:)).flatMap { LunaEffort.choices.contains($0) ? $0 : nil } ?? .fast
-        lunaSendsSelection = d.bool(forKey: "lunaSendsSelection")
-        lunaSendsMail = d.bool(forKey: "lunaSendsMail")
-        lunaSendsCalendar = d.bool(forKey: "lunaSendsCalendar")
-        lunaSendsUnreadMail = d.bool(forKey: "lunaSendsUnreadMail")
-        lunaSendsDictation = d.bool(forKey: "lunaSendsDictation")
+        quillEnabled = d.bool(forKey: QuillStorageKeys.enabled)
+        quillEffort = d.string(forKey: QuillStorageKeys.effort).flatMap(ReasoningEffort.init(storedQuillValue:))
+            .flatMap { ReasoningEffort.quillChoices.contains($0) ? $0 : nil } ?? .low
+        quillFast = d.bool(forKey: QuillStorageKeys.fast)
+        quillModel = d.string(forKey: QuillStorageKeys.model).flatMap { id in QuillModel.catalog.contains { $0.id == id } ? id : nil }
+            ?? QuillModel.defaultID
+        quillSendsSelection = d.bool(forKey: QuillStorageKeys.sendsSelection)
+        quillSendsMail = d.bool(forKey: QuillStorageKeys.sendsMail)
+        quillSendsCalendar = d.bool(forKey: QuillStorageKeys.sendsCalendar)
+        quillSendsUnreadMail = d.bool(forKey: QuillStorageKeys.sendsUnreadMail)
+        quillSendsDictation = d.bool(forKey: QuillStorageKeys.sendsDictation)
         dictationEnabled = d.bool(forKey: "dictationEnabled")
         dictationRetention = d.string(forKey: "dictationRetention").flatMap(DictationRetention.init(rawValue:)) ?? .days30
         edgeSnapping = d.bool(forKey: "edgeSnapping")

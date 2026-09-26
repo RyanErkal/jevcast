@@ -18,7 +18,7 @@ final class MailPage: ObservableObject, LauncherPage {
     /// A reply with text needs a second Escape before it is discarded.
 var discardArmed = false
     /// An empty model for snapshot runs, which never read Mail.
-    private lazy var empty = MailModel(luna: { _ in throw CancellationError() }, lunaAllowed: { false })
+    private lazy var empty = MailModel(quill: { _ in throw CancellationError() }, quillAllowed: { false })
 
     init(mail: MailModel?, popOut: ((Int64?) -> Void)?) { self.mail = mail; self.popOutAction = popOut }
 

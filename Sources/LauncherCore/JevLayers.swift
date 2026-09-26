@@ -4,7 +4,7 @@ import Foundation
 /// choice easy; the second step then chooses among every candidate of that one kind.
 public enum JevKind: String, CaseIterable, Sendable {
     case openApp, settingsPane, window, files, command, ports, automation, menu, web
-    case clipboard, schedule, organizer, mail, browser, people, context, luna, time
+    case clipboard, schedule, organizer, mail, browser, people, context, quill, time
 
     public var title: String {
         switch self {
@@ -24,7 +24,7 @@ public enum JevKind: String, CaseIterable, Sendable {
         case .browser: return "Browser tabs"
         case .people: return "Find a person in Contacts"
         case .context: return "Act on the page, files, or text in front"
-        case .luna: return "Answer a question or write text"
+        case .quill: return "Answer a question or write text"
         case .time: return "Convert a time between places or time zones"
         }
     }
@@ -47,7 +47,7 @@ public enum JevKind: String, CaseIterable, Sendable {
         case .browser: return "The request is about open browser tabs"
         case .people: return "The request names a person to email, call, or message"
         case .context: return "The request acts on \"this\": the open page, the selected files, or the selected text"
-        case .luna: return "The request is a question to answer or text to write, not an action on the Mac"
+        case .quill: return "The request is a question to answer or text to write, not an action on the Mac"
         case .time: return "The request asks what a clock time in one place is in another place or time zone, such as \"6pm atlanta in uk time\""
         }
     }
@@ -69,7 +69,7 @@ public enum JevKind: String, CaseIterable, Sendable {
         if id == "route:cleanup" { return .command }
         if id == "route:tabs" { return .browser }
         if id == "route:contacts" { return .people }
-        if id == "luna:ask" || id.hasPrefix("this:luna:") { return .luna }
+        if id == QuillStorageKeys.askRowID || id.hasPrefix(QuillStorageKeys.selectionRowPrefix) { return .quill }
         if id.hasPrefix("this:") { return .context }
         if id.hasPrefix("time:") { return .time }
         return nil

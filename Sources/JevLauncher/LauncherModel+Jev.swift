@@ -146,8 +146,8 @@ extension LauncherModel {
         for command in SystemCommands.all { add("command:" + command.id, command.title, command.detail) }
         add(Self.portsCandidateID, "Stop the process on a port", "Find the app or server listening on a local TCP port and stop it")
         for route in Self.routes { add(route.id, route.title, route.detail) }
-        if lunaReady { add(Self.askID, "Ask Luna", "Answer a question, explain something, or write new text with the Luna writing model") }
-        if let custom = customSelectionRow(query) { add(custom.id, custom.title, "Apply the typed instruction to the text selected in the front app, with the Luna writing model") }
+        if quillReady { add(Self.askID, "Ask Quill", "Answer a question, explain something, or write new text with the Quill writing model") }
+        if let custom = customSelectionRow(query) { add(custom.id, custom.title, "Apply the typed instruction to the text selected in the front app, with the Quill writing model") }
         for row in allContextRows() {
             if case .thing(let thing) = row.action, let detail = thing.jevDetail { add(row.id, row.title, detail) }
         }
@@ -274,7 +274,7 @@ extension LauncherModel {
         if id == Self.portsCandidateID || Self.routes.contains(where: { $0.id == id }) { return true }
         if id.hasPrefix("menu:") { return menuCommands.contains { $0.id == id } }
         if results.contains(where: { $0.id == id }) { return true }
-        if id == Self.askID { return lunaReady }
+        if id == Self.askID { return quillReady }
         if id == Self.customSelectionID { return customSelectionRow(query) != nil }
         if id.hasPrefix("this:") { return allContextRows().contains { $0.id == id } }
         if catalogue.entries.contains(where: { $0.id == id }) { return true }
@@ -322,7 +322,7 @@ extension LauncherModel {
             return LauncherResult(id: id, title: "Search " + link.name, detail: Self.hostDetail(url), symbol: "link", action: .url(url), score: 0)
         }
         if let command = menuCommands.first(where: { $0.id == id }) { return menuRow(command, score: 0) }
-        if id == Self.askID, lunaReady { return askRow(query.trimmingCharacters(in: .whitespaces), score: 0) }
+        if id == Self.askID, quillReady { return askRow(query.trimmingCharacters(in: .whitespaces), score: 0) }
         if id == Self.customSelectionID { return customSelectionRow(query) }
         if id.hasPrefix("this:") { return allContextRows().first { $0.id == id } }
         return commandRow(id: id, score: 0) ?? extraRow(id: id)

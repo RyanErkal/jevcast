@@ -6,7 +6,7 @@ import LauncherCore
 struct DictationSettings: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var dictation: DictationController
-    let openLuna: () -> Void
+    let openQuill: () -> Void
     @State private var confirmDelete = false
 
     var body: some View {
@@ -21,13 +21,13 @@ struct DictationSettings: View {
                     Text("Dictation needs macOS 26 or later.").foregroundStyle(.secondary)
                 }
             }
-            Section("Luna clean-up") {
-                LabeledContent("Luna") {
-                    Text(preferences.lunaEnabled && preferences.lunaSendsDictation ? "Cleans transcripts" : "Off").foregroundStyle(.secondary)
+            Section("Quill clean-up") {
+                LabeledContent("Quill") {
+                    Text(preferences.quillEnabled && preferences.quillSendsDictation ? "Cleans transcripts" : "Off").foregroundStyle(.secondary)
                 }
-                Text("Jevcast removes “um” and “uh” on this Mac. Luna can also fix punctuation and self-corrections. Turn on “Dictation transcripts” in Settings › AI › Luna to send transcript text; audio is never sent.")
+                Text("Jevcast removes “um” and “uh” on this Mac. Quill can also fix punctuation and self-corrections. Turn on “Dictation transcripts” in Settings › AI › Quill to send transcript text; audio is never sent.")
                     .font(.caption).foregroundStyle(.secondary)
-                Button("Open Luna Settings", action: openLuna).controlSize(.small)
+                Button("Open Quill Settings", action: openQuill).controlSize(.small)
             }
             Section("History") {
                 Picker("Keep transcripts", selection: $preferences.dictationRetention) {

@@ -50,7 +50,7 @@ final class DictationTests: XCTestCase {
         XCTAssertEqual(DictationText.clean("eu tenho um  carro", fillers: false), "Eu tenho um carro", "“um” is a word in Portuguese.")
     }
 
-    func testLunaCleanupMayOnlyTidy() {
+    func testQuillCleanupMayOnlyTidy() {
         XCTAssertTrue(DictationText.isFaithful("Meet at six.", to: "Meet at five, no, six"))
         XCTAssertTrue(DictationText.isFaithful("I don’t know.", to: "I don't know"))
         XCTAssertFalse(DictationText.isFaithful("It is three o'clock.", to: "What time is it"), "An answer is not a clean-up.")
@@ -67,7 +67,7 @@ final class DictationTests: XCTestCase {
         let (store, folder) = makeStore()
         defer { try? FileManager.default.removeItem(at: folder) }
         let old = Transcript(text: "First", date: Date(timeIntervalSince1970: 1_700_000_000), duration: 1.2, target: "com.apple.Notes", engine: "apple-speech")
-        let new = Transcript(text: "Second", date: Date(timeIntervalSince1970: 1_700_000_100), duration: 2, target: nil, engine: "apple-speech+luna")
+        let new = Transcript(text: "Second", date: Date(timeIntervalSince1970: 1_700_000_100), duration: 2, target: nil, engine: "apple-speech" + QuillStorageKeys.transcriptEngineSuffix)
         try store.append(old, retention: .all)
         try store.append(new, retention: .all)
         XCTAssertEqual(store.all(), [new, old])
@@ -125,11 +125,11 @@ final class DictationTests: XCTestCase {
     }
 
     func testDictationRequestTurnsReasoningOffAndUsesOwnContext() {
-        let request = LunaRequest.cleanDictation("um so hello")
+        let request = QuillRequest.cleanDictation("um so hello")
         XCTAssertEqual(request.sent, [.dictation])
-        XCTAssertEqual(request.effort, .off, "Luna with reasoning off, so it is quick.")
+        XCTAssertEqual(request.effort, ReasoningEffort.none, "Quill with reasoning off, so it is quick.")
         XCTAssertEqual(request.effort?.apiValue, "none")
-        XCTAssertNil(LunaRequest.ask("hi").effort, "Other requests follow Settings.")
+        XCTAssertNil(QuillRequest.ask("hi").effort, "Other requests follow Settings.")
         XCTAssertTrue(request.system.contains("Do not add content"))
         XCTAssertEqual(SourceQuery.parse("dictation history")?.kind, .dictation)
         XCTAssertEqual(SourceQuery.parse("dictation history meeting")?.filter, "meeting")

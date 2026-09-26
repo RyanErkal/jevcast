@@ -93,7 +93,6 @@ struct ApprovalView: View {
             Button("Reject All", role: .destructive) { model.reject(run) }
             Button("Ask for Changes…") { revising = true }
             Spacer()
-            Text(chosen.isEmpty ? "Nothing selected" : "\(chosen.count) selected").font(.callout).foregroundStyle(.secondary)
             Button("Approve \(chosen.count) Change\(chosen.count == 1 ? "" : "s")") { journal = model.approve(run, items: chosen) }
                 .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(chosen.isEmpty)
         }

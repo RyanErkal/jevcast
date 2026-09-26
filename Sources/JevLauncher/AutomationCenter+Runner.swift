@@ -124,8 +124,18 @@ extension AutomationCenter {
             var s = self.settings
             s.codexPath = found.0?.path ?? ""
             s.claudePath = found.1?.path ?? ""
+            s.scriptPath = Self.scriptPath(s.scriptPath, adding: [found.0?.path, found.1?.path].compactMap { $0 })
             if s != self.settings { self.saveSettings(s) }
         }
+    }
+
+    /// Adds the folders of found tools, and Bun's usual folder, to the script PATH, so scripts such as
+    /// `bun … ` that start `node` or `wrangler` work under launchd. Existing entries keep their order.
+    nonisolated static func scriptPath(_ current: String, adding tools: [String], home: String = NSHomeDirectory()) -> String {
+        var parts = current.split(separator: ":").map(String.init)
+        let extra = tools.map { ($0 as NSString).deletingLastPathComponent } + [home + "/.bun/bin", home + "/.local/bin"]
+        for dir in extra where !parts.contains(dir) && FileManager.default.fileExists(atPath: dir) { parts.insert(dir, at: 0) }
+        return parts.joined(separator: ":")
     }
 
     /// Uses a CLI the user chose in an open panel.

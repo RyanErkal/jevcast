@@ -169,6 +169,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         // A new install shows the welcome window once instead.
         if let directory = UISnapshots.directory { runSnapshots(to: directory); return }
         if notchDemo { runNotchDemo(); return }
+        if let flag = CommandLine.arguments.firstIndex(of: "--capture-automations"), flag + 1 < CommandLine.arguments.count {
+            AutomationsWindowCapture.run(to: CommandLine.arguments[flag + 1]); return
+        }
         automations.start()
         updates.start()
         // The runner opened the app for an alert: AutomationCenter shows it; nothing else opens.
@@ -435,7 +438,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     /// The Automations window, made on first use.
     func showAutomations(automationID: String? = nil, runID: String? = nil) {
         hide(restoreFocus: false)
-        if automationsWindow == nil { automationsWindow = AutomationsWindow(center: automations, quill: model.quillTasks) }
+        if automationsWindow == nil {
+            let window = AutomationsWindow(center: automations, quill: model.quillTasks)
+            // Quill tasks are made by typing a schedule in the launcher, so open it with an example to edit.
+            window.onNewQuillTask = { [weak self] in
+                self?.show()
+                self?.model.query = "every morning at 8 brief me on my meetings"
+            }
+            automationsWindow = window
+        }
         automationsWindow?.show(automationID: automationID, runID: runID)
     }
 

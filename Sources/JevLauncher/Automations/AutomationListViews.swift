@@ -7,7 +7,7 @@ struct AutomationListSplit: View {
 
     var body: some View {
         HSplitView {
-            list.frame(minWidth: 300, idealWidth: 360, maxWidth: 460)
+            list.frame(minWidth: 260, idealWidth: 300, maxWidth: 420)
             Group {
                 if let automation = model.selectedAutomation {
                     AutomationDetailView(model: model, automation: automation)

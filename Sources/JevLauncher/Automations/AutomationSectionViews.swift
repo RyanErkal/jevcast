@@ -93,6 +93,9 @@ struct ClientsSectionView: View {
                 }
                 .padding(20)
             }
+            // The center watches the metrics folders only while the cards are on screen.
+            .onAppear { model.live?.setClientsVisible(true) }
+            .onDisappear { model.live?.setClientsVisible(false) }
         }
     }
 }

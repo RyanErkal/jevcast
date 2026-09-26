@@ -177,12 +177,13 @@ struct EnvironmentField: View {
     }
 }
 
-/// Secret names only. Values belong in the Keychain.
-// HOOK(secrets): `AutomationSecrets.save(name:value:)` is not in this branch yet. When it lands, add a
-// SecureField per name here and call it on Save; never store the value in the automation.
+/// Secret names live in the automation; values go straight to the Keychain and are never shown again.
 struct SecretNamesField: View {
     @Binding var names: [String]
     @State private var newName = ""
+    @State private var values: [String: String] = [:]
+    @State private var stored: Set<String> = []
+    @State private var problem: String?
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Secrets")
@@ -191,6 +192,10 @@ struct SecretNamesField: View {
                     Image(systemName: "key.fill").foregroundStyle(.secondary)
                     Text(name).font(.system(.callout, design: .monospaced))
                     Spacer()
+                    SecureField(stored.contains(name) ? "Saved; type to replace" : "Value", text: Binding(
+                        get: { values[name, default: ""] }, set: { values[name] = $0 }))
+                        .frame(width: 180).onSubmit { saveValue(name) }
+                    Button("Save") { saveValue(name) }.disabled(values[name, default: ""].isEmpty)
                     Button { names.removeAll { $0 == name } } label: { Image(systemName: "minus.circle.fill") }
                         .buttonStyle(.borderless).foregroundStyle(.secondary).accessibilityLabel("Remove \(name)")
                 }
@@ -199,9 +204,16 @@ struct SecretNamesField: View {
                 TextField("NAME", text: $newName).font(.system(.callout, design: .monospaced)).onSubmit(add)
                 Button("Add", action: add).disabled(!AutomationDraft.isEnvName(newName) || names.contains(newName))
             }
+            if let problem { Text(problem).font(.caption).foregroundStyle(.red) }
             Text("Passed to this script only, as environment values. Values are kept in the Keychain, never in the automation file.")
                 .font(.caption).foregroundStyle(.secondary)
         }
+        .onAppear { stored = Set(names.filter { AutomationSecrets.exists(name: $0) }) }
+    }
+    private func saveValue(_ name: String) {
+        guard let value = values[name], !value.isEmpty else { return }
+        do { try AutomationSecrets.save(name: name, value: value); stored.insert(name); values[name] = ""; problem = nil }
+        catch { problem = "Could not save \(name) in the Keychain." }
     }
     private func add() {
         guard AutomationDraft.isEnvName(newName), !names.contains(newName) else { return }

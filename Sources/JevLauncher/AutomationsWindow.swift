@@ -17,7 +17,7 @@ final class AutomationsWindow: NSWindowController, NSWindowDelegate {
     init(center: AutomationCenter, quill: QuillTaskCenter) {
         self.center = center; self.quill = quill
         model = AutomationsViewModel(center: center, quill: quill)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1240, height: 780),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         window.title = "Automations"
         window.isReleasedWhenClosed = false
@@ -27,7 +27,7 @@ final class AutomationsWindow: NSWindowController, NSWindowDelegate {
         hosting.sceneBridgingOptions = [.toolbars, .title]
         window.contentViewController = hosting
         if !window.setFrameUsingName("JevcastAutomations") {
-            window.setContentSize(NSSize(width: 1100, height: 720))
+            window.setContentSize(NSSize(width: 1240, height: 780))
             window.center()
         }
         window.collectionBehavior = [.moveToActiveSpace]
@@ -97,7 +97,7 @@ final class AutomationsWindow: NSWindowController, NSWindowDelegate {
         case .all: model.selectedAutomationID = demo ? "desktop-tidy-demo" : nil
         default: break
         }
-        return AutomationsRootView(model: model).frame(width: 1100, height: 720)
+        return AutomationsRootView(model: model).frame(width: 1240, height: 780)
     }
 
     /// The editor for `--snapshot-ui`, filled from a template.

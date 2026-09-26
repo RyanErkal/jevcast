@@ -22,18 +22,31 @@ struct AutomationDetailView: View {
         .onChange(of: automation.id) { _, _ in tab = .overview }
     }
 
+    /// One row when there is room; otherwise the buttons move under the title so nothing is cut off.
     private var header: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 14) { identity; Spacer(minLength: 10); actions }
+            VStack(alignment: .leading, spacing: 10) { identity; HStack { Spacer(minLength: 0); actions } }
+        }
+        .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 12)
+    }
+
+    private var identity: some View {
         HStack(alignment: .center, spacing: 14) {
             SymbolTile(symbol: automation.symbol, tint: automation.enabled ? AutomationTint.color(automation.id) : .gray, size: 48)
             VStack(alignment: .leading, spacing: 4) {
-                Text(automation.name).font(.title2.weight(.semibold)).lineLimit(1).layoutPriority(1)
+                Text(automation.name).font(.title2.weight(.semibold)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 6) {
                     if let last = model.lastRun(automation.id) { StatusChip(last.state) }
                     else { StatusChip(title: "Never run", tint: .secondary) }
                     Text(statusLine).font(.callout).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
-            Spacer(minLength: 10)
+        }
+    }
+
+    private var actions: some View {
+        HStack(spacing: 10) {
             Toggle("On", isOn: Binding(get: { automation.enabled }, set: { model.setEnabled(automation.id, $0) }))
                 .toggleStyle(.switch).controlSize(.small).labelsHidden()
                 .help(automation.enabled ? "Pause the schedule" : "Turn on the schedule")
@@ -48,7 +61,7 @@ struct AutomationDetailView: View {
             Button { model.runNow(automation.id) } label: { Label("Run Now", systemImage: "play.fill") }
                 .buttonStyle(.borderedProminent)
         }
-        .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 12)
+        .fixedSize()
     }
 
     private var statusLine: String {

@@ -12,7 +12,7 @@ public enum HyperAction: Codable, Hashable, Sendable {
 
 /// The fixed Jevcast actions a Hyper key can run. IDs are stored, so never rename them.
 public enum HyperBuiltIn: String, CaseIterable, Sendable {
-    case launcher, mail, calendar, automations
+    case launcher, mail, calendar, automations, clipboard
     case leftHalf = "window.left-half", rightHalf = "window.right-half"
     case topHalf = "window.top-half", bottomHalf = "window.bottom-half"
     case maximize = "window.maximize"
@@ -23,6 +23,7 @@ public enum HyperBuiltIn: String, CaseIterable, Sendable {
         case .mail: return "Open Mail view"
         case .calendar: return "Open Calendar view"
         case .automations: return "Open Automations"
+        case .clipboard: return "Open Clipboard view"
         case .leftHalf: return "Window left half"
         case .rightHalf: return "Window right half"
         case .topHalf: return "Window top half"
@@ -55,6 +56,7 @@ public enum HyperLayer {
         .init(keyCode: 8, action: .builtIn(HyperBuiltIn.calendar.rawValue)),       // C
         .init(keyCode: 49, action: .builtIn(HyperBuiltIn.launcher.rawValue)),      // Space
         .init(keyCode: 0, action: .builtIn(HyperBuiltIn.automations.rawValue)),    // A
+        .init(keyCode: 9, action: .builtIn(HyperBuiltIn.clipboard.rawValue)),      // V
         .init(keyCode: 4, action: .sendKey(123)),                                  // H → ←
         .init(keyCode: 38, action: .sendKey(125)),                                 // J → ↓
         .init(keyCode: 40, action: .sendKey(126)),                                 // K → ↑
@@ -65,6 +67,22 @@ public enum HyperLayer {
         .init(keyCode: 125, action: .builtIn(HyperBuiltIn.bottomHalf.rawValue)),
         .init(keyCode: 36, action: .builtIn(HyperBuiltIn.maximize.rawValue))       // Return
     ]
+
+    /// Defaults added after the first release, with the version that added them. A stored layer gets
+    /// each one once, and only when the user has nothing on that key.
+    public static let addedDefaults: [(version: Int, keyCode: UInt16, action: HyperAction)] = [
+        (1, 9, .builtIn(HyperBuiltIn.clipboard.rawValue))
+    ]
+    public static var addedDefaultsVersion: Int { addedDefaults.map(\.version).max() ?? 0 }
+
+    /// The user's layer with defaults newer than `seenVersion` added where their key is free.
+    public static func addingNewDefaults(to bindings: [HyperBinding], seenVersion: Int) -> [HyperBinding] {
+        var result = bindings
+        for added in addedDefaults where added.version > seenVersion && !result.contains(where: { $0.keyCode == added.keyCode }) {
+            result.append(HyperBinding(keyCode: added.keyCode, action: added.action))
+        }
+        return result
+    }
 
     /// Key codes used by more than one binding.
     public static func duplicateKeys(_ bindings: [HyperBinding]) -> Set<UInt16> {

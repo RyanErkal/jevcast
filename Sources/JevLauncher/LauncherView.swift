@@ -26,7 +26,8 @@ struct LauncherView: View {
             Divider()
             HStack(spacing: 10) {
                 Spacer(minLength: 10)
-                KeyHint("Open", "↩")
+                ForEach(page.footerHints, id: \.key) { hint in KeyHint(hint.title, hint.key) }
+                KeyHint(page.openTitle, "↩")
                 KeyHint("Back", "esc")
                 if page.canPopOut { KeyHint("Open Window", "⌘O") }
             }

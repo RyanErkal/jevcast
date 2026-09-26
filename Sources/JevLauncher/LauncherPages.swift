@@ -40,7 +40,13 @@ protocol LauncherPage: AnyObject {
     var isTyping: Bool { get }
     /// True when ⌘O opens this view in its own window or app.
     var canPopOut: Bool { get }
+    /// What Return does, shown in the footer.
+    var openTitle: String { get }
+    /// More keys for the footer, before Return.
+    var footerHints: [(title: String, key: String)] { get }
     func handle(_ key: PageKey) -> Bool
+    /// Keys a view reads before the plain keys, such as ⌘P or ⇧↓. True when used.
+    func handleEvent(_ event: NSEvent) -> Bool
     func filter(_ text: String)
     /// Leaves a detail level, such as a message back to the list. False at the top level.
     func back() -> Bool
@@ -54,6 +60,9 @@ protocol LauncherPage: AnyObject {
 extension LauncherPage {
     var isTyping: Bool { false }
     var canPopOut: Bool { false }
+    var openTitle: String { "Open" }
+    var footerHints: [(title: String, key: String)] { [] }
+    func handleEvent(_ event: NSEvent) -> Bool { false }
     func popOut() {}
     func opened() {}
     func closed(handingOff: Bool) {}
@@ -106,9 +115,14 @@ extension LauncherModel {
     }
 
     /// A row that opens a view, above a source's rows: "Open Calendar", "Open Clipboard".
-    func viewRow(_ view: ViewID, detail: String, score: Double) -> LauncherResult? {
+    /// `configure` runs on the new view, such as picking a Clipboard chip.
+    func viewRow(_ view: ViewID, detail: String, score: Double, configure: ((LauncherPage) -> Void)? = nil) -> LauncherResult? {
         guard makePage != nil else { return nil }
-        let open = Verb(title: "Open " + view.title, after: .keepOpen) { [weak self] in self?.showView(view); return nil }
+        let open = Verb(title: "Open " + view.title, after: .keepOpen) { [weak self] in
+            self?.showView(view)
+            if let page = self?.page, page.id == view { configure?(page) }
+            return nil
+        }
         return LauncherResult(id: "view:" + view.rawValue, title: "Open " + view.title, detail: detail, symbol: view.symbol,
                               action: .thing(Thing(verbs: [open], twoLine: false)), score: score)
     }
@@ -132,6 +146,7 @@ extension LauncherModel {
             if !page.back() { closeView() }
             return true
         }
+        if event.keyCode != 53, page.handleEvent(event) { return true }
         switch event.keyCode {
         case 53:
             if !page.back() { closeView() }

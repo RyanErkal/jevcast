@@ -9,7 +9,7 @@ struct LauncherResult: Identifiable {
         case window(WindowAction, pid_t?)
         case url(URL)
         case copy(String)
-        case clipboard(ClipboardItem)
+        case clipboard(ClipEntry)
         case command(SystemCommand)
         case custom(CustomCommand, input: String?)
         case stopProcess(ListeningPort)
@@ -109,7 +109,7 @@ final class LauncherModel: ObservableObject {
     var emptyMessage: String {
         if isFileSearch { return fileStatus.isEmpty || isSearchingFiles ? "No matching files" : fileStatus }
         if isClipboardSearch {
-            return preferences.clipboardHistory ? "No clipboard entries yet" : "Clipboard history is off. Turn it on in Settings › General."
+            return preferences.clipboardHistory ? "No clipboard entries yet" : "Clipboard history is off. Turn it on in Settings › General › Clipboard."
         }
         return "No results"
     }
@@ -298,7 +298,7 @@ final class LauncherModel: ObservableObject {
         catalogue.$entries.sink { [weak self] _ in
             Task { @MainActor in guard let self, self.visible else { return }; self.rebuild() }
         }.store(in: &subscriptions)
-        preferences.$clipboardHistory.sink { [weak self] enabled in self?.clipboard.setEnabled(enabled) }.store(in: &subscriptions)
+        preferences.$clipboardSettings.removeDuplicates().sink { [weak self] settings in self?.clipboard.apply(settings) }.store(in: &subscriptions)
     }
     func begin() {
         let targetApp = NSWorkspace.shared.frontmostApplication
@@ -393,12 +393,18 @@ final class LauncherModel: ObservableObject {
         let start = CFAbsoluteTimeGetCurrent()
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if let filter = clipboardFilter {
-            let rows = clipboard.matches(filter).enumerated().map { index, item in
-                LauncherResult(id: "clip:" + item.id.uuidString, title: Self.clipboardTitle(item.text),
+            let rows = clipboard.matches(filter).prefix(200).enumerated().map { index, item in
+                LauncherResult(id: "clip:" + item.id.uuidString, title: Self.clipboardTitle(item),
                                detail: Self.clipboardDetail(item),
-                               symbol: "doc.on.clipboard", action: .clipboard(item), score: 1000 - Double(index))
+                               symbol: ClipStyle.symbol(item), action: .clipboard(item), score: 1000 - Double(index))
             }
-            let view = filter.isEmpty ? viewRow(.clipboard, detail: "Filter, pin, copy, and paste in a larger view", score: 999.5).map { row -> LauncherResult in var row = row; row.section = .clipboard; return row } : nil
+            // Return opens the view, with the chip a word such as "links" asks for.
+            let query = ClipQuery.parse(filter)
+            let opens = filter.isEmpty || (query.words.isEmpty && (query.filter != nil || query.kind != nil))
+            let chip = query.filter
+            let view = opens ? viewRow(.clipboard, detail: "Filter, pin, preview, copy, and paste in a larger view", score: 1001,
+                                       configure: { page in if let chip { (page as? ClipboardPage)?.chip = chip } })
+                .map { row -> LauncherResult in var row = row; row.section = .clipboard; return row } : nil
             publish((view.map { [$0] } ?? []) + rows, start: start)
             return
         }
@@ -539,16 +545,11 @@ final class LauncherModel: ObservableObject {
         LauncherResult(id: "window:" + action.rawValue, title: action.title, detail: target?.localizedName ?? targetName,
                        symbol: action.symbol, action: .window(action, target?.processIdentifier), score: score)
     }
-    static func clipboardDetail(_ item: ClipboardItem) -> String {
-        let lines = item.text.split(whereSeparator: \.isNewline).count
+    static func clipboardDetail(_ item: ClipEntry) -> String {
         let age = "Copied " + item.copiedAt.formatted(.relative(presentation: .named))
-        return lines > 1 ? age + " · \(lines) lines" : age
+        return ([age, ClipStyle.measure(item)].compactMap { $0 } + (item.sourceName.map { [$0] } ?? [])).joined(separator: " · ")
     }
-    static func clipboardTitle(_ text: String) -> String {
-        let line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        return trimmed.count > 120 ? String(trimmed.prefix(120)) + "…" : trimmed
-    }
+    static func clipboardTitle(_ item: ClipEntry) -> String { item.title }
     private func quicklinkRows(_ q: String) -> [LauncherResult] {
         var rows: [LauncherResult] = []
         let matched = Quicklink.match(q, in: preferences.quicklinks)
@@ -633,7 +634,7 @@ final class LauncherModel: ObservableObject {
             case .url(let url):
                 guard Frontmost.open(url) else { throw LauncherError("The URL could not be opened.") }
             case .copy(let text): copy(text)
-            case .clipboard(let item): clipboard.restore(item)
+            case .clipboard(let item): clipboard.restore(item, paste: paste)
             case .command(let command): run(command)
             case .custom(let command, let input): run(command, input: input)
             case .stopProcess(let listener):
@@ -658,9 +659,12 @@ final class LauncherModel: ObservableObject {
             learnFromExecution(result)
             if result.learnsFromUse && Self.prefix(for: query) == nil { preferences.record(result.id, query: query) }
             switch result.action {
-            case .copy, .clipboard, .snippet:
+            case .copy, .snippet:
                 onClose?(true)
                 if paste { Paster.pasteSoon() }
+            case .clipboard:
+                // The history pastes once its write is done.
+                onClose?(true)
             case .command, .custom, .timer, .cancelTimer, .shortcut, .workflow: onClose?(true)
             case .menu: onClose?(true)
             case .window(_, let pid):

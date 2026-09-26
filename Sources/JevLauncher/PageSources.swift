@@ -36,32 +36,6 @@ final class QuillTasksPageSource: ThingSource {
     }
 }
 
-/// The Clipboard view: Return copies, ⇧Return pastes, and Pin keeps an entry at the top.
-@MainActor
-final class ClipboardPageSource: ThingSource {
-    let section = "Clipboard"
-    private let history: ClipboardHistory
-    private let enabled: () -> Bool
-    init(history: ClipboardHistory, enabled: @escaping () -> Bool) { self.history = history; self.enabled = enabled }
-
-    func load(_ filter: String) async throws -> [LauncherResult] {
-        guard enabled() else { throw SourceProblem(text: "Clipboard history is off. Turn it on in Settings › General.") }
-        let items = history.matches(filter)
-        guard !items.isEmpty else { throw SourceProblem(text: filter.isEmpty ? "No clipboard entries yet" : "No matching entries") }
-        return items.map { item in
-            let history = self.history
-            let verbs = [
-                Verb(title: "Copy", after: .close) { history.restore(item); return nil },
-                Verb(title: "Paste", after: .close) { history.restore(item); Paster.pasteSoon(); return nil },
-                Verb(title: item.pinned ? "Unpin" : "Pin", after: .stay) { history.togglePin(item.id); return nil }
-            ]
-            return LauncherResult(id: "clip:" + item.id.uuidString, title: LauncherModel.clipboardTitle(item.text),
-                                  detail: LauncherModel.clipboardDetail(item), symbol: item.pinned ? "pin" : "doc.on.clipboard",
-                                  action: .thing(Thing(verbs: verbs)), score: 0)
-        }
-    }
-}
-
 /// Makes each view. Snapshot runs get empty Mail, Calendar, and Clean Up views, so a capture
 /// never shows real mail, events, or processes.
 @MainActor
@@ -96,9 +70,7 @@ enum LauncherPages {
                 })
             })
         case .clipboard:
-            let preferences = model.preferences
-            return SourcePage(.clipboard, source: ClipboardPageSource(history: model.clipboard, enabled: { preferences.clipboardHistory }),
-                              model: model, filtersInSource: true, hasDetail: false, emptyText: "No clipboard entries yet")
+            return ClipboardPage(history: model.clipboard, model: model)
         case .cleanup:
             return SourcePage(.cleanup, source: snapshot ? nil : CleanupSource(preferences: model.preferences), model: model, hasDetail: false,
                               emptyText: "Nothing to clean up. No idle servers, leftover processes, or simulators are running.")

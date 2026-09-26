@@ -81,6 +81,7 @@ final class LauncherSnapshotRig {
         if demo { model.overrideTargetName("Notes") }
         panel.place(on: NSScreen.main)
         panel.orderFrontRegardless()
+        seedClipboard()
     }
     /// One favourite app and two recent items, as after a few days of use.
     func seedSuggestions() {
@@ -91,12 +92,15 @@ final class LauncherSnapshotRig {
         if let safari = apps.first(where: { $0.name == "Safari" }) { preferences.record(safari.id, query: "") }
         model.rebuild()
     }
+    /// Invented entries, made in code. The history stays in memory.
     func seedClipboard() {
-        for text in DemoData.clipboard {
-            pasteboard.text = text; pasteboard.changeCount += 1
-            model.clipboard.poll()
-        }
+        guard !seeded else { return }
+        seeded = true
+        let history = model.clipboard
+        let made = DemoClipboard.entries()
+        Task { await history.insert(made) }
     }
+    private var seeded = false
     func close() {
         model.closeAllViews(); model.end(); panel.orderOut(nil)
     }

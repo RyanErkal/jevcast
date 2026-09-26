@@ -31,10 +31,6 @@ enum DemoData {
         }
         return DemoFileSearch(entries: entries)
     }
-
-    static let clipboard = [
-        "https://github.com/RyanErkal/jevcast", "Meeting moved to Thursday at 10:00\nRoom 4B", "£1,240.00"
-    ]
 }
 
 /// File search over the sample files, with the same name, kind, and folder filters as the real search.

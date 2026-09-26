@@ -122,12 +122,12 @@ final class LauncherFlowTests: XCTestCase {
             XCTAssertEqual(model.selected?.title, "Search GitHub")
         }
     }
-    @MainActor func testClipboardModeListsAndFiltersEntries() {
+    @MainActor func testClipboardModeListsAndFiltersEntries() async {
         let board = FakePasteboard()
         let (model, _, defaults, suite) = makeModel(jev: HeldJev(), board: board)
         defer { defaults.removePersistentDomain(forName: suite) }
-        board.copy("first note"); model.clipboard.poll()
-        board.copy("second invoice"); model.clipboard.poll()
+        board.copy("first note"); model.clipboard.poll(); await model.clipboard.settle()
+        board.copy("second invoice"); model.clipboard.poll(); await model.clipboard.settle()
         model.begin(); defer { model.end() }
         model.updateQuery("clip", typed: true)
         XCTAssertEqual(model.results.map(\.title), ["second invoice", "first note"])
@@ -550,14 +550,14 @@ final class LauncherFlowTests: XCTestCase {
         XCTAssertEqual(model.selected?.id.hasPrefix("workflow:"), true)
         XCTAssertEqual(Snippet(name: "s", text: "a {clipboard}").expanded(clipboard: "b"), "a b")
     }
-    @MainActor func testClipboardPinsAndKinds() {
+    @MainActor func testClipboardPinsAndKinds() async {
         let board = FakePasteboard()
         let (model, _, defaults, suite) = makeModel(jev: HeldJev(), board: board)
         defer { defaults.removePersistentDomain(forName: suite) }
-        board.copy("https://example.com/page"); model.clipboard.poll()
-        board.copy("#ff8800"); model.clipboard.poll()
-        board.copy("plain words"); model.clipboard.poll()
-        let link = model.clipboard.items.first { $0.text.hasPrefix("https") }!
+        for text in ["https://example.com/page", "#ff8800", "plain words"] {
+            board.copy(text); model.clipboard.poll(); await model.clipboard.settle()
+        }
+        let link = model.clipboard.entries.first { $0.text?.hasPrefix("https") == true }!
         model.clipboard.togglePin(link.id)
         model.begin(); defer { model.end() }
         model.updateQuery("clip", typed: true)

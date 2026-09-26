@@ -47,7 +47,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     private lazy var updates = UpdateChecker(preferences: preferences)
     private var welcome: WelcomeWindow?
     private let catalogue = AppCatalogue()
-    private lazy var model = LauncherModel(preferences: preferences, catalogue: catalogue, jev: JevService(usage: .shared), usage: .shared)
+    /// Snapshot runs keep clipboard history in memory, so they never read or change the stored history.
+    private lazy var model = LauncherModel(preferences: preferences, catalogue: catalogue, jev: JevService(usage: .shared),
+                                           clipboard: ClipboardHistory(folder: UISnapshots.directory == nil ? ClipboardStore.defaultFolder : nil),
+                                           usage: .shared)
     private lazy var dictation = DictationController(preferences: preferences, model: model)
     private let hotkeys = HotkeyCenter()
     private lazy var hyper = HyperKeyController(preferences: preferences)
@@ -217,6 +220,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         ]
         // Views in the panel. Mail, Calendar, and Clean Up render empty: snapshots never read them.
         steps += ViewID.allCases.map { id in ("view-" + id.rawValue, 1.0, launcher, { model.closeAllViews(); model.showView(id) }) }
+        for (name, id) in [("view-clipboard-image", DemoClipboard.imageID), ("view-clipboard-code", DemoClipboard.codeID)] {
+            steps.append((name, 1.2, launcher, {
+                model.closeAllViews(); model.showView(.clipboard); (model.page as? ClipboardPage)?.select(id)
+            }))
+        }
         steps.append(("view-calendar-week", 1.0, launcher, {
             model.closeAllViews(); model.showView(.calendar); (model.page as? CalendarPage)?.setMode(.week)
         }))
@@ -232,10 +240,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             self.settings?.window?.orderFrontRegardless()
         }))
         // Panes with parts render each part. The stored choice is put back after the last capture.
-        let partKeys = ["settingsAIPart", "settingsLibraryPart", "settingsAutomationsPart", "settingsWindowsPart"]
+        let partKeys = ["settingsGeneralPart", "settingsAIPart", "settingsLibraryPart", "settingsAutomationsPart", "settingsWindowsPart"]
         let storedParts = partKeys.map { UserDefaults.standard.string(forKey: $0) }
         for tab in SettingsWindow.Tab.allCases {
             let parts: (key: String, values: [String])? = switch tab {
+            case .general: ("settingsGeneralPart", GeneralSettings.Part.allCases.map(\.rawValue))
             case .ai: ("settingsAIPart", AISettings.Part.allCases.map(\.rawValue))
             case .library: ("settingsLibraryPart", CommandSettings.Part.allCases.map(\.rawValue))
             case .automations: ("settingsAutomationsPart", AutomationSettingsPane.Part.allCases.map(\.rawValue))
@@ -371,6 +380,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             case .mail: showView(.mail)
             case .calendar: showView(.calendar)
             case .automations: showAutomations()
+            case .clipboard: showView(.clipboard)
             default: break
             }
         case .openApp(let bundleID):
@@ -618,6 +628,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         backdrop.close(); resultActions.dismiss(); preview.close()
         model.end(); model.windows.stopEdgeSnapping(); hotkeys.clear()
         if UISnapshots.directory == nil { hyper.shutdown() }
+        model.clipboard.saveBeforeQuit()
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
     }
 }

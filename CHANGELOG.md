@@ -2,6 +2,24 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+
+- **Clipboard manager.** The Clipboard view now keeps text, rich text, images, screenshots, files, videos, audio, PDFs, links, colors, and code. The list is on the left and a large preview is on the right.
+- **Filters and search.** Chips filter by All, Pinned, Text, Images, Links, Files, Media, Colors, and Code. Search finds text, text in images, file names, source apps, and link hosts. "clip links" and "clip code" still work.
+- **Keys.** Return copies. Shift-Return pastes into the app you were in. Option-Return pastes plain text. Command-P pins, Delete deletes and Command-Z brings it back, Space opens Quick Look, Command-K shows actions, and Command-1 to Command-9 paste a row. Shift-Up and Shift-Down select more than one row.
+- **Actions.** Copy Text from Image, Save Image to Downloads, Open, Show in Finder, Open Link, Copy as Markdown Link, and text changes such as UPPERCASE, sort lines, JSON pretty print, URL encode, and Base64. A change makes a new entry and keeps the original.
+- **Text in images.** Vision finds text in copied images on this Mac. Search finds it. You can turn it off.
+- **History after restart.** On by default. Entries are kept in `~/Library/Application Support/Jevcast/Clipboard`, readable only by you. Choose how long to keep them, how many, and how much space they use. Pinned entries are never removed.
+- **Ignored apps.** Copies from 1Password, Bitwarden, Keychain Access, Passwords, LastPass, and Dashlane are never recorded. Add or remove apps in Settings › General › Clipboard.
+- **Hyper-V** opens the Clipboard view. It is added only when you have nothing on V.
+
+### Changed
+
+- Clipboard settings moved to Settings › General › Clipboard.
+- Typing "clips" also opens clipboard history, and Return on "clip" opens the Clipboard view.
+
 ## [1.7.0] - 2026-09-26
 
 ### Added

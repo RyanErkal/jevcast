@@ -100,7 +100,7 @@ final class SettingsWindow: NSWindowController, NSToolbarDelegate {
     }
     @ViewBuilder private func pane(for tab: Tab) -> some View {
         switch tab {
-        case .general: GeneralSettings(preferences: preferences, status: status, updates: updates, speech: model.speech, windows: model.windows, keys: model.keys, changed: changed)
+        case .general: GeneralSettings(preferences: preferences, status: status, updates: updates, speech: model.speech, windows: model.windows, keys: model.keys, history: model.clipboard, changed: changed, resized: resized)
         case .search: SearchSettings(preferences: preferences, catalogue: catalogue)
         case .windows: WindowSettings(preferences: preferences, model: model, hyper: hyper, changed: changed, resized: resized)
         case .library: CommandSettings(preferences: preferences, catalogue: catalogue, resized: resized)

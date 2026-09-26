@@ -125,3 +125,23 @@ final class HyperKeyTests: XCTestCase {
         XCTAssertEqual(HyperLayer.keyName(200), "Key 200")
     }
 }
+
+final class HyperDefaultsMergeTests: XCTestCase {
+    func testDefaultsBindVToClipboard() {
+        XCTAssertEqual(HyperLayer.table(HyperLayer.defaults)[9], .builtIn(HyperBuiltIn.clipboard.rawValue))
+    }
+
+    func testNewDefaultIsAddedOnceWhenVIsFree() {
+        let user = [HyperBinding(keyCode: 46, action: .builtIn("mail"))]
+        let merged = HyperLayer.addingNewDefaults(to: user, seenVersion: 0)
+        XCTAssertEqual(merged.count, 2)
+        XCTAssertEqual(HyperLayer.table(merged)[9], .builtIn("clipboard"))
+        // Already seen: a user who removed V does not get it back.
+        XCTAssertEqual(HyperLayer.addingNewDefaults(to: user, seenVersion: HyperLayer.addedDefaultsVersion), user)
+    }
+
+    func testUserBindingOnVIsKept() {
+        let user = [HyperBinding(keyCode: 9, action: .openApp("com.apple.Terminal"))]
+        XCTAssertEqual(HyperLayer.addingNewDefaults(to: user, seenVersion: 0), user)
+    }
+}

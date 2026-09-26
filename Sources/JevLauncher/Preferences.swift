@@ -49,7 +49,14 @@ final class Preferences: ObservableObject {
     @Published var snippets: [Snippet] { didSet { save(snippets, "snippets") } }
     /// Requests already resolved on this Mac, so they skip Jev next time.
     @Published private(set) var learned: LearnedIntents
-    @Published var clipboardHistory: Bool { didSet { defaults.set(clipboardHistory, forKey: "clipboardHistory") } }
+    /// Clipboard history choices. The on switch also keeps its older key, so earlier versions read it.
+    @Published var clipboardSettings: ClipboardSettings {
+        didSet { save(clipboardSettings, "clipboardSettings"); defaults.set(clipboardSettings.enabled, forKey: "clipboardHistory") }
+    }
+    var clipboardHistory: Bool {
+        get { clipboardSettings.enabled }
+        set { clipboardSettings.enabled = newValue }
+    }
     @Published var checksForUpdates: Bool { didSet { defaults.set(checksForUpdates, forKey: "checksForUpdates") } }
     /// Set once the welcome window has been shown, so it opens by itself only on a new install.
     @Published var welcomeShown: Bool { didSet { defaults.set(welcomeShown, forKey: "welcomeShown") } }
@@ -114,7 +121,12 @@ final class Preferences: ObservableObject {
         windowShortcuts = d.bool(forKey: "windowShortcuts")
         gap = d.object(forKey: "gap") as? Double ?? 8
         hyperKeyEnabled = d.bool(forKey: "hyperKeyEnabled")
-        hyperBindings = Self.load(d, "hyperBindings") ?? HyperLayer.defaults
+        let storedHyper: [HyperBinding]? = Self.load(d, "hyperBindings")
+        let hyper = storedHyper.map { HyperLayer.addingNewDefaults(to: $0, seenVersion: d.integer(forKey: "hyperDefaultsVersion")) }
+            ?? HyperLayer.defaults
+        hyperBindings = hyper
+        if storedHyper != nil, storedHyper != hyper { d.set(try? JSONEncoder().encode(hyper), forKey: "hyperBindings") }
+        d.set(HyperLayer.addedDefaultsVersion, forKey: "hyperDefaultsVersion")
         webEngine = d.string(forKey: "webEngine") ?? "Google"
         appFolders = d.stringArray(forKey: "appFolders") ?? []
         fileFolders = d.stringArray(forKey: "fileFolders") ?? [NSHomeDirectory()]
@@ -127,7 +139,11 @@ final class Preferences: ObservableObject {
         workflows = Self.load(d, "workflows") ?? []
         snippets = Self.load(d, "snippets") ?? []
         learned = Self.load(d, "learnedIntents") ?? LearnedIntents()
-        clipboardHistory = d.object(forKey: "clipboardHistory") as? Bool ?? true
+        clipboardSettings = Self.load(d, "clipboardSettings") ?? {
+            var settings = ClipboardSettings()
+            settings.enabled = d.object(forKey: "clipboardHistory") as? Bool ?? true
+            return settings
+        }()
         automationAlerts = d.object(forKey: "automationAlerts") as? Bool ?? true
         automationAlertFailures = d.object(forKey: "automationAlertFailures") as? Bool ?? true
         automationQuietHours = d.bool(forKey: "automationQuietHours")

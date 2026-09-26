@@ -2,6 +2,25 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.6.0] - 2026-09-26
+
+### Added
+
+- **Automations.** A new Automations window, like Mail and Calendar, for background work. Run a script, an agent, or a script that asks an agent to diagnose it only when it fails. Schedules run from a signed helper inside the app, also while Jevcast is closed. Templates: Desktop tidy, Downloads sort, Meta metrics refresh, Weekly client report, and Morning brief.
+- **Agents on your plan.** Agents run the `codex` (default) or `claude` command you are signed in to, so they use your ChatGPT or Claude plan. Access is read only unless you choose "Edit its folder" or "Edit its folder and use the network", and the CLI's own sandbox or tool list enforces it. There is no full-access level.
+- **Approvals and undo.** An agent can propose file changes. You tick each one; Jevcast checks every path, makes the change itself, keeps a journal, and can undo it. Deletes go to the Trash. An agent can also stop and ask you a question.
+- **Notch alerts.** Automations stay silent. A card drops from the MacBook notch only when a run needs your answer or approval, or fails. No system banners.
+- **Codex automations.** Jevcast reads `~/.codex/automations` (never writes to it), shows each schedule and status, and imports a paused copy. A copy stays blocked while its Codex original is active.
+- **Clients.** Meta ads metrics cards from local dashboard files, with each source's freshness.
+- **Settings › Automations**: Runner, Agents, Alerts, and Codex & Clients.
+- **Quill model picker** and **Fast** as its own switch.
+
+### Changed
+
+- **Luna is now Quill.** Luna is the name of one OpenAI model, so the writing helper has its own name. Your settings, key, tasks, and history carry over.
+- **Reasoning effort** offers Low, Medium, High, Extra high, and Max. The old "Fast" effort reads as Low.
+- **Quill tasks** no longer post system notifications. A failed task shows in the notch; successes stay in the history.
+
 ## [1.5.1] - 2026-09-25
 
 ### Fixed

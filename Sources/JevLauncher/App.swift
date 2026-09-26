@@ -76,6 +76,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         return AutomationCenter(isolatedStore: AutomationStore(root: root))
     }()
     private var automationsWindow: AutomationsWindow?
+    /// Holds demo Automations views on screen for `--snapshot-ui --demo`.
+    private var automationSnapshotWindow: NSWindow?
     /// `--automation-alerts`: the runner opened the app to show alerts. No welcome, no launcher.
     private let alertLaunch = CommandLine.arguments.contains("--automation-alerts")
     private let notchDemo = CommandLine.arguments.contains("--notch-demo")
@@ -245,11 +247,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
                 }))
             }
         }
+        // Automations screens, demo only: they show invented runs and files, never this Mac's.
+        if demo {
+            let shots: [(String, AnyView, NSSize)] = [
+                ("automations-approval", AnyView(AutomationsWindow.snapshotApproval()), NSSize(width: 760, height: 640)),
+                ("automations-editor", AnyView(AutomationsWindow.snapshotEditor(.metricsRefresh).frame(width: 720, height: 820)), NSSize(width: 720, height: 820))
+            ]
+            for (name, view, size) in shots {
+                steps.append((name, 1.2, { [weak self] in self?.automationSnapshotWindow?.contentView }, { [weak self] in
+                    guard let self else { return }
+                    self.settings?.window?.orderOut(nil)
+                    self.automationSnapshotWindow?.orderOut(nil)
+                    let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+                    window.isReleasedWhenClosed = false
+                    window.contentView = NSHostingView(rootView: view)
+                    window.alphaValue = 0
+                    window.ignoresMouseEvents = true
+                    window.orderFrontRegardless()
+                    self.automationSnapshotWindow = window
+                }))
+            }
+        }
         for page in WelcomePage.allCases {
             steps.append(("welcome-" + page.rawValue, 0.9, { [weak self] in self?.welcome?.window?.contentView }, { [weak self] in
                 guard let self else { return }
                 for (key, value) in zip(partKeys, storedParts) { UserDefaults.standard.set(value, forKey: key) }
                 self.settings?.window?.orderOut(nil)
+                self.automationSnapshotWindow?.orderOut(nil)
                 self.welcome?.close()
                 self.welcome = WelcomeWindow(preferences: shownPreferences, model: shownModel, status: self.status, page: page,
                                              changed: {}, openSettings: { _ in }, tryQuery: { _ in })

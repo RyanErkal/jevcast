@@ -62,6 +62,7 @@
       <nav class="top-nav" aria-label="Sections">
         <a href="#type">What you can type</a>
         <a href="#windows">Windows</a>
+        <a href="#automations">Automations</a>
         <a href="#privacy">Privacy</a>
         <a href="#install">Install</a>
         <a href="#changelog">What’s new</a>
@@ -570,6 +571,35 @@
         </div>
       </section>
 
+      <section class="section" id="automations" aria-labelledby="automations-title">
+        <div class="wrap windows-grid">
+          <div class="windows-copy">
+            <h2 id="automations-title">Background work, on your terms.</h2>
+            <p>
+              Schedule scripts and agents that run on your Mac, also while
+              Jevcast is closed. Agents use the <code>codex</code> or
+              <code>claude</code> command you are already signed in to, so they
+              run on your ChatGPT or Claude plan.
+            </p>
+            <ul class="auto-points">
+              <li><strong>You approve changes.</strong> An agent proposes file moves and tidy-ups. You tick what you want; Jevcast makes the change and can undo it.</li>
+              <li><strong>Quiet by default.</strong> No banners. A card drops from the notch only when a run needs you or fails.</li>
+              <li><strong>Read only unless you choose.</strong> Access is enforced by the agent's own sandbox, never by the prompt.</li>
+              <li><strong>Bring your Codex automations.</strong> Jevcast reads them, and imports a paused copy when you ask.</li>
+            </ul>
+          </div>
+          <figure class="auto-shot">
+            <img
+              src="images/automations-approval.png"
+              width="760"
+              height="640"
+              loading="lazy"
+              alt="The Jevcast approval screen for a Desktop tidy automation: two files to move into folders and one new folder are checked, one screenshot to trash is refused because it changed, and buttons read Reject All, Ask for Changes, and Approve 3 Changes."
+            />
+          </figure>
+        </div>
+      </section>
+
       <section
         class="section privacy"
         id="privacy"
@@ -579,7 +609,8 @@
           <h2 id="privacy-title">Your stuff stays on your Mac.</h2>
           <p class="privacy-lead">
             No account. No analytics. No crash reports. The app goes online for
-            four things only.
+            four things only. Automations run the command-line tools you signed
+            in to yourself; Jevcast adds no network calls of its own.
           </p>
           <ul class="net">
             <li>
@@ -684,6 +715,17 @@ scripts/build.sh</code></pre>
             </p>
           </div>
           <ol class="releases">
+            <li class="release">
+              <div class="release-head">
+                <span class="release-tag">1.6.0</span>
+                <time datetime="2026-09-26">26 September 2026</time>
+              </div>
+              <ul>
+                <li><strong>Automations.</strong> Scheduled scripts and Codex or Claude agents that run in the background, with approvals, undo, and alerts from the notch.</li>
+                <li><strong>Clients and Codex.</strong> Meta ads metrics cards from local files, and your Codex automations, read-only, with import.</li>
+                <li><strong>Quill.</strong> The writing helper has a new name, a model picker, and Fast as its own switch.</li>
+              </ul>
+            </li>
             <li class="release">
               <div class="release-head">
                 <span class="release-tag">1.5.1</span>

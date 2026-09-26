@@ -1364,3 +1364,28 @@ kbd {
     transition-duration: 1ms !important;
   }
 }
+
+/* Automations: points beside a screenshot of the approval screen. */
+.auto-points {
+  display: grid;
+  gap: var(--space-sm, 12px);
+  max-width: 30rem;
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--graphite);
+}
+
+.auto-shot {
+  margin: 0;
+}
+
+.auto-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--panel-radius);
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.3),
+    0 32px 64px -28px rgb(19 21 24 / 0.6),
+    0 14px 28px -14px rgb(19 21 24 / 0.35);
+}

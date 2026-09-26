@@ -100,6 +100,15 @@ final class AutomationsWindow: NSWindowController, NSWindowDelegate {
         return AutomationsRootView(model: model).frame(width: 1240, height: 780)
     }
 
+    /// The approval screen alone, with demo data, for `--snapshot-ui --demo`. Standalone, so it renders fully.
+    static func snapshotApproval() -> some View {
+        let model = AutomationsViewModel(center: nil, quill: nil, demo: AutomationsDemoData.make())
+        return Group {
+            if let run = model.run(AutomationsDemoData.approvalRunID) { ApprovalView(model: model, run: run) }
+        }
+        .frame(width: 760, height: 640)
+    }
+
     /// The editor for `--snapshot-ui`, filled from a template.
     static func snapshotEditor(_ template: AutomationTemplate = .desktopTidy) -> some View {
         let model = AutomationsViewModel(center: nil, quill: nil, demo: AutomationsDemoData.make())

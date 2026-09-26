@@ -16,6 +16,7 @@ struct JevLauncherApp {
         if let index = CommandLine.arguments.firstIndex(of: "--diagnose-mail-actions"), CommandLine.arguments.indices.contains(index + 1) {
             Diagnostics.mailActions(to: CommandLine.arguments[index + 1]); return
         }
+        if CommandLine.arguments.contains("--hyper-led-test") { HyperKeyController.runLightTest(); return }
         if CommandLine.arguments.contains("--diagnose-mail") { Diagnostics.mail(); return }
         if CommandLine.arguments.contains("--cleanup") { Diagnostics.cleanup(apply: CommandLine.arguments.contains("--apply")); return }
         if let index = CommandLine.arguments.firstIndex(of: "--diagnose-source"), CommandLine.arguments.indices.contains(index + 1) {
@@ -49,6 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     private lazy var model = LauncherModel(preferences: preferences, catalogue: catalogue, jev: JevService(usage: .shared), usage: .shared)
     private lazy var dictation = DictationController(preferences: preferences, model: model)
     private let hotkeys = HotkeyCenter()
+    private lazy var hyper = HyperKeyController(preferences: preferences)
     private var launcherHotkey: (hotkey: Hotkey, token: UInt32)?
     private var windowHotkeyIDs: [UInt32] = []
     private var windowShortcutsApplied = false
@@ -121,6 +123,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             configureHotkeys()
             dictation.canStart = { [weak self] in !(self?.wasVisible ?? false) }
             dictation.start()
+            hyper.perform = { [weak self] action, flags in self?.performHyper(action, flags: flags) }
+            hyper.launch()
         }
         Task { await JevKeyCache.shared.load() }
         observeAppSwitches()
@@ -221,19 +225,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             rig.close()
             self.settings = SettingsWindow(preferences: shownPreferences, model: shownModel, catalogue: shownModel.catalogue, status: self.status, updates: self.updates,
                                            dictation: DictationController(preferences: shownPreferences, model: shownModel),
-                                           automations: self.automations, changed: {}, openMail: {})
+                                           automations: self.automations,
+                                           hyper: HyperKeyController(preferences: shownPreferences), changed: {}, openMail: {})
             self.settings?.window?.alphaValue = 0
             self.settings?.window?.ignoresMouseEvents = true
             self.settings?.window?.orderFrontRegardless()
         }))
         // Panes with parts render each part. The stored choice is put back after the last capture.
-        let partKeys = ["settingsAIPart", "settingsLibraryPart", "settingsAutomationsPart"]
+        let partKeys = ["settingsAIPart", "settingsLibraryPart", "settingsAutomationsPart", "settingsWindowsPart"]
         let storedParts = partKeys.map { UserDefaults.standard.string(forKey: $0) }
         for tab in SettingsWindow.Tab.allCases {
             let parts: (key: String, values: [String])? = switch tab {
             case .ai: ("settingsAIPart", AISettings.Part.allCases.map(\.rawValue))
             case .library: ("settingsLibraryPart", CommandSettings.Part.allCases.map(\.rawValue))
             case .automations: ("settingsAutomationsPart", AutomationSettingsPane.Part.allCases.map(\.rawValue))
+            case .windows: ("settingsWindowsPart", WindowSettings.Part.allCases.map(\.rawValue))
             default: nil
             }
             guard let parts else {
@@ -344,13 +350,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             (kVK_Return, .maximize), (kVK_ANSI_Z, .restore), (kVK_ANSI_N, .nextDisplay), (kVK_ANSI_P, .previousDisplay)
         ]
         for (key, action) in keys {
-            let id = hotkeys.register(key: UInt32(key), modifiers: mods) { [weak self] in
-                guard let self else { return }
-                if !self.panel.isVisible { self.model.windows.captureTarget() }
-                do { try self.model.windows.execute(action, cycle: true) }
-                catch { self.show(); self.model.message = error.localizedDescription }
-            }
+            let id = hotkeys.register(key: UInt32(key), modifiers: mods) { [weak self] in self?.performWindowAction(action) }
             if let id { windowHotkeyIDs.append(id) } else { status.windowHotkeyMessage = "One or more window shortcuts are in use by another app." }
+        }
+    }
+    /// The window shortcut path, shared by ⌃⌥⌘ shortcuts and the Hyper key.
+    private func performWindowAction(_ action: WindowAction) {
+        if !panel.isVisible { model.windows.captureTarget() }
+        do { try model.windows.execute(action, cycle: true) }
+        catch { show(); model.message = error.localizedDescription }
+    }
+    /// Runs a Hyper key action. Built-in IDs are checked against the fixed list; nothing else runs.
+    private func performHyper(_ action: HyperAction, flags: CGEventFlags) {
+        switch action {
+        case .builtIn(let id):
+            guard let item = HyperBuiltIn(rawValue: id) else { return }
+            if let window = item.windowAction { performWindowAction(window); return }
+            switch item {
+            case .launcher: show()
+            case .mail: showView(.mail)
+            case .calendar: showView(.calendar)
+            case .automations: showAutomations()
+            default: break
+            }
+        case .openApp(let bundleID):
+            guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+                show(); model.message = "The app for this Hyper key was not found."; return
+            }
+            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+        case .sendKey(let code):
+            HyperKeyTap.post(keyCode: code, flags: flags)
         }
     }
     @objc private func toggle() { if panel.isVisible { hide() } else { show() } }
@@ -547,7 +576,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         hide(restoreFocus: false)
         if settings == nil {
             settings = SettingsWindow(preferences: preferences, model: model, catalogue: catalogue, status: status, updates: updates,
-                                      dictation: dictation, automations: automations,
+                                      dictation: dictation, automations: automations, hyper: hyper,
                                       changed: { [weak self] in self?.configureHotkeys() },
                                       openMail: { [weak self] in self?.showMail() })
         }
@@ -588,6 +617,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     func applicationWillTerminate(_ notification: Notification) {
         backdrop.close(); resultActions.dismiss(); preview.close()
         model.end(); model.windows.stopEdgeSnapping(); hotkeys.clear()
+        if UISnapshots.directory == nil { hyper.shutdown() }
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
     }
 }

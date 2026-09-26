@@ -30,6 +30,9 @@ final class Preferences: ObservableObject {
     @Published var edgeSnapping: Bool { didSet { defaults.set(edgeSnapping, forKey: "edgeSnapping") } }
     @Published var windowShortcuts: Bool { didSet { defaults.set(windowShortcuts, forKey: "windowShortcuts") } }
     @Published var gap: Double { didSet { defaults.set(gap, forKey: "gap") } }
+    /// Caps Lock becomes Hyper: held, it runs the keys in `hyperBindings`. Off by default.
+    @Published var hyperKeyEnabled: Bool { didSet { defaults.set(hyperKeyEnabled, forKey: "hyperKeyEnabled") } }
+    @Published var hyperBindings: [HyperBinding] { didSet { save(hyperBindings, "hyperBindings") } }
     @Published var webEngine: String { didSet { defaults.set(webEngine, forKey: "webEngine") } }
     @Published var appFolders: [String] { didSet { defaults.set(appFolders, forKey: "appFolders") } }
     @Published var fileFolders: [String] { didSet { defaults.set(fileFolders, forKey: "fileFolders") } }
@@ -110,6 +113,8 @@ final class Preferences: ObservableObject {
         edgeSnapping = d.bool(forKey: "edgeSnapping")
         windowShortcuts = d.bool(forKey: "windowShortcuts")
         gap = d.object(forKey: "gap") as? Double ?? 8
+        hyperKeyEnabled = d.bool(forKey: "hyperKeyEnabled")
+        hyperBindings = Self.load(d, "hyperBindings") ?? HyperLayer.defaults
         webEngine = d.string(forKey: "webEngine") ?? "Google"
         appFolders = d.stringArray(forKey: "appFolders") ?? []
         fileFolders = d.stringArray(forKey: "fileFolders") ?? [NSHomeDirectory()]

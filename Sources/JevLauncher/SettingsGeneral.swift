@@ -35,6 +35,7 @@ struct GeneralSettings: View {
                 PermissionRow(permission: .accessibility) { windows.requestPermission() }
                 PermissionRow(permission: .microphone, request: VoicePermissions.request(.microphone, speech: speech))
                 PermissionRow(permission: .speech, request: VoicePermissions.request(.speech, speech: speech))
+                PermissionRow(permission: .inputMonitoring, request: Permission.requestInputMonitoring)
                 ForEach(SourcePermissionRowKind.allCases) { SourcePermissionRow(kind: $0) }
             } header: { Text("Permissions") } footer: {
                 Text("Each feature asks when you first use it. macOS does not tell apps about Full Disk Access or Automation.")

@@ -39,15 +39,16 @@ final class SettingsWindow: NSWindowController, NSToolbarDelegate {
     private let updates: UpdateChecker
     private let dictation: DictationController
     private let automations: AutomationCenter
+    private let hyper: HyperKeyController
     private let changed: () -> Void
     private let openMail: () -> Void
     private let hosting = NSHostingView(rootView: AnyView(EmptyView()))
     private var current: Tab = .general
 
     init(preferences: Preferences, model: LauncherModel, catalogue: AppCatalogue, status: LauncherStatus, updates: UpdateChecker,
-         dictation: DictationController, automations: AutomationCenter, changed: @escaping () -> Void, openMail: @escaping () -> Void) {
+         dictation: DictationController, automations: AutomationCenter, hyper: HyperKeyController, changed: @escaping () -> Void, openMail: @escaping () -> Void) {
         self.preferences = preferences; self.model = model; self.catalogue = catalogue; self.status = status; self.updates = updates
-        self.dictation = dictation; self.automations = automations; self.changed = changed; self.openMail = openMail
+        self.dictation = dictation; self.automations = automations; self.hyper = hyper; self.changed = changed; self.openMail = openMail
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 400),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -101,7 +102,7 @@ final class SettingsWindow: NSWindowController, NSToolbarDelegate {
         switch tab {
         case .general: GeneralSettings(preferences: preferences, status: status, updates: updates, speech: model.speech, windows: model.windows, keys: model.keys, changed: changed)
         case .search: SearchSettings(preferences: preferences, catalogue: catalogue)
-        case .windows: WindowSettings(preferences: preferences, model: model, changed: changed)
+        case .windows: WindowSettings(preferences: preferences, model: model, hyper: hyper, changed: changed, resized: resized)
         case .library: CommandSettings(preferences: preferences, catalogue: catalogue, resized: resized)
         case .voice: VoiceSettings(preferences: preferences, speech: model.speech)
         case .dictation: DictationSettings(preferences: preferences, dictation: dictation, openQuill: { [weak self] in self?.select(.ai) })

@@ -2,6 +2,17 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+
+- **Hyper key.** Turn it on in Settings › Windows › Hyper key. Caps Lock then becomes Hyper. Hold it and press a key to run an action. It is off by default.
+- **Default keys.** M opens Mail, C opens Calendar, Space opens the launcher, and A opens Automations. H, J, K, and L send the arrow keys, and Shift still selects. The arrow keys move the window to a half, and Return fills the screen.
+- **Your own keys.** Change or clear each key, record a new one, and pick an action, a key to send, or an app to open. Settings warns when a key is used twice.
+- **Caps Lock light.** The light is on only while you hold the key. Caps Lock never types capitals while Hyper is on.
+- **Safe remap.** Jevcast keeps your other key mappings. It puts Caps Lock back when you turn Hyper off or quit, and after a crash on the next launch.
+- `--hyper-led-test` turns the Caps Lock light on for two seconds and reports the result.
+
 ## [1.6.0] - 2026-09-26
 
 ### Added

@@ -58,7 +58,7 @@ public enum MetricsFreshness: String, Sendable {
 }
 
 /// Explicit per-client KPI contracts. Field names match the sidecars exactly; labels keep their meaning.
-public enum ClientMetricsProfile: String, CaseIterable, Sendable {
+public enum ClientMetricsProfile: String, Codable, CaseIterable, Sendable {
     case stein, robertParish, redesign, generic
 
     public var clientName: String {

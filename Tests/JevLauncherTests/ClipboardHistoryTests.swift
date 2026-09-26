@@ -406,6 +406,221 @@ import XCTest
         XCTAssertNil(store.read(ClipEntry.Blob.text, for: id))
     }
 
+    func testDeletionRetriesOnceAndTreatsMissingFilesAsSuccess() throws {
+        let folder = tempFolder(), id = UUID()
+        var attempts = 0
+        let store = ClipboardStore(folder: folder, removeItem: { url in
+            attempts += 1
+            if attempts == 1 { throw CocoaError(.fileWriteNoPermission) }
+            try FileManager.default.removeItem(at: url)
+        })
+        store.write([ClipEntry.Blob.text: Data("secret".utf8)], for: id)
+        store.delete([id])
+        XCTAssertEqual(attempts, 2)
+        XCTAssertTrue(store.failedDeletions.isEmpty)
+        store.delete([id])
+        XCTAssertTrue(store.failedDeletions.isEmpty)
+    }
+
+    func testFailedClearIsVisibleAndRetryPreservesNewMemoryEntries() async throws {
+        let folder = tempFolder(), board = FakePasteboard()
+        var deny = true
+        var attempts = 0
+        let history = ClipboardHistory(pasteboard: board, folder: folder, removeItem: { url in
+            if url.standardizedFileURL == folder.standardizedFileURL {
+                attempts += 1
+                if deny { throw CocoaError(.fileWriteNoPermission) }
+            }
+            try FileManager.default.removeItem(at: url)
+        })
+        var settings = ClipboardSettings(); settings.ocr = false
+        history.apply(settings); await history.settle()
+        await copy("secret", board, history); await history.flush()
+        history.clear(includingPins: true); await history.settle()
+        XCTAssertEqual(attempts, 2)
+        XCTAssertEqual(history.failedDeletions, [folder])
+        XCTAssertTrue(history.entries.isEmpty)
+        let persistent = await history.worker.isPersistent
+        XCTAssertFalse(persistent)
+        await copy(String(repeating: "new", count: 4000), board, history)
+        let newEntry = try XCTUnwrap(history.entries.first)
+        deny = false
+        history.retryStorageCleanup(); await history.settle()
+        XCTAssertTrue(history.failedDeletions.isEmpty)
+        let payload = await history.worker.payload(for: newEntry, plain: true)
+        XCTAssertEqual(payload?.string, String(repeating: "new", count: 4000))
+        let reopened = await make(folder: folder)
+        XCTAssertEqual(reopened.entries.map(\.id), [newEntry.id])
+    }
+
+    func testFailedDisableRemainsVisibleWhileOff() async throws {
+        let folder = tempFolder(), board = FakePasteboard()
+        var deny = true
+        let history = ClipboardHistory(pasteboard: board, folder: folder, removeItem: { url in
+            if url.standardizedFileURL == folder.standardizedFileURL && deny { throw CocoaError(.fileWriteNoPermission) }
+            try FileManager.default.removeItem(at: url)
+        })
+        history.apply(ClipboardSettings()); await history.settle()
+        await copy("secret", board, history); await history.flush()
+        history.setEnabled(false); await history.settle()
+        XCTAssertFalse(history.isEnabled)
+        XCTAssertEqual(history.failedDeletions, [folder])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.path))
+        deny = false
+        history.retryStorageCleanup(); await history.settle()
+        XCTAssertTrue(history.failedDeletions.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
+    }
+
+    func testFailedMemoryOnlyCleanupKeepsFailureAndBlobs() async throws {
+        let folder = tempFolder(), board = FakePasteboard()
+        let history = ClipboardHistory(pasteboard: board, folder: folder, removeItem: { url in
+            if url.standardizedFileURL == folder.standardizedFileURL { throw CocoaError(.fileWriteNoPermission) }
+            try FileManager.default.removeItem(at: url)
+        })
+        history.apply(ClipboardSettings()); await history.settle()
+        let text = String(repeating: "private", count: 2000)
+        await copy(text, board, history); await history.flush()
+        var settings = history.settings; settings.persist = false
+        history.apply(settings); await history.settle()
+        XCTAssertEqual(history.failedDeletions, [folder])
+        let entry = try XCTUnwrap(history.entries.first)
+        let restored = await history.worker.fullText(entry)
+        XCTAssertEqual(restored, text)
+        await copy("another", board, history)
+        XCTAssertEqual(history.failedDeletions, [folder], "Unrelated work must not dismiss the warning")
+    }
+
+    func testOrphanAndPreviewDeletionFailuresAreReported() {
+        let folder = tempFolder(), id = UUID()
+        let store = ClipboardStore(folder: folder, removeItem: { _ in throw CocoaError(.fileWriteNoPermission) })
+        store.write([ClipEntry.Blob.text: Data("secret".utf8)], for: id)
+        XCTAssertTrue(store.loadIndex().isEmpty)
+        XCTAssertEqual(store.failedDeletions.count, 1)
+        store.removePreviewFiles()
+        XCTAssertEqual(store.failedDeletions.count, 2)
+    }
+
+    func testMissingLongTextDoesNotCopyTruncatedText() async {
+        let board = FakePasteboard(), history = await make()
+        let made = ClipboardCapture.text(String(repeating: "x", count: 20_000), source: nil, now: Date())
+        await history.insert([(made.entry, [:])])
+        let text = await history.worker.fullText(made.entry)
+        XCTAssertNil(text)
+        let copied = await history.restore([made.entry])
+        XCTAssertFalse(copied)
+        let other = await make(board)
+        await copy("short", board, other)
+        let multiple = await other.restore(other.entries + [made.entry])
+        XCTAssertFalse(multiple)
+        XCTAssertEqual(board.text, "short")
+    }
+
+    func testIndexWriteFailureIsVisibleAndCanRecover() async throws {
+        let folder = tempFolder()
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let index = folder.appendingPathComponent("index.json")
+        try FileManager.default.createDirectory(at: index, withIntermediateDirectories: true)
+        let history = await make(folder: folder)
+        await history.flush()
+        XCTAssertTrue(history.indexSaveFailed)
+        try FileManager.default.removeItem(at: index)
+        history.retryStorageCleanup(); await history.settle()
+        XCTAssertFalse(history.indexSaveFailed)
+    }
+
+    func testWorkerResolvesExistingFilesAndOmitsMissingFiles() async throws {
+        let folder = tempFolder()
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = folder.appendingPathComponent("file.txt")
+        try Data("text".utf8).write(to: url)
+        let worker = ClipboardWorker(folder: nil, persist: false)
+        let urls = await worker.resolveFiles([ClipFile(path: url.path, name: "file.txt", category: .document),
+                                               ClipFile(path: folder.appendingPathComponent("missing").path, name: "missing", category: .other)])
+        XCTAssertEqual(urls, [url])
+    }
+
+    func testMemoryWorkersHaveSeparatePreviewFiles() async throws {
+        let first = ClipboardWorker(folder: nil, persist: false)
+        let second = ClipboardWorker(folder: nil, persist: false)
+        let made = try XCTUnwrap(ClipboardCapture.image(Self.png(), uti: "public.png", source: nil, now: Date()))
+        _ = await first.add(made.entry, blobs: made.blobs)
+        let preview = await first.quickLookURL(for: made.entry)
+        let url = try XCTUnwrap(preview)
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        XCTAssertNotEqual(url.deletingLastPathComponent(), ClipboardStore.previewFolder)
+        _ = await second.load()
+        await second.deleteAll()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        await first.removePreview(url)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    func testQuitWaitsForDisableCleanupAndCommitsUndoTrash() async throws {
+        let folder = tempFolder(), board = FakePasteboard()
+        let history = await make(board, folder: folder)
+        await copy(String(repeating: "secret", count: 2000), board, history)
+        await history.flush()
+        history.delete([try XCTUnwrap(history.entries.first).id])
+        await history.prepareForQuit()
+        let children = try FileManager.default.contentsOfDirectory(atPath: folder.path)
+        XCTAssertFalse(children.contains { UUID(uuidString: $0) != nil })
+        history.setEnabled(false)
+        await history.prepareForQuit()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
+    }
+
+    func testFailedBlobWriteDoesNotPublishBrokenEntry() async throws {
+        let folder = tempFolder(), board = FakePasteboard()
+        let history = await make(board, folder: folder)
+        try FileManager.default.createDirectory(at: folder.deletingLastPathComponent(), withIntermediateDirectories: true)
+        // A file where the history directory belongs makes writes fail without relying on process permissions.
+        try Data("block writes".utf8).write(to: folder)
+        await copy(String(repeating: "private", count: 2000), board, history)
+        XCTAssertTrue(history.entries.isEmpty)
+        XCTAssertTrue(history.blobSaveFailed)
+        try FileManager.default.removeItem(at: folder)
+        await copy(String(repeating: "private", count: 2000), board, history)
+        XCTAssertEqual(history.entries.count, 1, "A failed write must not enter the duplicate cache")
+        XCTAssertFalse(history.blobSaveFailed)
+    }
+
+    func testFailedPersistenceTransitionKeepsMemoryBlobs() throws {
+        let folder = tempFolder(), store = ClipboardStore(folder: nil)
+        let made = ClipboardCapture.text(String(repeating: "private", count: 2000), source: nil, now: Date())
+        store.write(made.blobs, for: made.entry.id)
+        try FileManager.default.createDirectory(at: folder.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("block writes".utf8).write(to: folder)
+        store.goPersistent(folder, entries: [made.entry])
+        XCTAssertNil(store.folder)
+        XCTAssertTrue(store.blobSaveFailed)
+        XCTAssertEqual(store.read(ClipEntry.Blob.text, for: made.entry.id), made.blobs[ClipEntry.Blob.text])
+        store.goPersistent(folder, entries: [made.entry])
+        XCTAssertEqual(store.folder, folder)
+        XCTAssertFalse(store.blobSaveFailed)
+        XCTAssertEqual(store.read(ClipEntry.Blob.text, for: made.entry.id), made.blobs[ClipEntry.Blob.text])
+    }
+
+    func testMemoryTransitionDoesNotResaveFailedDeletedBlobs() throws {
+        let folder = tempFolder(), removed = UUID(), kept = UUID()
+        var deny = true
+        let store = ClipboardStore(folder: folder, removeItem: { url in
+            if deny { throw CocoaError(.fileWriteNoPermission) }
+            try FileManager.default.removeItem(at: url)
+        })
+        store.write([ClipEntry.Blob.text: Data("remove".utf8)], for: removed)
+        store.write([ClipEntry.Blob.text: Data("keep".utf8)], for: kept)
+        store.delete([removed])
+        store.goMemoryOnly(ids: [kept])
+        XCTAssertNil(store.read(ClipEntry.Blob.text, for: removed))
+        XCTAssertNotNil(store.read(ClipEntry.Blob.text, for: kept))
+        deny = false
+        store.retryDeletions()
+        store.goPersistent(folder, entries: [])
+        XCTAssertNil(store.read(ClipEntry.Blob.text, for: removed))
+        XCTAssertNotNil(store.read(ClipEntry.Blob.text, for: kept))
+    }
+
     // MARK: Search and transforms
 
     func testSearchFindsTextInImages() async throws {

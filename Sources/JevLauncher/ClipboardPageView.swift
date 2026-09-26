@@ -8,6 +8,7 @@ struct ClipboardPageView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            ClipboardStorageWarning(history: history)
             ClipChipBar(page: page, count: page.rows.count)
             Divider()
             if !history.isEnabled {
@@ -224,4 +225,31 @@ private struct ClipAnchor: NSViewRepresentable {
         return view
     }
     func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+/// Kept visible even when recording is off or the history is empty.
+struct ClipboardStorageWarning: View {
+    @ObservedObject var history: ClipboardHistory
+
+    var body: some View {
+        if !history.failedDeletions.isEmpty || history.indexSaveFailed || history.blobSaveFailed {
+            VStack(alignment: .leading, spacing: 6) {
+                if !history.failedDeletions.isEmpty {
+                    Text("Some clipboard files could not be deleted.")
+                    Button("Show in Finder") { Frontmost.reveal(history.failedDeletions) }
+                }
+                if history.blobSaveFailed {
+                    Text("Some clipboard data could not be saved. Check available disk space and copy the item again.")
+                }
+                if history.indexSaveFailed {
+                    Text("Clipboard changes could not be saved. Deleted entries may return after restart.")
+                }
+                Button("Retry") { history.retryStorageCleanup() }
+            }
+            .font(.callout)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.orange.opacity(0.12))
+        }
+    }
 }

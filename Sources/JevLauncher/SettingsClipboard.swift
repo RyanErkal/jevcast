@@ -81,6 +81,7 @@ struct ClipboardSettingsSections: View {
                 } icon: { Image(systemName: "lock.shield").foregroundStyle(.green) }
             }
             Section("Data") {
+                ClipboardStorageWarning(history: history)
                 HStack {
                     Button("Show Folder in Finder") {
                         let folder = ClipboardStore.defaultFolder

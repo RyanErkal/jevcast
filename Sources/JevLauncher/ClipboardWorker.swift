@@ -19,15 +19,22 @@ actor ClipboardWorker {
     private var hashes: [String: UUID] = [:]
     private var hashByID: [UUID: String] = [:]
 
-    init(folder: URL?, persist: Bool) {
+    init(folder: URL?, persist: Bool, removeItem: @escaping (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) }) {
         self.folder = folder
-        store = ClipboardStore(folder: persist ? folder : nil)
+        let preview = folder == ClipboardStore.defaultFolder ? ClipboardStore.previewFolder
+            : URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("JevcastClipboardPreview-" + UUID().uuidString)
+        store = ClipboardStore(folder: persist ? folder : nil, previewDirectory: preview, removeItem: removeItem)
     }
+
+    var failedDeletions: [URL] { store.failedDeletions.sorted { $0.path < $1.path } }
+    var blobSaveFailed: Bool { store.blobSaveFailed }
+    var indexSaveFailed: Bool { store.indexSaveFailed }
+    func retryDeletions() { store.retryDeletions() }
 
     var isPersistent: Bool { store.folder != nil }
 
     func load() -> [ClipEntry] {
-        ClipboardStore.removePreviewFiles()
+        store.removePreviewFiles()
         let entries = store.loadIndex()
         for entry in entries { remember(entry) }
         return entries
@@ -48,7 +55,7 @@ actor ClipboardWorker {
     /// Adds a made entry, such as a transform result or demo data, unless its content is already kept.
     func add(_ entry: ClipEntry, blobs: [String: Data]) -> Ingest {
         if let existing = hashes[entry.hash] { return .duplicate(existing) }
-        store.write(blobs, for: entry.id)
+        guard store.write(blobs, for: entry.id) else { return .skipped("storage failure") }
         remember(entry)
         return .added(entry)
     }
@@ -58,7 +65,7 @@ actor ClipboardWorker {
             if let hash = hashByID.removeValue(forKey: id) { hashes[hash] = nil }
         }
         store.delete(ids)
-        ClipboardStore.removePreviewFiles()
+        store.removePreviewFiles()
     }
 
     func saveIndex(_ entries: [ClipEntry]) { store.saveIndex(entries) }
@@ -71,7 +78,7 @@ actor ClipboardWorker {
     func setPersistent(_ persist: Bool, entries: [ClipEntry]) {
         guard let folder else { return }
         if persist, store.folder == nil { store.goPersistent(folder, entries: entries) }
-        if !persist, store.folder != nil { store.goMemoryOnly() }
+        if !persist, store.folder != nil { store.goMemoryOnly(ids: Set(hashByID.keys)) }
     }
 
     /// Deletes everything, on disk and in memory.
@@ -101,9 +108,12 @@ actor ClipboardWorker {
         return thumbnail(for: entry, maxPixels: maxPixels)
     }
 
+    func transform(_ transform: ClipTransform, text: String) throws -> String { try transform.apply(text) }
+
     func fullText(_ entry: ClipEntry) -> String? {
-        guard entry.textInBlob, let data = store.read(ClipEntry.Blob.text, for: entry.id) else { return entry.text }
-        return String(data: data, encoding: .utf8) ?? entry.text
+        guard entry.textInBlob else { return entry.text }
+        guard let data = store.read(ClipEntry.Blob.text, for: entry.id) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     /// Image data for text recognition: a copied image or a single image file.
@@ -142,7 +152,7 @@ actor ClipboardWorker {
     func quickLookURL(for entry: ClipEntry) -> URL? {
         if entry.kind == .files { return entry.files.first.flatMap(Self.resolve) }
         guard entry.kind == .image, let data = store.read(ClipEntry.Blob.image, for: entry.id) else { return nil }
-        let folder = ClipboardStore.previewFolder
+        let folder = store.previewDirectory
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
@@ -153,7 +163,9 @@ actor ClipboardWorker {
         } catch { return nil }
     }
 
-    func removePreview(_ url: URL) { try? FileManager.default.removeItem(at: url) }
+    func removePreview(_ url: URL) { store.remove(url) }
+
+    func resolveFiles(_ files: [ClipFile]) -> [URL] { files.compactMap(Self.resolve) }
 
     /// The file at its path, or where its bookmark says it moved to.
     static func resolve(_ file: ClipFile) -> URL? {

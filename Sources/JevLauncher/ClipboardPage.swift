@@ -240,9 +240,9 @@ final class ClipboardPage: ObservableObject, LauncherPage {
     func transform(_ transform: ClipTransform) {
         guard let entry = selected, entry.kind.isText else { return }
         Task {
-            guard let text = await history.worker.fullText(entry) else { return }
+            guard let text = await history.worker.fullText(entry) else { show("The stored text could not be read."); return }
             do {
-                let result = try transform.apply(text)
+                let result = try await history.worker.transform(transform, text: text)
                 guard transform.makesEntry else { show(result); return }
                 let added = await history.addText(result)
                 if chip != .all, let added, !chip.includes(added) { chip = .all }
@@ -288,10 +288,12 @@ final class ClipboardPage: ObservableObject, LauncherPage {
     func open(_ entry: ClipEntry) {
         switch entry.kind {
         case .files:
-            let urls = entry.files.compactMap(ClipboardWorker.resolve)
-            guard !urls.isEmpty else { show("The file was moved or deleted."); return }
-            for url in urls { _ = Frontmost.open(url) }
-            model?.onClose?(false)
+            Task {
+                let urls = await history.worker.resolveFiles(entry.files)
+                guard !urls.isEmpty else { show("The file was moved or deleted."); return }
+                for url in urls { _ = Frontmost.open(url) }
+                model?.onClose?(false)
+            }
         case .link:
             guard let text = entry.text?.trimmingCharacters(in: .whitespacesAndNewlines),
                   let url = URL(string: text.hasPrefix("www.") ? "https://" + text : text) else { return }
@@ -302,10 +304,12 @@ final class ClipboardPage: ObservableObject, LauncherPage {
     }
 
     func reveal(_ entry: ClipEntry) {
-        let urls = entry.files.compactMap(ClipboardWorker.resolve)
-        guard !urls.isEmpty else { show("The file was moved or deleted."); return }
-        Frontmost.reveal(urls)
-        model?.onClose?(false)
+        Task {
+            let urls = await history.worker.resolveFiles(entry.files)
+            guard !urls.isEmpty else { show("The file was moved or deleted."); return }
+            Frontmost.reveal(urls)
+            model?.onClose?(false)
+        }
     }
 
     func showActions() {
@@ -331,10 +335,10 @@ final class ClipboardPage: ObservableObject, LauncherPage {
         }
         guard quickLookRequest == request, selected?.id == entry.id,
               history.entries.contains(where: { $0.id == entry.id }), history.isEnabled else {
-            if entry.kind == .image { await worker.removePreview(url) }
+            if entry.kind == .image { await history.removePreview(url) }
             return
         }
-        if let old = quickLookFile { Task { await worker.removePreview(old) } }
+        if let old = quickLookFile { Task { await history.removePreview(old) } }
         quickLookFile = entry.kind == .image ? url : nil
         if updating { quickLook.update(path: url.path) } else { quickLook.toggle(path: url.path, beside: window) }
     }
@@ -346,8 +350,7 @@ final class ClipboardPage: ObservableObject, LauncherPage {
         quickLookRequest = UUID()
         quickLook.close()
         if let quickLookFile {
-            let worker = history.worker
-            Task { await worker.removePreview(quickLookFile) }
+            Task { await history.removePreview(quickLookFile) }
         }
         quickLookFile = nil
     }

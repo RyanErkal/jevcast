@@ -14,6 +14,9 @@ final class ClipboardHistory: ObservableObject {
     ]
     /// Newest first.
     @Published private(set) var entries: [ClipEntry] = []
+    @Published private(set) var failedDeletions: [URL] = []
+    @Published private(set) var indexSaveFailed = false
+    @Published private(set) var blobSaveFailed = false
     @Published private(set) var loaded = false
     @Published private(set) var settings = ClipboardSettings()
     var isEnabled: Bool { settings.enabled }
@@ -39,13 +42,14 @@ final class ClipboardHistory: ObservableObject {
     private var trashTask: Task<Void, Never>?
 
     /// `folder` is where history is kept after restart; nil keeps everything in memory, as tests and snapshots do.
-    init(pasteboard: PasteboardReading? = nil, folder: URL? = nil, frontmost: (() -> ClipSource?)? = nil) {
+    init(pasteboard: PasteboardReading? = nil, folder: URL? = nil, frontmost: (() -> ClipSource?)? = nil,
+         removeItem: @escaping (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) }) {
         self.pasteboard = pasteboard ?? SystemPasteboard()
         self.frontmost = frontmost ?? {
             let app = NSWorkspace.shared.frontmostApplication
             return ClipSource(bundleID: app?.bundleIdentifier, name: app?.localizedName)
         }
-        worker = ClipboardWorker(folder: folder, persist: ClipboardSettings().persist)
+        worker = ClipboardWorker(folder: folder, persist: ClipboardSettings().persist, removeItem: removeItem)
         lastChangeCount = self.pasteboard.changeCount
     }
 
@@ -128,7 +132,30 @@ final class ClipboardHistory: ObservableObject {
         chain = Task { @MainActor in
             await previous?.value
             await work()
+            await self.updateStorageState()
         }
+    }
+
+    func updateStorageState() async {
+        failedDeletions = await worker.failedDeletions
+        indexSaveFailed = await worker.indexSaveFailed
+        blobSaveFailed = await worker.blobSaveFailed
+    }
+
+    func retryStorageCleanup() {
+        enqueue { [weak self] in
+            guard let self else { return }
+            await self.worker.retryDeletions()
+            if self.isEnabled {
+                await self.worker.setPersistent(self.settings.persist, entries: self.entries)
+                await self.worker.saveIndex(self.entries)
+            }
+        }
+    }
+
+    func removePreview(_ url: URL) async {
+        await worker.removePreview(url)
+        await updateStorageState()
     }
 
     /// Waits for queued captures and loads. For tests and snapshots.
@@ -239,17 +266,20 @@ final class ClipboardHistory: ObservableObject {
     /// Puts entries back on the pasteboard without recording them as a new copy. Several entries
     /// are joined by newlines.
     func restore(_ items: [ClipEntry], plain: Bool = false) async -> Bool {
-        let worker = worker
+        let worker = worker, generation = generation
         let payload: ClipPayload?
         if items.count == 1, let item = items.first {
             payload = await worker.payload(for: item, plain: plain)
         } else {
             var full: [UUID: String] = [:]
-            for item in items where item.kind.isText { full[item.id] = await worker.fullText(item) }
+            for item in items where item.kind.isText {
+                guard let text = await worker.fullText(item) else { return false }
+                full[item.id] = text
+            }
             let joined = ClipSearch.joined(items) { full[$0.id] }
             payload = joined.isEmpty ? nil : ClipPayload(string: joined)
         }
-        guard let payload else { return false }
+        guard let payload, self.generation == generation else { return false }
         lastChangeCount = pasteboard.write(payload)
         return true
     }
@@ -376,16 +406,15 @@ final class ClipboardHistory: ObservableObject {
         saveTask?.cancel()
         await settle()
         if isEnabled { await worker.saveIndex(entries) }
+        await updateStorageState()
     }
 
-    /// Writes a pending index change before the app quits. Waits at most one second.
-    func saveBeforeQuit() {
-        guard saveTask != nil, isEnabled else { return }
-        saveTask?.cancel()
-        let worker = worker, entries = entries
-        let done = DispatchSemaphore(value: 0)
-        Task.detached { await worker.saveIndex(entries); done.signal() }
-        _ = done.wait(timeout: .now() + 1)
+    /// Keep the main actor free so queued Clear/disable operations can finish before termination.
+    func prepareForQuit() async {
+        stopTimer()
+        for task in ocrTasks.values { task.cancel() }
+        commitTrash()
+        await flush()
     }
 
     private func rebuildKeys() {

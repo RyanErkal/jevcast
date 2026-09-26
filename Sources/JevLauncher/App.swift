@@ -625,11 +625,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         if Frontmost.selfActivating { return false }
         show(); return true
     }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        Task { @MainActor in
+            await model.clipboard.prepareForQuit()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         backdrop.close(); resultActions.dismiss(); preview.close()
         model.end(); model.windows.stopEdgeSnapping(); hotkeys.clear()
         if UISnapshots.directory == nil { hyper.shutdown() }
-        model.clipboard.saveBeforeQuit()
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
     }
 }

@@ -331,8 +331,8 @@ private struct ClipFilesPreview: View {
     @ViewBuilder private func single(_ file: ClipFile) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             switch file.category {
-            case .video: ClipVideoPreview(entry: entry, file: file, thumbnails: page.history.thumbnails)
-            case .audio: ClipAudioPreview(file: file)
+            case .video: ClipVideoPreview(entry: entry, file: file, thumbnails: page.history.thumbnails, worker: page.history.worker)
+            case .audio: ClipAudioPreview(file: file, worker: page.history.worker)
             case .image, .pdf: ClipFileImage(entry: entry, page: page)
             default:
                 ClipFileRow(file: file, large: true)
@@ -408,6 +408,8 @@ private struct ClipVideoPreview: View {
     let entry: ClipEntry
     let file: ClipFile
     let thumbnails: ClipThumbnails
+    let worker: ClipboardWorker
+    @State private var wantsPlay = false
     @State private var poster: NSImage?
     @State private var player: AVPlayer?
 
@@ -428,7 +430,7 @@ private struct ClipVideoPreview: View {
                 if let poster = poster ?? thumbnails.cached(entry.id) {
                     Image(nsImage: poster).resizable().aspectRatio(contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 10))
                 }
-                Button(action: play) {
+                Button { wantsPlay = true } label: {
                     Image(systemName: "play.fill").font(.system(size: 26)).foregroundStyle(.white)
                         .frame(width: 64, height: 64).background(.ultraThinMaterial, in: Circle())
                 }
@@ -437,20 +439,20 @@ private struct ClipVideoPreview: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task(id: entry.id) { poster = await thumbnails.preview(for: entry) }
-        .onDisappear { player?.pause() }
-    }
-
-    private func play() {
-        guard let url = ClipboardWorker.resolve(file) else { return }
-        let player = AVPlayer(url: url)
-        player.isMuted = true
-        self.player = player
-        player.play()
+        .task(id: wantsPlay) {
+            guard wantsPlay, let url = await worker.resolveFiles([file]).first, !Task.isCancelled else { return }
+            let player = AVPlayer(url: url)
+            player.isMuted = true
+            self.player = player
+            player.play()
+        }
+        .onDisappear { wantsPlay = false; player?.pause() }
     }
 }
 
 private struct ClipAudioPreview: View {
     let file: ClipFile
+    let worker: ClipboardWorker
     @State private var player: AVPlayer?
     @State private var playing = false
 
@@ -459,8 +461,6 @@ private struct ClipAudioPreview: View {
             Spacer()
             Image(systemName: "waveform").font(.system(size: 64)).foregroundStyle(Color.accentColor.opacity(0.8))
             Button {
-                if player == nil, let url = ClipboardWorker.resolve(file) { player = AVPlayer(url: url) }
-                if playing { player?.pause() } else { player?.play() }
                 playing.toggle()
             } label: {
                 Label(playing ? "Pause" : "Play", systemImage: playing ? "pause.fill" : "play.fill").frame(minWidth: 90)
@@ -469,7 +469,15 @@ private struct ClipAudioPreview: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onDisappear { player?.pause() }
+        .task(id: playing) {
+            guard playing else { player?.pause(); return }
+            if player == nil {
+                guard let url = await worker.resolveFiles([file]).first, !Task.isCancelled else { playing = false; return }
+                player = AVPlayer(url: url)
+            }
+            player?.play()
+        }
+        .onDisappear { playing = false; player?.pause() }
     }
 }
 

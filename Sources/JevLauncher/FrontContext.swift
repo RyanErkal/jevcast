@@ -3,7 +3,7 @@ import EventKit
 import LauncherCore
 
 /// "This": the page, files, or text in front when the launcher opened. It stays on this Mac.
-/// Only a Luna action that the user turns on in Settings can send any of it.
+/// Only a Quill action that the user turns on in Settings can send any of it.
 enum FrontContext: Equatable {
     case page(title: String, url: String, browser: String)
     case files([String])
@@ -65,7 +65,7 @@ enum FrontContext: Equatable {
         AXUIElementSetMessagingTimeout(element, 0.25)
         var selected: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &selected) == .success else { return nil }
-        // The whole selection is kept, so a rewrite never replaces more than Luna saw.
+        // The whole selection is kept, so a rewrite never replaces more than Quill saw.
         return (selected as? String).map { String($0.prefix(1_000_000)) }
     }
 
@@ -159,7 +159,7 @@ extension LauncherModel {
                                 return nil
                             }))
         }
-        return rows + lunaRows(context)
+        return rows + quillRows(context)
     }
 
     static func tomorrowMorning() -> Date {

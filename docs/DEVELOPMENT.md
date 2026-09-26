@@ -24,16 +24,16 @@ The package has two targets.
   - `MenuScanner.swift`, `Notifier.swift`, `UserItems.swift`: front-app menus, local notifications and timers, and the user's commands, workflows, and snippets.
   - `JevService.swift`: Jev selection through TypeSafe or OpenRouter, chosen by the key. Validates every reply before use.
   - `UpdateService.swift`, `UpdateChecker.swift`: the daily GitHub release check.
-  - `Settings*.swift`, `WelcomeWindow.swift`, `StatusMenu.swift`, `AppMenus.swift`: windows and menus. Settings tabs: General (permissions, network), Search, Library (`SettingsCommands.swift`, export and import in `LibraryFile.swift`), Windows, Voice, AI (`SettingsAI.swift`: Jev, Luna, Usage), and Mail.
+  - `Settings*.swift`, `WelcomeWindow.swift`, `StatusMenu.swift`, `AppMenus.swift`: windows and menus. Settings tabs: General (permissions, network), Search, Library (`SettingsCommands.swift`, export and import in `LibraryFile.swift`), Windows, Voice, AI (`SettingsAI.swift`: Jev, Quill, Usage), and Mail.
   - `AppIdentity.swift`: name, bundle ID, and project links.
   - `Thing.swift`, `Sources.swift`: rows with their own verbs, and sources that load them for a query such as "scheduled tasks". `SourceQuery.swift` in LauncherCore reads the keywords.
   - `ScheduledSource.swift`: launchd jobs, crontab, and timers. `ScheduledJobs.swift` in LauncherCore parses plists and cron lines and computes the next run.
   - `OrganizerSources.swift`, `LauncherModel+Create.swift`: Calendar, Reminders, and Contacts through EventKit and Contacts. `CreateQuery.swift` reads "remind me …" and "add event …".
   - `BrowserSources.swift`, `FrontContext.swift`: tabs, history, and "this". `BrowserTabs.swift` in LauncherCore holds the fixed AppleScript for each browser.
-  - `LunaService.swift`, `LauncherModel+Luna.swift`, `SettingsLuna.swift`: Luna through OpenRouter, the context switches, and the activity log. `LunaPrompt.swift` in LauncherCore builds each request.
+  - `QuillService.swift`, `LauncherModel+Quill.swift`, `SettingsQuill.swift`: Quill through OpenRouter, the context switches, and the activity log. `QuillPrompt.swift` in LauncherCore builds each request. `QuillStorageKeys.swift` holds the stored names; they keep the old "luna" spelling so settings, keys, and history survive the rename.
   - `Mail*.swift`: the mail window. `MailStore.swift` reads Apple Mail's index and `.emlx` files; `MailActions.swift` changes mail through Apple Mail; `MIMEMessage.swift` and `MailIndex.swift` in LauncherCore parse messages and hold Mail's fixed AppleScript.
   - `SQLiteReader.swift`: a read-only SQLite reader with bound values.
-  - `LunaTaskCenter.swift`, `LunaTaskViews.swift`, `TaskRunsSource.swift`: scheduled Luna tasks, their results, and the result window. `LunaTasks.swift` in LauncherCore parses schedules and decides when a task is due.
+  - `QuillTaskCenter.swift`, `QuillTaskViews.swift`, `TaskRunsSource.swift`: scheduled Quill tasks, their results, and the result window. `QuillTasks.swift` in LauncherCore parses schedules and decides when a task is due.
   - `Dictation*.swift`, `AudioCapture.swift`, `AppleSpeechEngine.swift`, `TextInserter.swift`, `SettingsDictation.swift`: hold Right Command to dictate (macOS 26). Audio stays in memory; transcripts are JSON Lines in `~/Library/Application Support/Jevcast/Dictation/`. `DictationHold.swift`, `DictationText.swift`, and `TranscriptStore.swift` in LauncherCore hold the key state machine, local clean-up, and the history files.
   - `JevLayers.swift` in LauncherCore: the kinds of request for layered Jev matching, and how the two first answers are combined.
 

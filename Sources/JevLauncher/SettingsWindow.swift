@@ -101,7 +101,7 @@ final class SettingsWindow: NSWindowController, NSToolbarDelegate {
         case .windows: WindowSettings(preferences: preferences, model: model, changed: changed)
         case .library: CommandSettings(preferences: preferences, catalogue: catalogue, resized: resized)
         case .voice: VoiceSettings(preferences: preferences, speech: model.speech)
-        case .dictation: DictationSettings(preferences: preferences, dictation: dictation, openLuna: { [weak self] in self?.select(.ai) })
+        case .dictation: DictationSettings(preferences: preferences, dictation: dictation, openQuill: { [weak self] in self?.select(.ai) })
         case .ai: AISettings(preferences: preferences, model: model, resized: resized)
         case .mail: MailSettings(preferences: preferences, openMail: openMail)
         }

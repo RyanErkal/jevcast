@@ -8,9 +8,9 @@ final class ScheduledSource: ThingSource {
     let section = "Scheduled Tasks"
     private let timers: TimerCenter
     private let catalogue: AppCatalogue
-    private let tasks: LunaTaskCenter?
-    private let openRun: (LunaTaskRun) -> Void
-    init(timers: TimerCenter, catalogue: AppCatalogue, tasks: LunaTaskCenter? = nil, openRun: @escaping (LunaTaskRun) -> Void = { _ in }) {
+    private let tasks: QuillTaskCenter?
+    private let openRun: (QuillTaskRun) -> Void
+    init(timers: TimerCenter, catalogue: AppCatalogue, tasks: QuillTaskCenter? = nil, openRun: @escaping (QuillTaskRun) -> Void = { _ in }) {
         self.timers = timers; self.catalogue = catalogue; self.tasks = tasks; self.openRun = openRun
     }
 
@@ -37,8 +37,8 @@ final class ScheduledSource: ThingSource {
         if let tasks {
             for task in tasks.tasks {
                 if failingOnly, tasks.lastRun(of: task.id)?.succeeded != false { continue }
-                if !text.isEmpty, SearchRanking.score(query: text, title: task.name, aliases: ["luna", task.prompt]) == nil { continue }
-                rows.append(lunaRow(task, center: tasks, now: now))
+                if !text.isEmpty, SearchRanking.score(query: text, title: task.name, aliases: ["quill", task.prompt]) == nil { continue }
+                rows.append(quillRow(task, center: tasks, now: now))
             }
         }
         for timer in timers.active where text.isEmpty && !failingOnly {
@@ -198,15 +198,15 @@ final class ScheduledSource: ThingSource {
         return verbs
     }
 
-    private func lunaRow(_ task: LunaTask, center: LunaTaskCenter, now: Date) -> LauncherResult {
+    private func quillRow(_ task: QuillTask, center: QuillTaskCenter, now: Date) -> LauncherResult {
         let last = center.lastRun(of: task.id)
         var parts = [task.schedule.summary]
         if task.enabled, let next = task.nextRun(after: now) { parts.append("next " + next.formatted(.relative(presentation: .named))) }
         if !task.enabled { parts.append("paused") }
         if let last { parts.append(last.succeeded ? "last run " + last.date.formatted(.relative(presentation: .named)) : "last run failed") }
         let refused = center.refused(task)
-        if !refused.isEmpty { parts.append("needs " + refused.map(\.title).joined(separator: " and ").lowercased() + " in Settings › AI › Luna") }
-        parts.append("Luna task")
+        if !refused.isEmpty { parts.append("needs " + refused.map(\.title).joined(separator: " and ").lowercased() + " in Settings › AI › Quill") }
+        parts.append("Quill task")
         var verbs: [Verb] = []
         let openRun = self.openRun
         if let last { verbs.append(Verb(title: "Show Last Result", after: .keepOpen) { openRun(last); return nil }) }
@@ -215,12 +215,12 @@ final class ScheduledSource: ThingSource {
             center.setEnabled(task.id, !task.enabled); return task.enabled ? "Paused \(task.name)." : "Resumed \(task.name)."
         })
         verbs.append(Verb(title: "Open Results Folder") {
-            try? FileManager.default.createDirectory(at: LunaTaskCenter.folder, withIntermediateDirectories: true)
-            Frontmost.open(LunaTaskCenter.folder); return nil
+            try? FileManager.default.createDirectory(at: QuillTaskCenter.folder, withIntermediateDirectories: true)
+            Frontmost.open(QuillTaskCenter.folder); return nil
         })
         verbs.append(Verb(title: "Delete Task", after: .stay) { center.remove(task.id); return "Deleted \(task.name)." })
         let symbol = !refused.isEmpty || last?.succeeded == false ? "exclamationmark.triangle" : task.enabled ? "sparkles" : "pause.circle"
-        return LauncherResult(id: "lunatask:" + task.id, title: task.name, detail: parts.joined(separator: " · "), symbol: symbol,
+        return LauncherResult(id: QuillStorageKeys.taskRowPrefix + task.id, title: task.name, detail: parts.joined(separator: " · "), symbol: symbol,
                               action: .thing(Thing(verbs: verbs)), score: 3050)
     }
 

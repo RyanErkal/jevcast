@@ -1,6 +1,6 @@
 import Foundation
 
-/// Local clean-up of a dictation transcript. Runs on this Mac before, or instead of, Luna.
+/// Local clean-up of a dictation transcript. Runs on this Mac before, or instead of, Quill.
 public enum DictationText {
     private static let fillers = try! NSRegularExpression(
         pattern: #"(?i)(?<![\p{L}\p{N}'])(?:u+m+|u+h+|e+r+m+)(?![\p{L}\p{N}'])[,.]?"#)
@@ -20,7 +20,7 @@ public enum DictationText {
         return first.uppercased() + result.dropFirst()
     }
 
-    /// True when Luna's clean-up only removed words and fixed punctuation: it is not longer, and
+    /// True when Quill's clean-up only removed words and fixed punctuation: it is not longer, and
     /// nearly every word in it was spoken. An answer or added text fails, and the local text is used.
     public static func isFaithful(_ cleaned: String, to transcript: String) -> Bool {
         let spoken = words(transcript), kept = words(cleaned)

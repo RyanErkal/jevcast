@@ -2,20 +2,20 @@ import XCTest
 import LauncherCore
 @testable import JevLauncher
 
-final class LunaTaskCenterTests: XCTestCase {
+final class QuillTaskCenterTests: XCTestCase {
     @MainActor func testRunRecordsResultAndRefusesWithoutSwitch() async throws {
         let suite = "JevLauncherTests." + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        let sent = LockedBox<[LunaRequest]>([])
-        var allowed: Set<LunaContext> = [.typedText]
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("lunatasks-" + UUID().uuidString)
+        let sent = LockedBox<[QuillRequest]>([])
+        var allowed: Set<QuillContext> = [.typedText]
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("quilltasks-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }
-        let center = LunaTaskCenter(defaults: defaults, folder: folder, send: { request in
+        let center = QuillTaskCenter(defaults: defaults, folder: folder, send: { request in
             sent.mutate { $0.append(request) }
-            return LunaReply(text: "Nothing urgent today.\nTwo meetings.", inputTokens: 1, outputTokens: 1, cost: nil)
+            return QuillReply(text: "Nothing urgent today.\nTwo meetings.", inputTokens: 1, outputTokens: 1, cost: nil)
         }, allowed: { allowed })
-        let plain = LunaTask(name: "Quote", prompt: "give me a quote", schedule: .everyHours(24), contexts: [])
+        let plain = QuillTask(name: "Quote", prompt: "give me a quote", schedule: .everyHours(24), contexts: [])
         center.add(plain)
         center.run(plain)
         try await until { center.runs.count == 1 }
@@ -25,7 +25,7 @@ final class LunaTaskCenterTests: XCTestCase {
         XCTAssertTrue(try String(contentsOfFile: file, encoding: .utf8).contains("Two meetings."))
         XCTAssertTrue(file.hasPrefix(folder.path), "Results go to the injected folder.")
 
-        let mail = LunaTask(name: "Mail", prompt: "check my unread mail", schedule: .everyHours(1), contexts: [.unreadMail])
+        let mail = QuillTask(name: "Mail", prompt: "check my unread mail", schedule: .everyHours(1), contexts: [.unreadMail])
         center.run(mail)
         try await until { center.runs.count == 2 }
         XCTAssertFalse(center.runs[0].succeeded)
@@ -36,7 +36,7 @@ final class LunaTaskCenterTests: XCTestCase {
         XCTAssertEqual(center.refused(mail), [])
 
         // Persisted across a new center on the same store.
-        let again = LunaTaskCenter(defaults: defaults, send: { _ in throw CancellationError() }, allowed: { [] })
+        let again = QuillTaskCenter(defaults: defaults, send: { _ in throw CancellationError() }, allowed: { [] })
         XCTAssertEqual(again.tasks.map(\.name), ["Quote"])
         XCTAssertEqual(again.runs.count, 2)
     }

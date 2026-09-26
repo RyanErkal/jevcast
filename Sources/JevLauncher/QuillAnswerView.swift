@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Luna's answer: a title, then the text, which can be selected and scrolls when long.
-struct LunaAnswerView: View {
-    let answer: LunaAnswer
+/// Quill's answer: a title, then the text, which can be selected and scrolls when long.
+struct QuillAnswerView: View {
+    let answer: QuillAnswer
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label(answer.title, systemImage: "sparkles")
@@ -10,7 +10,7 @@ struct LunaAnswerView: View {
             if let error = answer.error {
                 Text(error).font(.system(size: 13)).foregroundStyle(.orange)
             } else if answer.isLoading {
-                HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Luna is writing…").foregroundStyle(.secondary) }
+                HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Quill is writing…").foregroundStyle(.secondary) }
                     .font(.system(size: 13))
             } else {
                 ScrollView {

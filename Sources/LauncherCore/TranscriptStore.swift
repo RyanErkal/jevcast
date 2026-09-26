@@ -8,7 +8,7 @@ public struct Transcript: Codable, Equatable, Sendable {
     public let duration: TimeInterval
     /// Bundle ID of the app the text went to, when known.
     public let target: String?
-    /// "apple-speech", or "apple-speech+luna" when Luna cleaned the text.
+    /// "apple-speech", or "apple-speech+luna" when Quill cleaned the text (see `QuillStorageKeys.transcriptEngineSuffix`).
     public let engine: String
     public init(text: String, date: Date, duration: TimeInterval, target: String?, engine: String) {
         self.text = text; self.date = date; self.duration = duration; self.target = target; self.engine = engine

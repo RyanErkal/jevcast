@@ -66,7 +66,7 @@ extension LauncherModel {
     /// Voice and pending search work stop, so nothing types into the view's filter.
     func showView(_ view: ViewID) {
         guard page?.id != view, let made = makePage?(view) else { return }
-        dismissLuna()
+        dismissQuill()
         pauseListening()
         revision = UUID(); sourceTask?.cancel()
         viewStack.append((page, query))

@@ -1,4 +1,5 @@
 import Foundation
+import LauncherCore
 import LocalAuthentication
 import Security
 
@@ -21,8 +22,8 @@ enum KeychainStoreError: Error, LocalizedError, Equatable {
 enum KeychainStore {
     private static let service = AppIdentity.bundleID
     static let jevAccount = "typesafe-api-key"
-    /// A separate OpenRouter key for Luna, used when the Jev key is a TypeSafe key.
-    static let lunaAccount = "openrouter-luna-key"
+    /// A separate OpenRouter key for Quill, used when the Jev key is a TypeSafe key.
+    static let quillAccount = QuillStorageKeys.keychainAccount
     /// Where builds before 1.0 kept the key. A read moves it to the current item once.
     private static let legacyQuery: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
@@ -127,8 +128,8 @@ final class JevKeyCache: ObservableObject {
         return nil
     }
     static let shared = JevKeyCache()
-    /// Luna's own OpenRouter key, when the Jev key is not one.
-    static let luna = JevKeyCache(account: KeychainStore.lunaAccount)
+    /// Quill's own OpenRouter key, when the Jev key is not one.
+    static let quill = JevKeyCache(account: KeychainStore.quillAccount)
     @Published private(set) var state: State = .unknown
     private let reader: @Sendable () throws -> String?
     private var loading: Task<State, Never>?

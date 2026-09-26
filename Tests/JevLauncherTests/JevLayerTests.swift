@@ -24,8 +24,8 @@ final class JevLayerTests: XCTestCase {
         XCTAssertEqual(JevLayerPlan.decide(pick: nil, pickKind: nil, kind: nil), .noMatch)
         XCTAssertEqual(JevKind.of("window:left-half"), .window)
         XCTAssertEqual(JevKind.of("app:/A.app", isSettingsPane: true), .settingsPane)
-        XCTAssertEqual(JevKind.of("this:luna:custom"), .luna)
-        XCTAssertEqual(JevKind.of("this:luna:shorter"), .luna)
+        XCTAssertEqual(JevKind.of(QuillStorageKeys.selectionRowPrefix + "custom"), .quill)
+        XCTAssertEqual(JevKind.of(QuillStorageKeys.selectionRowPrefix + "shorter"), .quill)
         XCTAssertEqual(JevKind.of("route:calendar"), .organizer)
     }
 

@@ -30,10 +30,10 @@ extension LauncherModel {
         if let existing = sources[kind] { return existing }
         let made: ThingSource?
         switch kind {
-        case .scheduled: made = ScheduledSource(timers: timers, catalogue: catalogue, tasks: lunaTasks, openRun: { [weak self] in self?.openTaskRun?($0) })
+        case .scheduled: made = ScheduledSource(timers: timers, catalogue: catalogue, tasks: quillTasks, openRun: { [weak self] in self?.openTaskRun?($0) })
         case .help: made = HelpSource()
         case .cleanup: made = CleanupSource(preferences: preferences)
-        case .taskRuns: made = TaskRunsSource(tasks: lunaTasks, openRun: { [weak self] in self?.openTaskRun?($0) })
+        case .taskRuns: made = TaskRunsSource(tasks: quillTasks, openRun: { [weak self] in self?.openTaskRun?($0) })
         case .calendar: made = CalendarSource()
         case .reminders: made = RemindersSource()
         case .contacts: made = ContactsSource(compose: Self.usesJevcastMail ? { [weak self] address in self?.composeMail?(address) } : nil)

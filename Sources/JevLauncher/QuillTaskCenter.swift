@@ -4,7 +4,7 @@ import LauncherCore
 import UserNotifications
 
 /// One finished run of a scheduled task. The full text is in a Markdown file on this Mac.
-struct LunaTaskRun: Codable, Identifiable, Equatable {
+struct QuillTaskRun: Codable, Identifiable, Equatable {
     var id = UUID().uuidString
     let taskID: String
     let taskName: String
@@ -15,35 +15,35 @@ struct LunaTaskRun: Codable, Identifiable, Equatable {
     let file: String?
 }
 
-/// Runs scheduled Luna tasks while Jevcast is open: at the time, it reads the data the task may
-/// read, asks Luna, saves the result as Markdown, and posts a notification. A run missed while
+/// Runs scheduled Quill tasks while Jevcast is open: at the time, it reads the data the task may
+/// read, asks Quill, saves the result as Markdown, and posts a notification. A run missed while
 /// the Mac slept for hours is skipped, not run late.
 @MainActor
-final class LunaTaskCenter: ObservableObject {
-    @Published private(set) var tasks: [LunaTask]
-    @Published private(set) var runs: [LunaTaskRun]
+final class QuillTaskCenter: ObservableObject {
+    @Published private(set) var tasks: [QuillTask]
+    @Published private(set) var runs: [QuillTaskRun]
     @Published private(set) var running: Set<String> = []
     private let defaults: UserDefaults
-    private let send: (LunaRequest) async throws -> LunaReply
-    private let allowed: () -> Set<LunaContext>
+    private let send: (QuillRequest) async throws -> QuillReply
+    private let allowed: () -> Set<QuillContext>
     private var loop: Task<Void, Never>?
     private var wakeObserver: NSObjectProtocol?
     static let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent(AppIdentity.name + "/Luna Tasks", isDirectory: true)
+        .appendingPathComponent(AppIdentity.name + "/" + QuillStorageKeys.tasksFolder, isDirectory: true)
     /// Where results go. Tests use a temporary folder.
     let resultsFolder: URL
     static let runLimit = 200
 
-    init(defaults: UserDefaults = .standard, folder: URL = LunaTaskCenter.folder,
-         send: @escaping (LunaRequest) async throws -> LunaReply, allowed: @escaping () -> Set<LunaContext>) {
+    init(defaults: UserDefaults = .standard, folder: URL = QuillTaskCenter.folder,
+         send: @escaping (QuillRequest) async throws -> QuillReply, allowed: @escaping () -> Set<QuillContext>) {
         self.defaults = defaults; self.send = send; self.allowed = allowed; self.resultsFolder = folder
-        tasks = defaults.data(forKey: "lunaTasks").flatMap { try? JSONDecoder().decode([LunaTask].self, from: $0) } ?? []
-        runs = defaults.data(forKey: "lunaTaskRuns").flatMap { try? JSONDecoder().decode([LunaTaskRun].self, from: $0) } ?? []
+        tasks = defaults.data(forKey: QuillStorageKeys.tasks).flatMap { try? JSONDecoder().decode([QuillTask].self, from: $0) } ?? []
+        runs = defaults.data(forKey: QuillStorageKeys.taskRuns).flatMap { try? JSONDecoder().decode([QuillTaskRun].self, from: $0) } ?? []
     }
 
     // MARK: Tasks
 
-    func add(_ task: LunaTask) { tasks.append(task); save() }
+    func add(_ task: QuillTask) { tasks.append(task); save() }
     func remove(_ id: String) { tasks.removeAll { $0.id == id }; save() }
     func setEnabled(_ id: String, _ enabled: Bool) {
         guard let index = tasks.firstIndex(where: { $0.id == id }) else { return }
@@ -52,16 +52,16 @@ final class LunaTaskCenter: ObservableObject {
         if enabled { tasks[index].lastRun = Date() }
         save()
     }
-    func lastRun(of id: String) -> LunaTaskRun? { runs.first { $0.taskID == id } }
+    func lastRun(of id: String) -> QuillTaskRun? { runs.first { $0.taskID == id } }
 
     private func save() {
-        defaults.set(try? JSONEncoder().encode(tasks), forKey: "lunaTasks")
-        defaults.set(try? JSONEncoder().encode(runs), forKey: "lunaTaskRuns")
+        defaults.set(try? JSONEncoder().encode(tasks), forKey: QuillStorageKeys.tasks)
+        defaults.set(try? JSONEncoder().encode(runs), forKey: QuillStorageKeys.taskRuns)
     }
 
     /// Kinds of data a task reads that the user has not allowed.
-    func refused(_ task: LunaTask) -> [LunaTaskContext] {
-        task.contexts.filter { !allowed().contains($0.lunaContext) }
+    func refused(_ task: QuillTask) -> [QuillTaskContext] {
+        task.contexts.filter { !allowed().contains($0.quillContext) }
     }
 
     // MARK: Scheduling
@@ -91,7 +91,7 @@ final class LunaTaskCenter: ObservableObject {
             guard let due = task.due(at: now) else { continue }
             if due.late {
                 mark(task.id, ranAt: now)
-                record(LunaTaskRun(taskID: task.id, taskName: task.name, date: now, succeeded: false,
+                record(QuillTaskRun(taskID: task.id, taskName: task.name, date: now, succeeded: false,
                                    preview: "Skipped the \(due.time.formatted(date: .omitted, time: .shortened)) run: the Mac was asleep or Jevcast was closed.", file: nil))
                 continue
             }
@@ -111,7 +111,7 @@ final class LunaTaskCenter: ObservableObject {
     // MARK: Running
 
     /// Runs a task now. The result is saved and announced; errors are saved and announced too.
-    func run(_ task: LunaTask) {
+    func run(_ task: QuillTask) {
         guard !running.contains(task.id) else { return }
         running.insert(task.id)
         Task { @MainActor [weak self] in
@@ -121,24 +121,24 @@ final class LunaTaskCenter: ObservableObject {
             do {
                 let refused = self.refused(task)
                 guard refused.isEmpty else {
-                    throw LauncherError("This task reads " + refused.map(\.title).joined(separator: " and ").lowercased() + ". Turn that on in Settings › AI › Luna.")
+                    throw LauncherError("This task reads " + refused.map(\.title).joined(separator: " and ").lowercased() + ". Turn that on in Settings › AI › Quill.")
                 }
                 let sections = await Self.gather(task.contexts)
-                let sent = Array(Set(task.contexts.map(\.lunaContext))).sorted { $0.rawValue < $1.rawValue }
+                let sent = Array(Set(task.contexts.map(\.quillContext))).sorted { $0.rawValue < $1.rawValue }
                 let reply = try await self.send(.task(task, sections: sections, sent: sent, now: date))
                 let file = Self.write(task, text: reply.text, date: date, in: self.resultsFolder)
-                let run = LunaTaskRun(taskID: task.id, taskName: task.name, date: date, succeeded: true, preview: Self.preview(reply.text), file: file)
+                let run = QuillTaskRun(taskID: task.id, taskName: task.name, date: date, succeeded: true, preview: Self.preview(reply.text), file: file)
                 self.record(run)
                 await Self.notify(run, body: run.preview)
             } catch {
-                let run = LunaTaskRun(taskID: task.id, taskName: task.name, date: date, succeeded: false, preview: error.localizedDescription, file: nil)
+                let run = QuillTaskRun(taskID: task.id, taskName: task.name, date: date, succeeded: false, preview: error.localizedDescription, file: nil)
                 self.record(run)
                 await Self.notify(run, body: "Did not run: " + error.localizedDescription)
             }
         }
     }
 
-    private func record(_ run: LunaTaskRun) {
+    private func record(_ run: QuillTaskRun) {
         runs = Array(([run] + runs).prefix(Self.runLimit))
         save()
     }
@@ -158,7 +158,7 @@ final class LunaTaskCenter: ObservableObject {
 
     /// Saves the result as `<task name>/<local date and time>.md`, and returns its path. A name that
     /// is already taken gets a number, so no result replaces another.
-    static func write(_ task: LunaTask, text: String, date: Date, in root: URL = folder) -> String? {
+    static func write(_ task: QuillTask, text: String, date: Date, in root: URL = folder) -> String? {
         let safe = task.name.map { "/:\\".contains($0) ? "-" : $0 }.prefix(60)
         let folder = root.appendingPathComponent(String(safe), isDirectory: true)
         let stamp = stampFormat.string(from: date)
@@ -172,23 +172,23 @@ final class LunaTaskCenter: ObservableObject {
         } catch { return nil }
     }
 
-    static func notify(_ run: LunaTaskRun, body: String) async {
+    static func notify(_ run: QuillTaskRun, body: String) async {
         guard await Notifier.authorize() else { return }
         let content = UNMutableNotificationContent()
         content.title = run.taskName
-        content.subtitle = run.succeeded ? "Luna · scheduled task" : "Scheduled task"
+        content.subtitle = run.succeeded ? "Quill · scheduled task" : "Scheduled task"
         content.body = body
         content.sound = .default
-        content.threadIdentifier = "luna-task." + run.taskID
-        content.userInfo = ["lunaRun": run.id]
-        try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "luna-run." + run.id, content: content, trigger: nil))
+        content.threadIdentifier = QuillStorageKeys.notificationThreadPrefix + run.taskID
+        content.userInfo = [QuillStorageKeys.notificationRunKey: run.id]
+        try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: QuillStorageKeys.notificationRunPrefix + run.id, content: content, trigger: nil))
     }
 
     // MARK: Data a task may read
 
     /// Today's events, open reminders due by tomorrow, and unread inbox mail: titles, times, senders,
     /// and previews only. Each kind is read only when the task names it and the user allowed it.
-    static func gather(_ contexts: [LunaTaskContext]) async -> [(title: String, text: String)] {
+    static func gather(_ contexts: [QuillTaskContext]) async -> [(title: String, text: String)] {
         var sections: [(String, String)] = []
         let store = Permissions.events
         let cal = Calendar.current

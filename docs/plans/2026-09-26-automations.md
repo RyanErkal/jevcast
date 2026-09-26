@@ -1,6 +1,6 @@
 # Automations, AI naming, and notch alerts: plan
 
-Status: revised draft for Ryan's review. Date: 2026-09-26.
+Status: approved 2026-09-26, in build. Decisions: the writing feature is "Quill"; Codex is the default runner, Claude is also offered; the runner needs an Apple Development or Developer ID signed build; agent access has three levels (read only, edit its folder, edit its folder and use the network) enforced by the CLI sandbox or tool list; a later drafts/reports schema is wanted. Date: 2026-09-26.
 
 ## Goals
 
@@ -10,7 +10,7 @@ Status: revised draft for Ryan's review. Date: 2026-09-26.
 4. Human-in-the-loop: an agent proposes changes, Ryan approves each item, and Jevcast code applies them with a recovery journal. Undo is conditional on the files still being available and unchanged.
 5. Silent by default. Show input, approval, and final failure alerts in a panel below the MacBook notch.
 6. Read and port the Codex automations, including the Stein, Robert Parish, and ReDesign metrics jobs. A port must preserve its workflow, not just its schedule.
-7. Rename the writing feature to "AI Writing". Keep the model name in the picker. Split Fast from reasoning effort.
+7. Rename the writing feature to "Quill". Keep the model name in the picker. Split Fast from reasoning effort.
 
 Non-goals: a cloud runner, running on another Mac, changing the Codex automation registry, and model-written shell commands. CLI authentication and session persistence may write their own files in `~/.codex` or Claude's data folder. The importer never writes there.
 
@@ -31,7 +31,7 @@ Non-goals: a cloud runner, running on another Mac, changing the Codex automation
 
 ### A1. Naming
 
-- User-facing: "Luna" becomes "AI Writing". Settings › AI tabs: Jev, Writing, Automations, Usage.
+- User-facing: "Luna" becomes "Quill". Settings › AI tabs: Jev, Writing, Automations, Usage.
 - Code: `Luna*` types become `Writing*`. Move `LunaTask*` into Automations only when Part B is ready. Rename prompts, errors, search labels, help, and dictation copy. Remove model-branded command aliases. Keep `ask` and `?`.
 - System prompt: "You are the writing helper inside Jevcast".
 - Add a model picker with `openai/gpt-6-luna` as the initial value. Show only verified models and capabilities. Do not substitute a model silently.
@@ -91,7 +91,7 @@ Non-goals: a cloud runner, running on another Mac, changing the Codex automation
 - `-s read-only` constrains model shell commands; it does not disable them, confine reads to allowedRoots, or prove that hooks and MCP tools cannot write. The product forbids model-written commands. Phase 0 must prove a supported way to disable command execution, hooks, plugins, external tools, and unapproved file reads while retaining subscription auth. If it cannot, the Codex agent runner is blocked. Do not relax the policy to ship it.
 - Candidate Claude invocation: `claude -p --output-format stream-json --verbose --restricted --safe-mode --strict-mcp-config --mcp-config <empty-config> --tools <fixed-read-tools> --allowedTools <same-tools> --permission-mode plan --permission-prompts none --json-schema <schema>`. Supply the prompt through stdin and set cwd directly. Verify this combination in phase 0. `--allowedTools` alone is not a sandbox. No Bash, write tools, network tools, agents, or arbitrary MCP tools.
 - Prefer a private run workspace containing only user-approved context snapshots. Never copy executable project settings, hooks, or instructions into it. Verify filesystem confinement and protection of the real home and control state. CLI read-only mode alone does not give that guarantee.
-- No workspace-write agent mode in v1. All mutations go through approved scripts or B5. No bypass flags, automatic approval reviewer, or inherited broad tool permissions.
+- Workspace-write agent access is a per-task choice with a warning, confined to the working folder and allowed roots by the Codex sandbox or the Claude tool list and `--restricted`. Changes outside that go through B5. No bypass flags or full access.
 - File contents, logs, imported prompts, and model replies are untrusted data. A fixed header explains that boundary but cannot enforce it. Restrict tools and reads, bound context, keep secrets out, and validate outputs. Test prompt injection that asks to run commands, expose files, change roots, or approve its own proposal.
 - Resume only a validated session ID created for this Jevcast run. Reapply and verify all isolation, model, cwd, and schema settings on every round. Codex resume has different flags; phase 0 must prove the effective policy. Block resume if it cannot retain the same limits. Never use `--last` or resume the imported Codex target thread.
 - Parse bounded JSON events, terminal result, exit status, and structured errors. Exit 0 alone does not prove task success. Usage can be missing or cumulative; display Unknown when absent and avoid double-counting resumed turns. Tokens are not a subscription balance or a bill.
@@ -213,4 +213,4 @@ Non-goals: a cloud runner, running on another Mac, changing the Codex automation
 2. Which supported signing mode should be required if ad-hoc registration fails in phase 0?
 3. Should the later port include a separate draft/report operations schema for the workflows blocked in B9?
 
-AI Writing is the chosen feature name. Needs-input and final-failure alerts use the notch panel. Unsupported Codex desktop workflows remain visible in Codex until a complete port is designed.
+Quill is the chosen feature name. Needs-input and final-failure alerts use the notch panel. Unsupported Codex desktop workflows remain visible in Codex until a complete port is designed.

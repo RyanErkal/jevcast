@@ -61,7 +61,11 @@ public enum RunnerCommand {
         public var schemaFile: URL
         /// Codex writes its final message here.
         public var lastMessageFile: URL
-        public init(schemaFile: URL, lastMessageFile: URL) { self.schemaFile = schemaFile; self.lastMessageFile = lastMessageFile }
+        /// Claude only: sign-in values from `ClaudeSignIn`, passed with `--settings`.
+        public var claudeSettingsFile: URL?
+        public init(schemaFile: URL, lastMessageFile: URL, claudeSettingsFile: URL? = nil) {
+            self.schemaFile = schemaFile; self.lastMessageFile = lastMessageFile; self.claudeSettingsFile = claudeSettingsFile
+        }
     }
 
     /// The full launch for one agent turn. `cliPath` is the resolved CLI from settings.
@@ -76,7 +80,7 @@ public enum RunnerCommand {
         let args: [String]
         switch task.runner {
         case .codex: args = codexArguments(task, schemaFile: files.schemaFile, lastMessage: files.lastMessageFile, resume: resumeSession)
-        case .claude: args = claudeArguments(task, schema: schema, resume: resumeSession)
+        case .claude: args = claudeArguments(task, schema: schema, resume: resumeSession, settingsFile: files.claudeSettingsFile)
         }
         return ProcessLaunch(executable: cliPath, arguments: args, environment: env,
                              workingDirectory: task.workingDirectory, stdin: Data(prompt.utf8))
@@ -111,13 +115,14 @@ public enum RunnerCommand {
         return a
     }
 
-    static func claudeArguments(_ task: AgentTask, schema: String, resume: String?) -> [String] {
+    static func claudeArguments(_ task: AgentTask, schema: String, resume: String?, settingsFile: URL? = nil) -> [String] {
         let tools = claudeTools(task.access).joined(separator: ",")
         var a = ["-p", "--output-format", "stream-json", "--verbose", "--restricted", "--safe-mode", "--strict-mcp-config",
                  "--permission-prompts", "none", "--tools", tools, "--allowedTools", tools, "--json-schema", schema]
         if !task.model.isEmpty { a += ["--model", task.model] }
         if let e = effortValue(task.effort) { a += ["--effort", e] }
         for root in task.allowedRoots { a += ["--add-dir", root] }
+        if let settingsFile { a += ["--settings", settingsFile.path] }
         if let resume { a += ["--resume", resume] }
         return a
     }

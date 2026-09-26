@@ -185,11 +185,14 @@ private struct AgentSettingsSection: View {
             }
         } header: { Text("Defaults for new agent automations") } footer: {
             InfoCaption("Agent runs use your signed-in subscription.",
-                        detail: "Jevcast runs the codex or claude command you are signed in to. It removes API-key variables such as OPENAI_API_KEY and ANTHROPIC_API_KEY, so runs use your ChatGPT or Claude plan, not API billing. The agent reads only the folders you allow and never runs changes itself: file changes wait for your approval.")
+                        detail: "Jevcast runs the codex or claude command you are signed in to. It removes API-key variables such as OPENAI_API_KEY and ANTHROPIC_API_KEY from its own environment, so runs use your ChatGPT or Claude plan. If Claude Code is set to sign in through a gateway in ~/.claude/settings.json, only those sign-in values are passed to each run. The agent reads only the folders you allow and never runs changes itself: file changes wait for your approval.")
         }
         Section("Command-line tools") {
             ToolRow(title: "Codex", tool: center.codexTool, path: center.settings.codexPath) { choose(.codex) }
             ToolRow(title: "Claude", tool: center.claudeTool, path: center.settings.claudePath) { choose(.claude) }
+            LabeledContent("Claude sign-in") {
+                Text(center.settings.claudeUsesSettingsSignIn ? "Gateway from ~/.claude/settings.json" : "Your Claude account").foregroundStyle(.secondary)
+            }
             HStack {
                 if center.detectingTools { ProgressView().controlSize(.small) }
                 Spacer()

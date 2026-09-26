@@ -21,6 +21,8 @@ public struct ProposalApplier {
         let byID = Dictionary(manifest.checked.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         // Manifest order, so the user sees the same order they approved.
         let order = manifest.proposal.items.map(\.id).filter { approved.contains($0) }
+        // Folders made earlier in this apply, by folded path, so later moves can go into them.
+        var created: [String: (device: UInt64, inode: UInt64)] = [:]
         for id in order {
             guard let item = byID[id] else {
                 var e = Entry(itemID: id, op: manifest.proposal.items.first { $0.id == id }?.op ?? .move, source: "", destination: nil, status: .skipped)
@@ -36,7 +38,7 @@ public struct ProposalApplier {
                 journal.entries[index].message = "Could not write the journal. Nothing was changed."
                 break
             }
-            let outcome = run(item, entry: &entry)
+            let outcome = run(item, entry: &entry, created: &created)
             journal.entries[index] = entry
             var stop = false
             switch outcome {
@@ -76,10 +78,15 @@ public struct ProposalApplier {
 
     // MARK: Apply steps
 
-    private func run(_ c: CheckedItem, entry: inout Entry) -> Outcome {
+    private func run(_ c: CheckedItem, entry: inout Entry, created: inout [String: (device: UInt64, inode: UInt64)]) -> Outcome {
         switch c.item.op {
         case .move, .rename:
-            guard let dst = c.destination, let parentID = c.parentIdentity else { return .failed("Checked item is incomplete") }
+            guard let dst = c.destination, var parentID = c.parentIdentity else { return .failed("Checked item is incomplete") }
+            // A destination folder made by this proposal: expect the folder this apply created.
+            if parentID.inode == 0 {
+                guard let made = created[SafeFS.folded(SafeFS.parent(dst))] else { return .skipped("Its new folder was not created") }
+                parentID.device = made.device; parentID.inode = made.inode
+            }
             return withSource(c) { srcFD, srcLeaf in
                 withDir(SafeFS.parent(dst), expect: parentID) { dstFD in
                     guard SafeFS.statAt(dstFD, SafeFS.leaf(dst)) == nil else { return .skipped("Destination now exists") }
@@ -93,7 +100,10 @@ public struct ProposalApplier {
                 guard mkdirat(fd, SafeFS.leaf(c.source), 0o755) == 0 else {
                     return errno == EEXIST ? .skipped("Folder now exists") : .failed(errorText())
                 }
-                entry.createdInode = SafeFS.statAt(fd, SafeFS.leaf(c.source)).map { UInt64($0.st_ino) }
+                if let st = SafeFS.statAt(fd, SafeFS.leaf(c.source)) {
+                    entry.createdInode = UInt64(st.st_ino)
+                    created[SafeFS.folded(c.source)] = (UInt64(st.st_dev), UInt64(st.st_ino))
+                }
                 return .done
             }
         case .trash:
@@ -144,7 +154,7 @@ public struct ProposalApplier {
             return moveBack(from: dst, to: e.source, inode: c.identity.inode)
         case .trash:
             guard let trash = e.trashURL else { return .failed("Trash location unknown. Restore it from the Trash by hand.") }
-            return moveBack(from: trash, to: e.source, inode: c.identity.inode)
+            return moveBackFromTrash(trash, to: e.source, inode: c.identity.inode)
         case .mkdir:
             guard let fd = SafeFS.openDirectory(SafeFS.parent(e.source)) else { return .failed("Parent folder changed or is missing") }
             defer { close(fd) }
@@ -175,6 +185,21 @@ public struct ProposalApplier {
         guard SafeFS.statAt(origFD, SafeFS.leaf(original)) == nil else { return .failed("Something now exists at the original place") }
         guard renameatx_np(curFD, SafeFS.leaf(current), origFD, SafeFS.leaf(original), UInt32(RENAME_EXCL)) == 0 else {
             return .failed(errno == EXDEV ? "Item is on another volume. Move it back by hand." : errorText())
+        }
+        return .done
+    }
+
+    /// macOS privacy protection refuses to open `~/.Trash` itself, but a known item in it can still be
+    /// checked and renamed by path. The inode check and the no-overwrite rename keep this safe.
+    private func moveBackFromTrash(_ current: String, to original: String, inode: UInt64) -> Outcome {
+        var st = stat()
+        guard lstat(current, &st) == 0 else { return .failed("It is no longer in the Trash") }
+        guard UInt64(st.st_ino) == inode, st.st_mode & S_IFMT == S_IFREG else { return .failed("The item in the Trash was replaced") }
+        guard let origFD = SafeFS.openDirectory(SafeFS.parent(original)) else { return .failed("Original folder changed or is missing") }
+        defer { close(origFD) }
+        guard SafeFS.statAt(origFD, SafeFS.leaf(original)) == nil else { return .failed("Something now exists at the original place") }
+        guard renameatx_np(AT_FDCWD, current, origFD, SafeFS.leaf(original), UInt32(RENAME_EXCL)) == 0 else {
+            return .failed(errno == EXDEV ? "Item is on another volume. Put it back from the Trash." : errorText())
         }
         return .done
     }

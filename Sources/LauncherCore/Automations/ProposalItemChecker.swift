@@ -7,6 +7,9 @@ struct Refusal: Error { var text: String; init(_ text: String) { self.text = tex
 struct ItemChecker {
     let roots: [ResolvedRoot]
     let protected: [[String]]
+    /// Folders that earlier mkdir items in this proposal will make, by folded path, with their volume.
+    /// A move may name one of them as its destination folder.
+    var plannedFolders: [String: UInt64] = [:]
 
     static let maxTags = 16
     static let maxTagLength = 64
@@ -107,6 +110,8 @@ struct ItemChecker {
         for n in (root.real.count + 1)...real.count {
             guard let st = SafeFS.lstatPath(SafeFS.join(Array(real.prefix(n)))) else {
                 if n == real.count { break }
+                // The destination folder may be one this proposal makes first.
+                if n == real.count - 1, plannedFolders[SafeFS.folded(SafeFS.join(Array(real.prefix(n))))] != nil { break }
                 throw Refusal("A folder in the path is missing")
             }
             if st.st_mode & S_IFMT == S_IFLNK { throw Refusal("Path goes through a symbolic link") }
@@ -129,6 +134,12 @@ struct ItemChecker {
         let leaf = parts.last!
         try validName(leaf)
         let parent = Array(parts.dropLast())
+        if SafeFS.lstatPath(SafeFS.join(parent)) == nil, let device = plannedFolders[SafeFS.folded(SafeFS.join(parent))] {
+            // Inode 0 marks a folder made by this proposal; the applier fills in the real one.
+            let pending = FileIdentity(device: device, inode: 0, isDirectory: true, size: 0, modified: .distantPast, linkCount: 0)
+            guard SafeFS.lstatPath(SafeFS.join(parts)) == nil else { throw Refusal("Destination already exists") }
+            return (parent, pending, leaf)
+        }
         guard let pst = SafeFS.lstatPath(SafeFS.join(parent)), pst.st_mode & S_IFMT == S_IFDIR else {
             throw Refusal("Destination folder does not exist")
         }

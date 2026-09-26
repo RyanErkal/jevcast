@@ -347,10 +347,29 @@ public struct AutomationSettings: Codable, Equatable, Sendable {
     public var scriptPath: String
     /// Keep the Mac from idle sleep while a run is active.
     public var preventIdleSleep: Bool
+    /// Claude signs in through the gateway set in `~/.claude/settings.json` (`ANTHROPIC_BASE_URL`), not the
+    /// account login. Restricted mode ignores that file, so the runner passes just those values with `--settings`.
+    public var claudeUsesSettingsSignIn: Bool = false
     public init(maxConcurrentRuns: Int = 2, historyDays: Int = 30, codexPath: String = "", claudePath: String = "",
                 scriptPath: String = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
                 preventIdleSleep: Bool = true) {
         self.maxConcurrentRuns = maxConcurrentRuns; self.historyDays = historyDays; self.codexPath = codexPath
         self.claudePath = claudePath; self.scriptPath = scriptPath; self.preventIdleSleep = preventIdleSleep
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case maxConcurrentRuns, historyDays, codexPath, claudePath, scriptPath, preventIdleSleep, claudeUsesSettingsSignIn
+    }
+    /// Older files lack newer keys; each missing key keeps its default.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = AutomationSettings()
+        maxConcurrentRuns = try c.decodeIfPresent(Int.self, forKey: .maxConcurrentRuns) ?? d.maxConcurrentRuns
+        historyDays = try c.decodeIfPresent(Int.self, forKey: .historyDays) ?? d.historyDays
+        codexPath = try c.decodeIfPresent(String.self, forKey: .codexPath) ?? d.codexPath
+        claudePath = try c.decodeIfPresent(String.self, forKey: .claudePath) ?? d.claudePath
+        scriptPath = try c.decodeIfPresent(String.self, forKey: .scriptPath) ?? d.scriptPath
+        preventIdleSleep = try c.decodeIfPresent(Bool.self, forKey: .preventIdleSleep) ?? d.preventIdleSleep
+        claudeUsesSettingsSignIn = try c.decodeIfPresent(Bool.self, forKey: .claudeUsesSettingsSignIn) ?? false
     }
 }

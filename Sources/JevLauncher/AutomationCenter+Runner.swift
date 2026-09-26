@@ -124,6 +124,7 @@ extension AutomationCenter {
             var s = self.settings
             s.codexPath = found.0?.path ?? ""
             s.claudePath = found.1?.path ?? ""
+            s.claudeUsesSettingsSignIn = ClaudeSignIn.gatewayEnvironment() != nil
             s.scriptPath = Self.scriptPath(s.scriptPath, adding: [found.0?.path, found.1?.path].compactMap { $0 })
             if s != self.settings { self.saveSettings(s) }
         }

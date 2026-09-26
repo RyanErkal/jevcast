@@ -35,8 +35,20 @@ extension RunEngine {
         do {
             try store.writeRunFile(automationID: run.automationID, runID: run.id, name: Self.schemaFile, data: Data(schema.utf8))
         } catch { return .done(.failed, "The run folder could not be written: \(error)") }
+        var signInFile: URL?
+        if task.runner == .claude, context.settings.claudeUsesSettingsSignIn {
+            guard let env = ClaudeSignIn.gatewayEnvironment(), let data = ClaudeSignIn.settingsData(env) else {
+                return .done(.failed, "Claude is set to sign in through ~/.claude/settings.json, but no gateway is set there.")
+            }
+            do { try store.writeRunFile(automationID: run.automationID, runID: run.id, name: ClaudeSignIn.fileName, data: data) }
+            catch { return .done(.failed, "The run folder could not be written: \(error)") }
+            signInFile = folder.appendingPathComponent(ClaudeSignIn.fileName)
+        }
+        // The sign-in copy holds a token, so it lives only while the CLI runs.
+        defer { if let signInFile { try? FileManager.default.removeItem(at: signInFile) } }
         let files = RunnerCommand.Files(schemaFile: folder.appendingPathComponent(Self.schemaFile),
-                                        lastMessageFile: folder.appendingPathComponent(Self.lastMessageFile))
+                                        lastMessageFile: folder.appendingPathComponent(Self.lastMessageFile),
+                                        claudeSettingsFile: signInFile)
         let launch: ProcessLaunch
         do {
             launch = try RunnerCommand.agent(task, cliPath: cli, prompt: prompt, schema: schema, files: files, resumeSession: resume,
@@ -91,8 +103,11 @@ extension RunEngine {
             run.summary = summary.isEmpty ? question : summary
             return .done(.needsInput, nil)
         case .proposal(let proposal):
+            // Saved in the `Proposal` format the app's validator reads, not the agent's schema shape
+            // (which uses empty strings for unused fields and has no version).
             do {
-                try store.writeRunFile(automationID: run.automationID, runID: run.id, name: Self.proposalRawFile, data: raw)
+                let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+                try store.writeRunFile(automationID: run.automationID, runID: run.id, name: Self.proposalRawFile, data: encoder.encode(proposal))
             } catch { return .done(.failed, "The proposal could not be saved.") }
             run.proposalFile = Self.proposalRawFile
             run.summary = proposal.summary.isEmpty ? "\(proposal.items.count) changes to review" : proposal.summary

@@ -27,12 +27,14 @@ public enum ProposalValidator {
         }
         let resolvedRoots = roots.compactMap(ResolvedRoot.init)
         guard !resolvedRoots.isEmpty else { return .failure(.noRoots) }
-        let checker = ItemChecker(roots: resolvedRoots, protected: protected.compactMap(SafeFS.components))
+        var checker = ItemChecker(roots: resolvedRoots, protected: protected.compactMap(SafeFS.components))
         var checked: [CheckedItem] = []
         var refused: [String: String] = [:]
         for item in proposal.items {
             switch checker.check(item) {
-            case .success(let c): checked.append(c)
+            case .success(let c):
+                checked.append(c)
+                if c.item.op == .mkdir { checker.plannedFolders[SafeFS.folded(c.source)] = c.identity.device }
             case .failure(let reason): refused[item.id] = reason.text
             }
         }
@@ -51,6 +53,7 @@ public enum ProposalValidator {
         var result: [String: String] = [:]
         for a in items.indices {
             for b in items.indices where b > a {
+                if Self.movesIntoNewFolder(items[a], items[b]) || Self.movesIntoNewFolder(items[b], items[a]) { continue }
                 let overlap = paths[a].contains { pa in paths[b].contains { pb in SafeFS.isInside(pa, pb) || SafeFS.isInside(pb, pa) } }
                 guard overlap else { continue }
                 result[items[a].id] = "Depends on item \(items[b].id). Approve it in a separate proposal."
@@ -62,6 +65,16 @@ public enum ProposalValidator {
 }
 
 extension ProposalValidator {
+    /// A move or rename straight into a folder an mkdir item makes is the one allowed overlap:
+    /// the folder is new and empty, and the applier makes it first.
+    static func movesIntoNewFolder(_ folder: CheckedItem, _ item: CheckedItem) -> Bool {
+        guard folder.item.op == .mkdir, item.item.op == .move, let dst = item.destination else { return false }
+        let made = SafeFS.folded(folder.source)
+        guard SafeFS.folded(SafeFS.parent(dst)) == made,
+              let src = SafeFS.components(SafeFS.folded(item.source)), let madeParts = SafeFS.components(made) else { return false }
+        return !SafeFS.isInside(src, madeParts)
+    }
+
     /// Proposals older than this cannot be approved. Their journals stay for undo.
     public static let maxAge: TimeInterval = 7 * 86400
 

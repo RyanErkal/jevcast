@@ -8,6 +8,18 @@ extension RunEngine {
     /// One agent turn: a fresh prompt, a resumed session with an answer or revision note, or a diagnosis report.
     func runAgent(_ run: inout RunRecord, _ task: AgentTask, automation: Automation, control: RunControl,
                   followUp: RunFollowUp?, diagnosis: String?) -> Step {
+        if task.access.canWrite {
+            let controlPath = store.root.resolvingSymlinksInPath().path
+            let roots = [task.workingDirectory] + task.allowedRoots
+            for root in roots {
+                let path = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
+                guard let parts = SafeFS.components(SafeFS.folded(path)),
+                      let control = SafeFS.components(SafeFS.folded(controlPath)),
+                      !SafeFS.isInside(control, parts), !SafeFS.isInside(parts, control) else {
+                    return .done(.failed, "The agent's writable folders must not include automation state.")
+                }
+            }
+        }
         let mode: OutputMode = diagnosis != nil ? .report : task.output
         let cli = task.runner == .codex ? context.settings.codexPath : context.settings.claudePath
         let prompt: String
@@ -34,6 +46,9 @@ extension RunEngine {
         let schema = AgentPrompt.schema(mode)
         do {
             try store.writeRunFile(automationID: run.automationID, runID: run.id, name: Self.schemaFile, data: Data(schema.utf8))
+            if task.runner == .codex {
+                try store.writeRunFile(automationID: run.automationID, runID: run.id, name: Self.lastMessageFile, data: Data())
+            }
         } catch { return .done(.failed, "The run folder could not be written: \(error)") }
         var signInFile: URL?
         if task.runner == .claude, context.settings.claudeUsesSettingsSignIn {
@@ -70,7 +85,7 @@ extension RunEngine {
         }
         let stderr = Redactor.redact(Redactor.tail(outcome.stderrTail, maxBytes: 2000)).trimmingCharacters(in: .whitespacesAndNewlines)
         guard outcome.succeeded, parsed.error == nil else {
-            let why = parsed.error ?? (stderr.isEmpty ? "The \(task.runner.executableName) CLI exited with code \(outcome.exitCode ?? -1)." : stderr)
+            let why = Redactor.redact(parsed.error ?? (stderr.isEmpty ? "The \(task.runner.executableName) CLI exited with code \(outcome.exitCode ?? -1)." : stderr))
             return Self.isTransient(why) ? .retry(why, spawnOnly: false) : .done(.failed, String(why.prefix(1000)))
         }
         var structured = parsed.structured

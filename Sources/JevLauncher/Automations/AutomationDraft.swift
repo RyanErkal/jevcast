@@ -67,7 +67,7 @@ struct AutomationDraft: Equatable {
     }
 
     private mutating func fill(_ agent: AgentTask) {
-        runner = agent.runner; model = agent.model; effort = agent.effort == .none ? .medium : agent.effort; fast = agent.fast
+        runner = agent.runner; model = agent.model; effort = agent.effort; fast = agent.fast
         prompt = agent.prompt; output = agent.output; access = agent.access
         agentFolder = Paths.display(agent.workingDirectory); allowedRoots = agent.allowedRoots.map(Paths.display)
     }
@@ -79,13 +79,30 @@ struct AutomationDraft: Equatable {
         secretNames = script.secretNames
     }
 
+    @MainActor mutating func applyDefaults(_ preferences: Preferences) {
+        let agent = preferences.defaultAgentTask(prompt: prompt, workingDirectory: agentFolder)
+        runner = agent.runner; model = agent.model; effort = agent.effort; fast = agent.fast
+        // Proposal templates must not gain direct write access from a default.
+        if output != .proposal { access = agent.access }
+        policy.timeout = preferences.defaultAutomationPolicy.timeout
+        policy.alertOnFailure = preferences.defaultAutomationPolicy.alertOnFailure
+    }
+
     var isNew: Bool { existing == nil }
     var usesAgent: Bool { kind != .script }
     var usesScript: Bool { kind != .agent }
 
-    /// One argument per line. Blank lines are dropped; spaces inside a line stay part of it.
+    /// Preserve saved argv exactly when this field was not edited.
     var arguments: [String] {
-        argumentsText.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        if let existing {
+            let saved: [String]
+            switch existing.kind {
+            case .script(let script), .scriptWithDiagnosis(let script, _): saved = script.arguments
+            case .agent: saved = []
+            }
+            if argumentsText == saved.joined(separator: "\n") { return saved }
+        }
+        return argumentsText.split(whereSeparator: \.isNewline).map(String.init)
     }
 
     var commandLinePreview: String {

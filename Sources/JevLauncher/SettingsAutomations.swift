@@ -174,7 +174,7 @@ private struct AgentSettingsSection: View {
                 TextField("Model", text: $preferences.automationClaudeModel, prompt: Text("opus, or empty for the CLI default"))
             }
             Picker("Reasoning effort", selection: $preferences.automationEffort) {
-                ForEach(ReasoningEffort.allCases.filter { $0 != .none }, id: \.self) { Text($0.title).tag($0) }
+                ForEach(ReasoningEffort.allCases, id: \.self) { Text($0.title).tag($0) }
             }
             if preferences.automationRunner == .codex {
                 Toggle("Fast", isOn: $preferences.automationFast)
@@ -185,7 +185,7 @@ private struct AgentSettingsSection: View {
             }
         } header: { Text("Defaults for new agent automations") } footer: {
             InfoCaption("Agent runs use your signed-in subscription.",
-                        detail: "Jevcast runs the codex or claude command you are signed in to. It removes API-key variables such as OPENAI_API_KEY and ANTHROPIC_API_KEY from its own environment, so runs use your ChatGPT or Claude plan. If Claude Code is set to sign in through a gateway in ~/.claude/settings.json, only those sign-in values are passed to each run. The agent reads only the folders you allow and never runs changes itself: file changes wait for your approval.")
+                        detail: "Jevcast runs the codex or claude command you are signed in to. It removes API-key variables such as OPENAI_API_KEY and ANTHROPIC_API_KEY from its own environment, so runs use your ChatGPT or Claude plan. If Claude Code is set to sign in through a gateway in ~/.claude/settings.json, only those sign-in values are passed to each run. Read-only access prevents direct file changes. Write access lets the agent change files while it runs. Proposals always need a separate approval.")
         }
         Section("Command-line tools") {
             ToolRow(title: "Codex", tool: center.codexTool, path: center.settings.codexPath) { choose(.codex) }
@@ -258,7 +258,7 @@ private struct AlertSettingsSection: View {
             .disabled(!preferences.automationAlerts)
             HStack { Spacer(); Button("Show Test Alert") { center.showTestAlert() }.controlSize(.small) }
         } header: { Text("Alerts") } footer: {
-            Text("Questions and changes to approve always alert. Successful runs stay silent in the history unless an automation asks otherwise.")
+            Text("When alerts are on, questions and changes to approve can alert. Quiet hours delay them.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         Section("Quiet hours") {

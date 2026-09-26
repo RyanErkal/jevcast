@@ -77,12 +77,15 @@ public final class RunEngine: @unchecked Sendable {
     public func execute(_ run: RunRecord, automation: Automation, control: RunControl = RunControl(),
                         followUp: RunFollowUp? = nil) -> RunRecord {
         var run = run
+        guard run.revision == automation.revision else {
+            return finish(&run, .failed, error: "The automation changed after this run was queued. Start a new run.")
+        }
         run.state = .running
         run.started = run.started ?? Date()
         run.finished = nil
         run.ownerPID = context.ownerPID; run.ownerStart = context.ownerStart
         run.error = nil
-        save(&run)
+        guard save(&run) else { return run }
         let maxAttempts = 1 + max(0, automation.policy.retries)
         while true {
             let step = attempt(&run, automation: automation, control: control, followUp: followUp)
@@ -94,9 +97,11 @@ public final class RunEngine: @unchecked Sendable {
                 // A spawn failure did nothing, so it gets one retry even when the policy allows none.
                 let allowed = spawnOnly ? max(maxAttempts, 2) : maxAttempts
                 guard run.attempt < allowed else { return finish(&run, .failed, error: why) }
-                run.state = .retryWaiting; run.error = why; save(&run)
+                run.state = .retryWaiting; run.error = why
+                guard save(&run) else { return run }
                 guard control.sleep(context.retryDelay * Double(run.attempt)) else { return finish(&run, .cancelled, error: "Cancelled.") }
-                run.attempt += 1; run.state = .running; run.error = nil; save(&run)
+                run.attempt += 1; run.state = .running; run.error = nil
+                guard save(&run) else { return run }
             }
         }
     }
@@ -137,7 +142,7 @@ public final class RunEngine: @unchecked Sendable {
         supervisor.stdoutTailBytes = Self.scriptOutputBytes
         let outcome = supervisor.run(launch, timeout: TimeInterval(automation.policy.timeout))
         run.exitCode = outcome.exitCode
-        let secrets = script.secretNames.compactMap { env[$0] }
+        let secrets = script.secretNames.compactMap { env[$0] } + Array(script.environment.values)
         let text = Redactor.redact(Redactor.tail(outcome.stdoutTail, maxBytes: Self.scriptOutputBytes), known: secrets)
         let body = "Exit: \(outcome.exitCode.map(String.init) ?? "none")\n\n```\n\(text.replacingOccurrences(of: "```", with: "ʼʼʼ"))\n```\n"
         guard writeOutput(&run, body) else { return (.done(.failed, "The output could not be saved."), outcome) }
@@ -183,9 +188,17 @@ public final class RunEngine: @unchecked Sendable {
         } catch { return false }
     }
 
-    func save(_ run: inout RunRecord) {
-        try? store.saveRun(run)
+    @discardableResult
+    func save(_ run: inout RunRecord) -> Bool {
+        do { try store.saveRun(run) } catch {
+            run.state = .failed
+            run.error = "The run state could not be saved. Check the automation folder before running again."
+            run.finished = Date()
+            run.ownerPID = nil; run.ownerStart = nil
+            return false
+        }
         onChange(run)
+        return true
     }
 
     private func finish(_ run: inout RunRecord, _ state: RunState, error: String?) -> RunRecord {

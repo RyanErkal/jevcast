@@ -128,7 +128,9 @@ final class QuillTaskCenter: ObservableObject {
                 let sections = await Self.gather(task.contexts)
                 let sent = Array(Set(task.contexts.map(\.quillContext))).sorted { $0.rawValue < $1.rawValue }
                 let reply = try await self.send(.task(task, sections: sections, sent: sent, now: date))
-                let file = Self.write(task, text: reply.text, date: date, in: self.resultsFolder)
+                guard let file = Self.write(task, text: reply.text, date: date, in: self.resultsFolder) else {
+                    throw LauncherError("The result could not be saved. Check the results folder and try again.")
+                }
                 let run = QuillTaskRun(taskID: task.id, taskName: task.name, date: date, succeeded: true, preview: Self.preview(reply.text), file: file)
                 self.record(run)
             } catch {

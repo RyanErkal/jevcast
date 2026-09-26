@@ -33,6 +33,22 @@ final class NotchAlertController {
     private var panel: NotchPanel?
     private let state = NotchState()
     private var hideTask: Task<Void, Never>?
+    private var session: NotchSession?
+    private var sessionAvailable = NotchSession.isAvailable
+
+    init() {
+        session = NotchSession { [weak self] available in
+            guard let self else { return }
+            self.sessionAvailable = available
+            if available { self.next() }
+            else {
+                self.hideTask?.cancel()
+                if let alert = self.state.alert { self.queue.insert(alert, at: 0) }
+                self.state.alert = nil
+                self.panel?.orderOut(nil)
+            }
+        }
+    }
 
     func show(_ alert: NotchAlert) {
         if state.alert?.id == alert.id || queue.contains(where: { $0.id == alert.id }) { return }
@@ -47,7 +63,7 @@ final class NotchAlertController {
     }
 
     private func next() {
-        guard !queue.isEmpty else { return }
+        guard sessionAvailable, state.alert == nil, !queue.isEmpty else { return }
         var alert = queue.removeFirst()
         // A burst becomes one alert, so several failures do not stack up.
         if !queue.isEmpty {

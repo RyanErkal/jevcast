@@ -7,11 +7,7 @@ import Security
 /// The file is never unlinked.
 enum SingleInstance {
     static func acquire(root: URL) -> Int32? {
-        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        let fd = open(root.appendingPathComponent("runner.lock").path, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
-        guard fd >= 0 else { return nil }
-        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { close(fd); return nil }
-        return fd
+        try? AutomationStore(root: root).acquireRunnerLock()
     }
 }
 
@@ -63,7 +59,7 @@ enum AlertLauncher {
         switch run.state {
         case .needsInput, .needsApproval: return true
         case .failed: return policy.alertOnFailure
-        case .succeeded: return policy.alertOnSuccess
+        case .succeeded: return false
         default: return false
         }
     }

@@ -165,25 +165,16 @@ enum ToolProbe {
 
     /// `<tool> --version` with a 5-second limit and a fixed small environment.
     static func version(_ path: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = ["--version"]
         let dir = (path as NSString).deletingLastPathComponent
-        // Node-based CLIs find `node` beside them or in Homebrew.
-        process.environment = ["PATH": "\(dir):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin", "HOME": NSHomeDirectory()]
-        let out = Pipe()
-        process.standardOutput = out
-        process.standardError = FileHandle.nullDevice
-        process.standardInput = FileHandle.nullDevice
-        let done = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in done.signal() }
-        do { try process.run() } catch { return nil }
-        if done.wait(timeout: .now() + 5) == .timedOut {
-            process.terminate()
-            if done.wait(timeout: .now() + 1) == .timedOut { kill(process.processIdentifier, SIGKILL) }
-            return nil
-        }
-        let data = (try? out.fileHandleForReading.read(upToCount: 4096)) ?? nil
-        return data.flatMap { ToolLocator.versionLine(String(decoding: $0, as: UTF8.self)) }
+        let launch = ProcessLaunch(executable: path, arguments: ["--version"],
+                                   environment: ["PATH": "\(dir):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin", "HOME": NSHomeDirectory()],
+                                   workingDirectory: "", stdin: Data())
+        let supervisor = ProcessSupervisor()
+        supervisor.stdoutTailBytes = 4096
+        supervisor.stderrTailBytes = 0
+        supervisor.killGrace = 1
+        let result = supervisor.run(launch, timeout: 5)
+        guard result.succeeded else { return nil }
+        return ToolLocator.versionLine(String(decoding: result.stdoutTail, as: UTF8.self))
     }
 }

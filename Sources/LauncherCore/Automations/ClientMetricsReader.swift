@@ -11,7 +11,7 @@ public enum ClientMetricsReader {
     public static let maxBytes = 10 * 1024 * 1024
 
     public static func read(url: URL, profile: ClientMetricsProfile) throws -> ClientMetricsSnapshot {
-        let fd = open(url.path, O_RDONLY | O_CLOEXEC)
+        let fd = open(url.path, O_RDONLY | O_NONBLOCK | O_CLOEXEC)
         guard fd >= 0 else { throw ClientMetricsError.unreadable }
         let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
         var st = stat()

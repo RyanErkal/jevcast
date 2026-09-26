@@ -88,12 +88,6 @@ enum SafeFS {
 
     /// Atomic write, then fsync of the file and its folder.
     static func writeDurably(_ data: Data, to url: URL) throws {
-        try data.write(to: url, options: .atomic)
-        for path in [url.path, url.deletingLastPathComponent().path] {
-            let fd = open(path, O_RDONLY | O_CLOEXEC)
-            guard fd >= 0 else { throw POSIXError(.EIO) }
-            defer { close(fd) }
-            guard fsync(fd) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
-        }
+        try SecureFile.write(data, to: url)
     }
 }

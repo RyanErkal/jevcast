@@ -59,6 +59,7 @@ final class AutomationsViewModel: ObservableObject {
     @Published var showQuillExplainer = false
 
     /// Set by the app: opens Quill's new-task flow (the launcher).
+    var configureNewDraft: ((inout AutomationDraft) -> Void)?
     var onNewQuillTask: (() -> Void)?
     private var resultWindows: [QuillResultWindow] = []
     private var watchers: Set<AnyCancellable> = []
@@ -66,6 +67,7 @@ final class AutomationsViewModel: ObservableObject {
     init(center: AutomationCenter?, quill: QuillTaskCenter?, demo: AutomationsDemoData? = nil) {
         self.center = center; self.quill = quill; self.demo = demo
         // Views observe this object only; changes in either center redraw them.
+        center?.$message.compactMap { $0 }.sink { [weak self] in self?.banner = $0 }.store(in: &watchers)
         center?.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &watchers)
         quill?.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &watchers)
     }
@@ -131,9 +133,14 @@ final class AutomationsViewModel: ObservableObject {
     // MARK: Run content (call from .task, not from a view body: the center reads files)
 
     func output(of run: RunRecord) -> String? { demo.map { $0.outputs[run.id] } ?? center?.output(of: run) }
-    func proposal(for run: RunRecord) -> Result<ProposalManifest, ProposalError>? {
+    func readOutput(of run: RunRecord) async -> String? {
+        if let demo { return demo.outputs[run.id] }
+        guard let store = center?.store else { return nil }
+        return await Task.detached(priority: .utility) { store.readOutput(run) }.value
+    }
+    func proposal(for run: RunRecord) async -> Result<ProposalManifest, ProposalError>? {
         if let demo { return demo.proposals[run.id].map { .success($0) } }
-        return center?.proposal(for: run)
+        return await center?.proposal(for: run)
     }
     func journal(for run: RunRecord) -> ApplyJournal? { demo == nil ? center?.journal(for: run) : nil }
 
@@ -145,16 +152,24 @@ final class AutomationsViewModel: ObservableObject {
         if let message = live?.setEnabled(id, enabled) { banner = message }
     }
     func runNow(_ id: String, test: Bool = false) {
-        live?.runNow(id, test: test)
-        if live != nil { banner = test ? "Test run queued." : "Run queued." }
+        guard let live, live.runNow(id, test: test) else { return }
+        banner = live.runnerStatus.isRunning ? (test ? "Test run queued." : "Run queued.")
+            : "Queued. Turn on the background runner in Settings › Automations to start it."
     }
-    func runSelected() { if let id = selectedAutomationID ?? selectedRun?.automationID { runNow(id) } }
+    var runnableSelection: String? {
+        if section == .all {
+            return filteredAutomations.first { $0.id == selectedAutomationID }?.id
+        }
+        guard section.listsRuns, let selectedRun, runs(in: section).contains(where: { $0.id == selectedRun.id }) else { return nil }
+        return selectedRun.automationID
+    }
+    func runSelected() { if let id = runnableSelection { runNow(id) } }
     func cancel(_ run: RunRecord) { live?.cancel(run) }
-    func answer(_ run: RunRecord, _ text: String) { live?.answer(run, text) }
-    func revise(_ run: RunRecord, note: String) { live?.revise(run, note: note) }
-    func approve(_ run: RunRecord, items: Set<String>) -> ApplyJournal? { live?.approve(run, items: items) }
+    @discardableResult func answer(_ run: RunRecord, _ text: String) -> Bool { live?.answer(run, text) ?? false }
+    @discardableResult func revise(_ run: RunRecord, note: String) -> Bool { live?.revise(run, note: note) ?? false }
+    func approve(_ run: RunRecord, items: Set<String>) async -> ApplyJournal? { await live?.approve(run, items: items) }
     func reject(_ run: RunRecord) { live?.reject(run) }
-    func undo(_ run: RunRecord) -> ApplyJournal? { live?.undo(run) }
+    func undo(_ run: RunRecord) async -> ApplyJournal? { await live?.undo(run) }
     func reveal(_ run: RunRecord) { live?.revealRunFolder(run) }
     func delete(_ id: String) {
         live?.delete(id)
@@ -192,7 +207,9 @@ final class AutomationsViewModel: ObservableObject {
     func newAutomation(_ template: AutomationTemplate = .blank) {
         if template.isQuillTask { showQuillExplainer = true; return }
         let bun = template == .metricsRefresh ? AutomationTemplate.detectBun() : nil
-        editor = EditorRequest(draft: template.draft(bunPath: bun))
+        var draft = template.draft(bunPath: bun)
+        configureNewDraft?(&draft)
+        editor = EditorRequest(draft: draft)
     }
     func edit(_ id: String) {
         guard let automation = automation(id) else { return }

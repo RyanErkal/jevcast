@@ -45,6 +45,10 @@ public final class ProcessSupervisor: @unchecked Sendable {
     private var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
 
     public func run(_ launch: ProcessLaunch, timeout: TimeInterval, onLine: @escaping (Data) -> Void = { _ in }) -> ProcessOutcome {
+        if isCancelled {
+            return ProcessOutcome(reason: .cancelled, exitCode: nil, signal: nil,
+                                  stdoutTail: Data(), stderrTail: Data(), stdoutBytes: 0)
+        }
         signal(SIGPIPE, SIG_IGN)
         var inPipe: [Int32] = [0, 0], outPipe: [Int32] = [0, 0], errPipe: [Int32] = [0, 0]
         guard pipe(&inPipe) == 0 else { return failed("Cannot create pipes.") }
@@ -80,10 +84,14 @@ public final class ProcessSupervisor: @unchecked Sendable {
         }
 
         let group = DispatchGroup()
+        let io = PipeControl()
+        for fd in [inPipe[1], outPipe[0], errPipe[0]] {
+            _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+        }
         let stdinData = launch.stdin, inFD = inPipe[1]
-        DispatchQueue.global().async(group: group) { Self.writeAll(stdinData, to: inFD); close(inFD) }
-        let out = LineDrain(fd: outPipe[0], tailCap: stdoutTailBytes, lineCap: maxLineBytes, onLine: onLine)
-        let err = LineDrain(fd: errPipe[0], tailCap: stderrTailBytes, lineCap: 0, onLine: nil)
+        DispatchQueue.global().async(group: group) { Self.writeAll(stdinData, to: inFD, control: io); close(inFD) }
+        let out = LineDrain(fd: outPipe[0], tailCap: stdoutTailBytes, lineCap: maxLineBytes, onLine: onLine, control: io)
+        let err = LineDrain(fd: errPipe[0], tailCap: stderrTailBytes, lineCap: 0, onLine: nil, control: io)
         DispatchQueue.global().async(group: group) { out.drain() }
         DispatchQueue.global().async(group: group) { err.drain() }
 
@@ -102,7 +110,10 @@ public final class ProcessSupervisor: @unchecked Sendable {
         if !reaper.done { stopGroup(pid, reaper: reaper) }
         // The leader is gone; stop anything it left in its group so the pipes close.
         if kill(-pid, 0) == 0 { stopGroup(pid, reaper: nil) }
-        _ = group.wait(timeout: .now() + 5)
+        if group.wait(timeout: .now() + 5) == .timedOut {
+            io.stop()
+            group.wait()
+        }
 
         let status = reaper.status
         let exited = status & 0x7f == 0
@@ -131,13 +142,16 @@ public final class ProcessSupervisor: @unchecked Sendable {
 
     private func closeAll(_ fds: [Int32]) { fds.forEach { close($0) } }
 
-    private static func writeAll(_ data: Data, to fd: Int32) {
+    private static func writeAll(_ data: Data, to fd: Int32, control: PipeControl) {
         data.withUnsafeBytes { buf in
             guard let base = buf.baseAddress else { return }
             var done = 0
-            while done < buf.count {
+            while done < buf.count, !control.stopped {
                 let n = write(fd, base + done, buf.count - done)
                 if n < 0, errno == EINTR { continue }
+                if n < 0, errno == EAGAIN {
+                    control.wait(fd, events: Int16(POLLOUT)); continue
+                }
                 if n <= 0 { return }
                 done += n
             }
@@ -171,20 +185,24 @@ private final class Reaper: @unchecked Sendable {
 private final class LineDrain: @unchecked Sendable {
     let fd: Int32, tailCap: Int, lineCap: Int
     let onLine: ((Data) -> Void)?
+    let control: PipeControl
     private(set) var tail = Data()
     private(set) var total = 0
     private var line = Data()
     private var skipping = false
 
-    init(fd: Int32, tailCap: Int, lineCap: Int, onLine: ((Data) -> Void)?) {
-        self.fd = fd; self.tailCap = tailCap; self.lineCap = lineCap; self.onLine = onLine
+    init(fd: Int32, tailCap: Int, lineCap: Int, onLine: ((Data) -> Void)?, control: PipeControl) {
+        self.fd = fd; self.tailCap = tailCap; self.lineCap = lineCap; self.onLine = onLine; self.control = control
     }
 
     func drain() {
         var buffer = [UInt8](repeating: 0, count: 64 * 1024)
-        while true {
+        while !control.stopped {
             let n = buffer.withUnsafeMutableBytes { read(fd, $0.baseAddress, $0.count) }
             if n < 0, errno == EINTR { continue }
+            if n < 0, errno == EAGAIN {
+                control.wait(fd, events: Int16(POLLIN)); continue
+            }
             if n <= 0 { break }
             let chunk = Data(buffer[0..<n])
             total += n
@@ -208,5 +226,17 @@ private final class LineDrain: @unchecked Sendable {
         line.append(chunk[start...])
         // A line over the cap is dropped whole.
         if line.count > lineCap { line.removeAll(); skipping = true }
+    }
+}
+
+/// Stops pipe workers even when a descendant escaped the process group and kept a pipe open.
+private final class PipeControl: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    var stopped: Bool { lock.lock(); defer { lock.unlock() }; return value }
+    func stop() { lock.lock(); value = true; lock.unlock() }
+    func wait(_ fd: Int32, events: Int16) {
+        var descriptor = pollfd(fd: fd, events: events, revents: 0)
+        _ = poll(&descriptor, 1, 100)
     }
 }

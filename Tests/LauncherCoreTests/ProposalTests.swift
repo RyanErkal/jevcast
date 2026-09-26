@@ -241,4 +241,29 @@ final class ProposalTests: XCTestCase {
         let j = ProposalApplier(manifest: m, approved: ["mk"], journalURL: url).apply()
         XCTAssertEqual(ApplyJournal.decode(try Data(contentsOf: url))?.entries.map(\.status), j.entries.map(\.status))
     }
+    func testUndoBlocksChangedFileAndTags() throws {
+        let moved = check([["id": "rn", "op": "rename", "path": root + "/a.txt", "name": "c.txt", "reason": ""]])
+        let applier = ProposalApplier(manifest: moved, approved: ["rn"], journalURL: base.appendingPathComponent("j.json"))
+        let journal = applier.apply()
+        try Data("changed in place".utf8).write(to: URL(fileURLWithPath: root + "/c.txt"))
+        XCTAssertEqual(applier.undo(journal: journal).entries.first?.status, .undoBlocked)
+        XCTAssertFalse(fm.fileExists(atPath: root + "/a.txt"))
+
+        let tagged = check([["id": "t", "op": "tag", "path": root + "/b.txt", "tags": ["Blue"], "reason": ""]])
+        let tagger = ProposalApplier(manifest: tagged, approved: ["t"], journalURL: base.appendingPathComponent("tags.json"))
+        let tags = tagger.apply()
+        let url = URL(fileURLWithPath: root + "/b.txt")
+        try (url as NSURL).setResourceValue(["Red"], forKey: .tagNamesKey)
+        XCTAssertEqual(tagger.undo(journal: tags).entries.first?.status, .undoBlocked)
+        XCTAssertEqual(try URL(fileURLWithPath: url.path).resourceValues(forKeys: [.tagNamesKey]).tagNames, ["Red"])
+    }
+
+    func testJournalIsOwnerOnly() throws {
+        let manifest = check([["id": "mk", "op": "mkdir", "path": root + "/Made", "reason": ""]])
+        let url = base.appendingPathComponent("j.json")
+        _ = ProposalApplier(manifest: manifest, approved: ["mk"], journalURL: url).apply()
+        let attributes = try fm.attributesOfItem(atPath: url.path)
+        XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+    }
+
 }

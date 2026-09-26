@@ -440,6 +440,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         hide(restoreFocus: false)
         if automationsWindow == nil {
             let window = AutomationsWindow(center: automations, quill: model.quillTasks)
+            window.model.configureNewDraft = { [weak self] draft in
+                guard let self else { return }
+                draft.applyDefaults(self.preferences)
+            }
             // Quill tasks are made by typing a schedule in the launcher, so open it with an example to edit.
             window.onNewQuillTask = { [weak self] in
                 self?.show()

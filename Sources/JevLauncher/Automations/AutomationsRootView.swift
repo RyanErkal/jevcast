@@ -43,7 +43,7 @@ struct AutomationsRootView: View {
         ToolbarItemGroup(placement: .primaryAction) {
             Button { model.runSelected() } label: { Label("Run Now", systemImage: "play.fill") }
                 .help("Run the selected automation now (⌘R)")
-                .disabled(model.selectedAutomationID == nil && model.selectedRun == nil)
+                .disabled(model.runnableSelection == nil)
             Menu {
                 ForEach(AutomationTemplate.allCases.filter { $0 != .blank }) { template in
                     Button { model.newAutomation(template) } label: { Label(template.title, systemImage: template.symbol) }

@@ -87,6 +87,7 @@ final class AutomationCenter: ObservableObject {
     @Published var message: String?
     /// True while `detectTools` runs.
     @Published var detectingTools = false
+    @Published var applyingProposal = false
     /// The Codex registry folder, read only.
     nonisolated static let codexFolder = URL(fileURLWithPath: NSHomeDirectory() + "/.codex/automations", isDirectory: true)
     /// Snapshot and demo runs: a temporary store, no runner, tools, Codex, clients seeding, or alerts.
@@ -104,6 +105,8 @@ final class AutomationCenter: ObservableObject {
     var rootWatch: DirectoryWatch?
     var clientWatches: [DirectoryWatch] = []
     var clientViewers = 0
+    var clientReadGeneration = 0
+    var clientRefreshGenerations: [String: Int] = [:]
     var reloadTask: Task<Void, Never>?
     var rescanTask: Task<Void, Never>?
     var quietTask: Task<Void, Never>?
@@ -138,6 +141,7 @@ final class AutomationCenter: ObservableObject {
             }
             watchRoot()
         }
+        if !isolated { recoverInterruptedApprovals() }
         reload()
         if !isolated {
             loadCodex()
@@ -149,6 +153,23 @@ final class AutomationCenter: ObservableObject {
             }
         }
         scheduleRescan()
+    }
+
+    /// Approvals run in this process, so at launch none can still be applying. One left in that state
+    /// means Jevcast quit part way; mark it failed so the journal and Undo stay available and nothing re-runs.
+    private func recoverInterruptedApprovals() {
+        let store = self.store
+        Task.detached(priority: .utility) {
+            for var run in store.allRecentRuns(limit: 500) where run.state == .applying {
+                run.state = .failed
+                run.error = "Jevcast quit while applying these changes. The journal shows what changed; you can undo it here."
+                run.summary = "File changes need review"
+                run.journalFile = ApplyJournal.fileName
+                run.finished = run.finished ?? Date()
+                try? store.saveRun(run)
+            }
+            AutomationSignal.post()
+        }
     }
 
     func stop() {
@@ -197,6 +218,10 @@ final class AutomationCenter: ObservableObject {
 
     /// Moves the automation's folder to the Trash.
     func delete(_ id: String) {
+        guard !applyingProposal, !store.runs(for: id, limit: 1000).contains(where: { $0.state.isActive }) else {
+            message = "Cancel the active run and wait for it to stop before you delete this automation."
+            return
+        }
         do { try store.remove(id: id) } catch { message = "Could not move it to the Trash: \(error)"; return }
         automations.removeAll { $0.id == id }
         runs[id] = nil
@@ -253,22 +278,25 @@ final class AutomationCenter: ObservableObject {
 
     // MARK: Runs
 
-    func runNow(_ id: String, test: Bool = false) {
-        submit(.runNow(automationID: id, test: test))
+    @discardableResult func runNow(_ id: String, test: Bool = false) -> Bool {
+        guard submit(.runNow(automationID: id, test: test)) else { return false }
         if !runnerStatus.isRunning, !isolated {
             message = "Queued. It starts when the background runner is on (Settings › Automations)."
         }
+        return true
     }
     func cancel(_ run: RunRecord) { submit(.cancel(automationID: run.automationID, runID: run.id)) }
-    func answer(_ run: RunRecord, _ text: String) {
+    @discardableResult func answer(_ run: RunRecord, _ text: String) -> Bool {
         let round = run.questions.last(where: { $0.answer == nil })?.round ?? run.questions.last?.round ?? 1
-        submit(.answer(automationID: run.automationID, runID: run.id, round: round, text: text))
+        guard submit(.answer(automationID: run.automationID, runID: run.id, round: round, text: text)) else { return false }
         NotchAlertController.shared.withdraw(id: Self.alertID(run))
+        return true
     }
-    func revise(_ run: RunRecord, note: String) {
+    @discardableResult func revise(_ run: RunRecord, note: String) -> Bool {
+        guard submit(.revise(automationID: run.automationID, runID: run.id, note: note)) else { return false }
         proposals[run.id] = nil
-        submit(.revise(automationID: run.automationID, runID: run.id, note: note))
         NotchAlertController.shared.withdraw(id: Self.alertID(run))
+        return true
     }
     /// The report or script output.
     func output(of run: RunRecord) -> String? {
@@ -286,11 +314,12 @@ final class AutomationCenter: ObservableObject {
     }
 
     /// Writes a request for the runner and wakes it. A failure shows in `message`.
-    func submit(_ action: RunnerRequest.Action) {
-        guard !isolated else { return }
-        do { try store.submit(RunnerRequest(action: action)) } catch { message = "Could not reach the runner's folder: \(error)" }
+    @discardableResult func submit(_ action: RunnerRequest.Action) -> Bool {
+        guard !isolated else { return false }
+        do { try store.submit(RunnerRequest(action: action)) } catch { message = "Could not reach the runner's folder: \(error)"; return false }
         AutomationSignal.post()
         scheduleReload()
+        return true
     }
 
     // MARK: Runner
@@ -302,10 +331,11 @@ final class AutomationCenter: ObservableObject {
         var s = settings
         s.maxConcurrentRuns = min(max(s.maxConcurrentRuns, 1), 4)
         s.historyDays = max(s.historyDays, 1)
+        if !isolated {
+            do { try store.saveSettings(s) } catch { message = "Could not save settings: \(error)"; return }
+            AutomationSignal.post()
+        }
         self.settings = s
-        guard !isolated else { return }
-        do { try store.saveSettings(s) } catch { message = "Could not save settings: \(error)"; return }
-        AutomationSignal.post()
     }
 
     // MARK: Codex

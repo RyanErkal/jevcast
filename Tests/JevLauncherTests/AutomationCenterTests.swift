@@ -1,18 +1,19 @@
 import XCTest
+import CryptoKit
 import LauncherCore
 @testable import JevLauncher
 
 @MainActor
 final class AutomationCenterTests: XCTestCase {
     private var base: URL!
-    /// Proposals refuse /private, where the temporary folder lives, so file work happens in a hidden home folder.
+    /// Proposals refuse /private. Keep proposal fixtures inside the repository.
     private var workURL: URL!
     private var center: AutomationCenter!
     private let fm = FileManager.default
 
     override func setUp() async throws {
         base = fm.temporaryDirectory.appendingPathComponent("center-\(UUID().uuidString)")
-        workURL = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".jevcast-test-\(UUID().uuidString)")
+        workURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent(".jevcast-test-\(UUID().uuidString)")
         try fm.createDirectory(at: workURL, withIntermediateDirectories: true)
         center = AutomationCenter(isolatedStore: AutomationStore(root: base.appendingPathComponent("Automations")))
     }
@@ -59,7 +60,7 @@ final class AutomationCenterTests: XCTestCase {
         XCTAssertEqual(center.automation(a.id)?.enabled, true)
     }
 
-    func testApproveAppliesJournalsAndUndoes() throws {
+    func testApproveAppliesJournalsAndUndoes() async throws {
         try Data("x".utf8).write(to: URL(fileURLWithPath: work + "/a.txt"))
         try fm.createDirectory(atPath: work + "/Done", withIntermediateDirectories: false)
         let a = agent()
@@ -74,11 +75,12 @@ final class AutomationCenterTests: XCTestCase {
         ]])
         try center.store.writeRunFile(automationID: a.id, runID: run.id, name: RunEngine.proposalRawFile, data: raw)
 
-        guard case .success(let manifest)? = center.proposal(for: run) else { return XCTFail("no proposal") }
+        guard case .success(let manifest)? = await center.proposal(for: run) else { return XCTFail("no proposal") }
         XCTAssertEqual(manifest.checked.map(\.id), ["m"])
         XCTAssertEqual(manifest.refused["d"], "Folders cannot be moved or trashed yet")
 
-        let journal = try XCTUnwrap(center.approve(run, items: ["m"]))
+        let applied = await center.approve(run, items: ["m"])
+        let journal = try XCTUnwrap(applied)
         XCTAssertEqual(journal.summaryText, "Moved 1")
         XCTAssertTrue(fm.fileExists(atPath: work + "/Done/a.txt"))
         let after = try XCTUnwrap(center.store.run(automationID: a.id, runID: run.id))
@@ -86,12 +88,13 @@ final class AutomationCenterTests: XCTestCase {
         XCTAssertEqual(after.summary, "Moved 1")
         XCTAssertNotNil(center.journal(for: after))
 
-        _ = center.undo(after)
+        _ = await center.undo(after)
         XCTAssertTrue(fm.fileExists(atPath: work + "/a.txt"))
-        XCTAssertNil(center.approve(after, items: ["m"]), "A finished run cannot be approved again")
+        let repeated = await center.approve(after, items: ["m"])
+        XCTAssertNil(repeated, "A finished run cannot be approved again")
     }
 
-    func testExpiredProposalIsRefused() throws {
+    func testExpiredProposalIsRefused() async throws {
         try Data("x".utf8).write(to: URL(fileURLWithPath: work + "/a.txt"))
         let a = agent()
         center.save(a)
@@ -102,7 +105,8 @@ final class AutomationCenterTests: XCTestCase {
             ["id": "t", "op": "tag", "path": work + "/a.txt", "tags": ["Red"], "reason": "r"]
         ]])
         try center.store.writeRunFile(automationID: a.id, runID: run.id, name: RunEngine.proposalRawFile, data: raw)
-        XCTAssertNil(center.approve(run, items: ["t"]))
+        let applied = await center.approve(run, items: ["t"])
+        XCTAssertNil(applied)
         XCTAssertEqual(center.store.run(automationID: a.id, runID: run.id)?.state, .expired)
     }
 
@@ -152,4 +156,48 @@ final class AutomationCenterTests: XCTestCase {
         XCTAssertEqual(opened.first?.0, "tidy-1")
         XCTAssertEqual(opened.first?.1, "20260926T080000Z-abcd")
     }
+    func testSavedManifestCannotSupplyCheckedPaths() async throws {
+        let a = agent()
+        center.save(a)
+        var run = RunRecord(id: RunID.make(), automation: center.automation(a.id)!, trigger: .manual, occurrence: nil)
+        run.state = .needsApproval
+        try center.store.saveRun(run)
+        let raw = try JSONSerialization.data(withJSONObject: ["version": 1, "summary": "s", "items": [
+            ["id": "m", "op": "mkdir", "path": work + "/Approved", "reason": "r"]
+        ]])
+        try center.store.writeRunFile(automationID: a.id, runID: run.id, name: RunEngine.proposalRawFile, data: raw)
+        guard case .success(var forged)? = await center.proposal(for: run) else { return XCTFail("no manifest") }
+        forged.checked[0].source = work + "/Unapproved"
+        forged.checked[0].destination = work + "/Unapproved"
+        try center.store.writeRunFile(automationID: a.id, runID: run.id, name: AutomationCenter.proposalFile,
+                                     data: AutomationJSON.encoder().encode(forged))
+        let hash = SHA256.hash(data: raw).map { String(format: "%02x", $0) }.joined()
+        try center.store.writeRunFile(automationID: a.id, runID: run.id, name: "proposal-source.txt", data: Data(hash.utf8))
+        center.proposals.removeAll()
+        guard case .success(let checked)? = await center.proposal(for: run) else { return XCTFail("no manifest") }
+        XCTAssertEqual(checked.checked.first?.source, work + "/Approved")
+        let applied = await center.approve(run, items: ["m"])
+        XCTAssertNotNil(applied)
+        XCTAssertTrue(fm.fileExists(atPath: work + "/Approved"))
+        XCTAssertFalse(fm.fileExists(atPath: work + "/Unapproved"))
+    }
+
+    func testPendingProposalAgeDoesNotResetWhenOpened() async throws {
+        let a = agent()
+        center.save(a)
+        var run = RunRecord(id: RunID.make(), automation: center.automation(a.id)!, trigger: .manual, occurrence: nil)
+        run.state = .needsApproval
+        run.started = Date().addingTimeInterval(-8 * 86400)
+        run.finished = nil
+        try center.store.saveRun(run)
+        let raw = try JSONSerialization.data(withJSONObject: ["version": 1, "summary": "s", "items": [
+            ["id": "m", "op": "mkdir", "path": work + "/New", "reason": "r"]
+        ]])
+        try center.store.writeRunFile(automationID: a.id, runID: run.id, name: RunEngine.proposalRawFile, data: raw)
+        let applied = await center.approve(run, items: ["m"])
+        XCTAssertNil(applied)
+        XCTAssertEqual(center.store.run(automationID: a.id, runID: run.id)?.state, .expired)
+        XCTAssertFalse(fm.fileExists(atPath: work + "/New"))
+    }
+
 }

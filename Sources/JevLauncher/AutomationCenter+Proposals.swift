@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 import LauncherCore
 
@@ -6,28 +5,30 @@ import LauncherCore
 /// the app checks it against the user's roots, applies approved items, and records the outcome.
 extension AutomationCenter {
     static let proposalFile = "proposal.json"
-    /// SHA-256 of the raw proposal that `proposal.json` was checked from, so a revised proposal is checked again.
-    static let proposalSourceFile = "proposal-source.txt"
 
     /// Checks the agent's raw proposal against the automation's roots and caches `proposal.json`.
-    func proposal(for run: RunRecord) -> Result<ProposalManifest, ProposalError>? {
+    func proposal(for run: RunRecord) async -> Result<ProposalManifest, ProposalError>? {
         if let cached = proposals[run.id] { return cached }
-        guard let raw = try? store.readRunFile(automationID: run.automationID, runID: run.id, name: RunEngine.proposalRawFile) else { return nil }
-        let hash = SHA256.hash(data: raw).map { String(format: "%02x", $0) }.joined()
-        if let stored = try? store.readRunFile(automationID: run.automationID, runID: run.id, name: Self.proposalSourceFile),
-           String(decoding: stored, as: UTF8.self) == hash,
-           let data = try? store.readRunFile(automationID: run.automationID, runID: run.id, name: Self.proposalFile),
-           let manifest = try? AutomationJSON.decoder().decode(ProposalManifest.self, from: data) {
-            proposals[run.id] = .success(manifest)
-            return .success(manifest)
+        let store = self.store
+        let roots = roots(for: run.automationID)
+        do {
+            let result = try await Task.detached(priority: .userInitiated) { () throws -> Result<ProposalManifest, ProposalError>? in
+                guard let raw = try store.readRunFile(automationID: run.automationID, runID: run.id, name: RunEngine.proposalRawFile) else { return nil }
+                // Only checks made in this process are trusted for approval. Disk files are recovery records.
+                let result = ProposalValidator.check(rawJSON: raw, roots: roots, now: run.finished ?? run.started ?? run.queued)
+                if case .success(let manifest) = result {
+                    try store.writeRunFile(automationID: run.automationID, runID: run.id, name: Self.proposalFile,
+                                           data: AutomationJSON.encoder().encode(manifest))
+                }
+                return result
+            }.value
+            guard !Task.isCancelled else { return nil }
+            if run.state == .needsApproval { proposals[run.id] = result }
+            return result
+        } catch {
+            message = "Could not read or save the checked proposal. Nothing can be approved yet."
+            return nil
         }
-        let result = ProposalValidator.check(rawJSON: raw, roots: roots(for: run.automationID), now: run.finished ?? Date())
-        if case .success(let manifest) = result, let data = try? AutomationJSON.encoder().encode(manifest) {
-            try? store.writeRunFile(automationID: run.automationID, runID: run.id, name: Self.proposalFile, data: data)
-            try? store.writeRunFile(automationID: run.automationID, runID: run.id, name: Self.proposalSourceFile, data: Data(hash.utf8))
-        }
-        if run.state == .needsApproval { proposals[run.id] = result }
-        return result
     }
 
     /// The working folder and allowed roots of the automation's agent. Roots come only from the user's definition.
@@ -43,11 +44,14 @@ extension AutomationCenter {
     }
 
     /// Applies the chosen items, records the journal, and marks the run succeeded.
-    func approve(_ run: RunRecord, items: Set<String>) -> ApplyJournal? {
+    func approve(_ run: RunRecord, items: Set<String>) async -> ApplyJournal? {
+        guard !applyingProposal else { message = "Wait for the current file changes to finish."; return nil }
+        applyingProposal = true
+        defer { applyingProposal = false }
         guard var current = store.run(automationID: run.automationID, runID: run.id), current.state == .needsApproval else {
             message = "This run no longer waits for approval."; return nil
         }
-        guard case .success(let manifest)? = proposal(for: current) else { message = "The proposal could not be checked."; return nil }
+        guard case .success(let manifest)? = await proposal(for: current) else { message = "The proposal could not be checked."; return nil }
         let now = Date()
         if ProposalValidator.isExpired(manifest, now: now) {
             current.state = .expired; current.finished = now; current.summary = "Proposal expired after 7 days"
@@ -55,15 +59,22 @@ extension AutomationCenter {
             message = "This proposal is older than 7 days. Run the automation again for a fresh one."
             return nil
         }
-        guard let a = automation(current.automationID), a.revision == current.revision else {
+        guard let a = store.automation(id: current.automationID), a == automation(current.automationID), a.revision == current.revision else {
             message = "The automation changed after this proposal. Run it again for a fresh one."; return nil
         }
         // Check again now: files may have moved since the proposal was shown. Apply only items that still pass,
         // bound to the identities the user saw.
-        guard let raw = try? store.readRunFile(automationID: current.automationID, runID: current.id, name: RunEngine.proposalRawFile),
-              case .success(let fresh) = ProposalValidator.check(rawJSON: raw, roots: roots(for: current.automationID), now: now),
-              fresh.digest == manifest.digest else {
-            message = "The proposal changed or could not be checked again."; return nil
+        let store = self.store
+        let roots = roots(for: current.automationID)
+        let approvalRun = current
+        let checked = await Task.detached(priority: .userInitiated) { () -> Result<ProposalManifest, ProposalError>? in
+            guard let raw = try? store.readRunFile(automationID: approvalRun.automationID, runID: approvalRun.id, name: RunEngine.proposalRawFile) else { return nil }
+            return ProposalValidator.check(rawJSON: raw, roots: roots, now: now)
+        }.value
+        guard case .success(let fresh)? = checked, fresh.digest == manifest.digest,
+              store.run(automationID: current.automationID, runID: current.id) == current,
+              store.automation(id: current.automationID) == a else {
+            message = "The proposal or run changed while it was checked. Review it again."; return nil
         }
         let stillValid = Set(fresh.checked.map(\.id))
         let shown = Set(manifest.checked.map(\.id))
@@ -71,15 +82,35 @@ extension AutomationCenter {
         guard !approved.isEmpty else { message = "None of the chosen items can be applied now."; return nil }
 
         current.state = .applying
-        saveApproval(current)
+        guard saveApproval(current) else { return nil }
         let journalURL = store.runFolder(automationID: current.automationID, runID: current.id).appendingPathComponent(ApplyJournal.fileName)
-        var journal = ProposalApplier(manifest: manifest, approved: approved, journalURL: journalURL).apply()
+        var journal = await Task.detached(priority: .userInitiated) {
+            ProposalApplier(manifest: manifest, approved: approved, journalURL: journalURL).apply()
+        }.value
+        guard journal.finished != nil else {
+            current.state = .failed
+            current.error = "File changes stopped before the journal was complete. Check the run folder before you try again."
+            current.summary = "File changes need review"
+            current.journalFile = ApplyJournal.fileName
+            current.finished = Date()
+            saveApproval(current)
+            message = current.error
+            return journal
+        }
         // Chosen items that failed the second check are recorded as skipped.
         for id in items.subtracting(approved).sorted() {
             var entry = ApplyJournal.Entry(itemID: id, op: manifest.proposal.items.first { $0.id == id }?.op ?? .move,
                                            source: "", destination: nil, status: .skipped)
             entry.message = fresh.refused[id] ?? "No longer passes the check"
             journal.entries.append(entry)
+        }
+        do {
+            let encoder = AutomationJSON.encoder()
+            try store.writeRunFile(automationID: current.automationID, runID: current.id, name: ApplyJournal.fileName,
+                                   data: encoder.encode(journal))
+        } catch {
+            message = "File changes may have finished, but the journal could not be saved. Check the run folder before you try again."
+            return journal
         }
         current.journalFile = ApplyJournal.fileName
         current.state = journal.failed ? .failed : .succeeded
@@ -107,13 +138,18 @@ extension AutomationCenter {
         return ApplyJournal.decode(data)
     }
 
-    func undo(_ run: RunRecord) -> ApplyJournal? {
+    func undo(_ run: RunRecord) async -> ApplyJournal? {
+        guard !applyingProposal else { message = "Wait for the current file changes to finish."; return nil }
+        applyingProposal = true
+        defer { applyingProposal = false }
         guard let journal = journal(for: run),
               let data = try? store.readRunFile(automationID: run.automationID, runID: run.id, name: Self.proposalFile),
               let manifest = try? AutomationJSON.decoder().decode(ProposalManifest.self, from: data),
               manifest.digest == journal.digest else { message = "There is nothing to undo."; return nil }
         let journalURL = store.runFolder(automationID: run.automationID, runID: run.id).appendingPathComponent(ApplyJournal.fileName)
-        let result = ProposalApplier(manifest: manifest, approved: Set(journal.approvedItems), journalURL: journalURL).undo(journal: journal)
+        let result = await Task.detached(priority: .userInitiated) {
+            ProposalApplier(manifest: manifest, approved: Set(journal.approvedItems), journalURL: journalURL).undo(journal: journal)
+        }.value
         if var current = store.run(automationID: run.automationID, runID: run.id) {
             let undone = result.entries.filter { $0.status == .undone }.count
             let blocked = result.entries.filter { $0.status == .undoBlocked }.count
@@ -123,10 +159,11 @@ extension AutomationCenter {
         return result
     }
 
-    /// Saves an approval outcome and refreshes. The app writes only approval fields; the runner owns the rest.
-    func saveApproval(_ run: RunRecord) {
-        do { try store.saveRun(run) } catch { message = "Could not save the run: \(error)" }
+    /// Saves the approval record and refreshes. Cross-process state transitions still need a shared transaction.
+    @discardableResult func saveApproval(_ run: RunRecord) -> Bool {
+        do { try store.saveRun(run) } catch { message = "Could not save the run: \(error)"; return false }
         if !isolated { AutomationSignal.post() }
         scheduleReload()
+        return true
     }
 }

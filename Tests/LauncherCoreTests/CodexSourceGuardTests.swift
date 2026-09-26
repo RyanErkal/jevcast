@@ -5,7 +5,7 @@ final class CodexSourceGuardTests: XCTestCase {
     func testStatusReader() {
         XCTAssertEqual(CodexSourceGuard.topLevelStatus("version = 1\nstatus = \"ACTIVE\"\n"), "ACTIVE")
         XCTAssertEqual(CodexSourceGuard.topLevelStatus("status='PAUSED' # note"), "PAUSED")
-        XCTAssertEqual(CodexSourceGuard.topLevelStatus("status_note = \"x\"\nstatus = PAUSED # c"), "PAUSED")
+        XCTAssertNil(CodexSourceGuard.topLevelStatus("status = PAUSED"))
         XCTAssertNil(CodexSourceGuard.topLevelStatus("[meta]\nstatus = \"ACTIVE\""))
     }
 
@@ -18,4 +18,10 @@ final class CodexSourceGuardTests: XCTestCase {
         try "status = \"PAUSED\"\n".write(to: file, atomically: true, encoding: .utf8)
         XCTAssertEqual(CodexSourceGuard.check(path: file.path), .clear)
     }
+    func testPromptCannotOverrideRealStatus() {
+        let text = "prompt = \"\"\"\nstatus = \"PAUSED\"\n\"\"\"\nstatus = \"ACTIVE\"\n"
+        XCTAssertEqual(CodexSourceGuard.topLevelStatus(text), "ACTIVE")
+        XCTAssertNil(CodexSourceGuard.topLevelStatus("status = \"PAUSED\"\nstatus = \"ACTIVE\""))
+    }
+
 }

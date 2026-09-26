@@ -55,12 +55,13 @@ struct EditorAgent: View {
                 }
             }
             Picker("Reasoning", selection: $draft.effort) {
-                ForEach(ReasoningEffort.allCases.filter { $0 != .none }, id: \.self) { Text($0.title).tag($0) }
+                ForEach(ReasoningEffort.allCases, id: \.self) { Text($0.title).tag($0) }
             }
             if draft.runner == .codex { Toggle("Fast", isOn: $draft.fast) }
             VStack(alignment: .leading, spacing: 6) {
                 Text(diagnosis ? "Diagnosis prompt (optional)" : "Prompt")
                 TextEditor(text: $draft.prompt)
+                    .accessibilityLabel(diagnosis ? "Diagnosis prompt" : "Prompt")
                     .font(.system(.body, design: .monospaced)).frame(minHeight: 110)
                     .scrollContentBackground(.hidden).padding(6)
                     .background(.background, in: RoundedRectangle(cornerRadius: 6))
@@ -93,7 +94,9 @@ struct EditorAgent: View {
     private var outputHelp: String {
         switch draft.output {
         case .report: return "Writes a report you can read in its run."
-        case .proposal: return "Suggests file changes. Nothing changes until you approve each one."
+        case .proposal: return draft.access.canWrite
+            ? "The proposal needs your approval. This access also lets the agent change files directly while it runs."
+            : "Suggests file changes. Nothing changes until you approve each one."
         case .ask: return "Writes a report, and may stop to ask you a question first."
         }
     }
@@ -137,6 +140,7 @@ struct EditorScript: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Arguments, one per line")
                 TextEditor(text: $draft.argumentsText)
+                    .accessibilityLabel("Arguments, one per line")
                     .font(.system(.body, design: .monospaced)).frame(minHeight: 60)
                     .scrollContentBackground(.hidden).padding(6)
                     .background(.background, in: RoundedRectangle(cornerRadius: 6))

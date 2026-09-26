@@ -40,6 +40,23 @@ final class QuillTaskCenterTests: XCTestCase {
         XCTAssertEqual(again.tasks.map(\.name), ["Quote"])
         XCTAssertEqual(again.runs.count, 2)
     }
+    @MainActor func testResultWriteFailureRecordsFailure() async throws {
+        let suite = "JevLauncherTests." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data().write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let center = QuillTaskCenter(defaults: defaults, folder: file, send: { _ in
+            QuillReply(text: "Report", inputTokens: 1, outputTokens: 1, cost: nil)
+        }, allowed: { [.typedText] })
+        center.run(QuillTask(name: "Report", prompt: "Report", schedule: .everyHours(1), contexts: []))
+        try await until { !center.runs.isEmpty }
+        XCTAssertFalse(center.runs[0].succeeded)
+        XCTAssertNil(center.runs[0].file)
+        XCTAssertTrue(center.runs[0].preview.contains("could not be saved"))
+    }
+
 }
 
 final class LockedBox<Value>: @unchecked Sendable {

@@ -30,7 +30,11 @@ struct AutomationReadout: Sendable {
         let loaded = store.loadAutomations()
         var runs: [String: [RunRecord]] = [:], states: [String: AutomationState] = [:]
         for a in loaded.automations {
-            runs[a.id] = store.runs(for: a.id, limit: 50)
+            runs[a.id] = store.runs(for: a.id, limit: 50).map { record in
+                var run = record
+                if !run.alerted { run.alerted = AutomationAlertReceipt.wasDelivered(run, store: store) }
+                return run
+            }
             states[a.id] = store.state(for: a.id)
         }
         return AutomationReadout(automations: loaded.automations, problems: loaded.problems, runs: runs, states: states,
@@ -77,6 +81,14 @@ extension AutomationCenter {
     private func apply(_ r: AutomationReadout) {
         if automations != r.automations { automations = r.automations }
         if problems != r.problems { problems = r.problems }
+        for id in shownAlerts {
+            let previous = runs.values.flatMap { $0 }.first { Self.alertID($0) == id }
+            let next = r.runs.values.flatMap { $0 }.first { Self.alertID($0) == id }
+            if previous.map(AutomationAlertReceipt.init) != next.map(AutomationAlertReceipt.init) {
+                NotchAlertController.shared.withdraw(id: id)
+                shownAlerts.remove(id)
+            }
+        }
         if runs != r.runs { runs = r.runs }
         states = r.states
         if !isolated, settings != r.settings { settings = r.settings }

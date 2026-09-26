@@ -67,7 +67,7 @@ public enum CodexImport {
     public static func isActiveInCodex(path: String) -> Bool {
         let folderName = URL(fileURLWithPath: path).deletingLastPathComponent().lastPathComponent
         let entry = read(path: path, folderName: folderName)
-        return entry.error != nil || entry.status == .active
+        return entry.error != nil || entry.status != .paused
     }
 
     private struct FieldError: Error, CustomStringConvertible { var description: String }
@@ -115,10 +115,6 @@ public enum CodexImport {
 
     /// Opens without following a final symlink and reads at most `maxFileBytes`.
     private static func readBounded(_ path: String) -> Data? {
-        let fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
-        guard fd >= 0 else { return nil }
-        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
-        guard let data = try? handle.read(upToCount: maxFileBytes + 1), data.count <= maxFileBytes else { return nil }
-        return data
+        try? SecureFile.read(URL(fileURLWithPath: path), maxBytes: maxFileBytes)
     }
 }

@@ -61,7 +61,7 @@ public enum AlertDecision: Equatable, Sendable {
         switch run.state {
         case .needsInput, .needsApproval: break
         case .failed: guard settings.failures, policy?.alertOnFailure ?? true else { return .skip }
-        case .succeeded: guard policy?.alertOnSuccess == true else { return .skip }
+        case .succeeded: return .skip
         default: return .skip
         }
         let when = run.finished ?? run.started ?? run.queued

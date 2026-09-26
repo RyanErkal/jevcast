@@ -121,6 +121,7 @@ final class AutomationStoreTests: XCTestCase {
     }
 
     func testRemoveMovesToTrash() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["JEVCAST_LIVE_TESTS"] == "1", "Requires explicit access to real user files")
         // Uses a real Trash only when the folder is on a volume with one; skip otherwise.
         let a = sample(); try store.save(a)
         do { try store.remove(id: a.id) } catch { throw XCTSkip("No Trash for the temp volume: \(error)") }

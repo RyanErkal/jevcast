@@ -38,8 +38,11 @@ struct AutomationEditorView: View {
         .frame(width: 700, height: 760)
         .task(id: draft.program) {
             try? await Task.sleep(nanoseconds: 200_000_000)
+            guard !Task.isCancelled else { return }
             let path = Paths.expand(draft.program)
-            programOK = await Task.detached { FileManager.default.isExecutableFile(atPath: path) }.value
+            let valid = await Task.detached { FileManager.default.isExecutableFile(atPath: path) }.value
+            guard !Task.isCancelled, path == Paths.expand(draft.program) else { return }
+            programOK = valid
         }
     }
 

@@ -46,7 +46,7 @@ plutil -lint -s "$APP/Contents/Library/LaunchAgents/$RUNNER_LABEL.plist"
 # AppIcon.icns fallback for older systems. Without actool (no Xcode), ship the static .icns.
 if [ -d Resources/AppIcon.icon ] && xcrun --find actool >/dev/null 2>&1; then
   # Absolute: actool runs in a shared daemon, which reads a relative path from its own folder.
-  ICON_OUT="$(pwd)/$STAGE/icon"
+  ICON_OUT="$STAGE/icon"
   mkdir -p "$ICON_OUT"
   xcrun actool "$(pwd)/Resources/AppIcon.icon" --compile "$ICON_OUT" --platform macosx --minimum-deployment-target 14.0 \
     --app-icon AppIcon --target-device mac --output-partial-info-plist "$ICON_OUT/partial.plist" >/dev/null

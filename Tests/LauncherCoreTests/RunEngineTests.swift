@@ -155,4 +155,23 @@ final class RunEngineTests: XCTestCase {
         let run = engine(cli: try fake("sleep 30")).execute(newRun(a), automation: a, control: control)
         XCTAssertEqual(run.state, .cancelled)
     }
+    func testOldLastMessageCannotCompleteAnotherTurn() throws {
+        let definition = try agent(.report)
+        let run = newRun(definition)
+        try store.writeRunFile(automationID: run.automationID, runID: run.id, name: RunEngine.lastMessageFile,
+                               data: Data(#"{"summary":"Old","report_markdown":"Old report"}"#.utf8))
+        let result = engine(cli: try fake("exit 0")).execute(run, automation: definition)
+        XCTAssertEqual(result.state, .failed)
+        XCTAssertNotEqual(result.summary, "Old")
+    }
+
+    func testWritableAgentCannotIncludeControlState() throws {
+        let definition = Automation(id: "unsafe-agent", name: "Unsafe", kind: .agent(AgentTask(prompt: "report",
+                                    workingDirectory: dir.path, access: .workspaceWrite)), schedule: Schedule(rule: .manual))
+        let result = engine(cli: try fake("touch should-not-run")).execute(newRun(definition), automation: definition)
+        XCTAssertEqual(result.state, .failed)
+        XCTAssertTrue(result.error?.contains("automation state") == true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("should-not-run").path))
+    }
+
 }

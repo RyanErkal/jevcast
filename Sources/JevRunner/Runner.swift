@@ -68,8 +68,9 @@ final class Runner: @unchecked Sendable {
         case .reload: return true
         case .runNow(let automationID, let test):
             guard let automation = store.automation(id: automationID) else { return true }
+            guard store.run(automationID: automationID, runID: request.id) == nil else { return true }
             guard !isBusy(automationID) else { log("\(automationID) is already running; Run Now ignored."); return true }
-            enqueue(automation, trigger: test ? .test : .manual, occurrence: nil)
+            enqueue(automation, trigger: test ? .test : .manual, occurrence: nil, runID: request.id)
             return true
         case .cancel(let automationID, let runID):
             if let a = active[runID] { a.control.cancel(); return true }
@@ -88,7 +89,8 @@ final class Runner: @unchecked Sendable {
     private func resume(_ automationID: String, _ runID: String, expect: RunState, followUp: RunFollowUp, _ settings: AutomationSettings) -> Bool {
         guard let automation = store.automation(id: automationID), var run = store.run(automationID: automationID, runID: runID),
               run.state == expect else { return true }
-        guard active.count < max(1, settings.maxConcurrentRuns), !lockTaken(automation.policy.sharedLock) else { return false }
+        guard !active.values.contains(where: { $0.automationID == automationID }),
+              active.count < max(1, settings.maxConcurrentRuns), !lockTaken(automation.policy.sharedLock) else { return false }
         if case .answer(let round, _) = followUp, !run.questions.contains(where: { $0.round == round && $0.answer == nil }) { return true }
         run.trigger = .resume
         launch(run, automation, settings, followUp: followUp)
@@ -111,8 +113,8 @@ final class Runner: @unchecked Sendable {
 
     /// Writes a queued run owned by this runner. The Codex guard is checked here and again at start.
     @discardableResult
-    private func enqueue(_ automation: Automation, trigger: RunTrigger, occurrence: Date?) -> String {
-        var run = RunRecord(id: RunID.make(), automation: automation, trigger: trigger, occurrence: occurrence)
+    private func enqueue(_ automation: Automation, trigger: RunTrigger, occurrence: Date?, runID: String = RunID.make()) -> String {
+        var run = RunRecord(id: runID, automation: automation, trigger: trigger, occurrence: occurrence)
         run.ownerPID = pid; run.ownerStart = started
         if case .blocked(let why) = CodexSourceGuard.check(automation) {
             run.state = .failed; run.error = why; run.summary = "Blocked: Codex original is not paused"; run.finished = Date()
@@ -208,6 +210,11 @@ final class Runner: @unchecked Sendable {
     /// At start, runs another runner left active can no longer be owned by anyone (this process holds the lock).
     private func recoverInterruptedRuns() {
         for automation in store.loadAutomations().automations {
+            // A crash can leave the short-lived Claude sign-in copy behind; it holds a token.
+            for run in store.runs(for: automation.id, limit: 200) {
+                let copy = store.runFolder(automationID: automation.id, runID: run.id).appendingPathComponent(ClaudeSignIn.fileName)
+                try? FileManager.default.removeItem(at: copy)
+            }
             for var run in store.runs(for: automation.id, limit: 200) where [.queued, .running, .retryWaiting].contains(run.state) {
                 run.state = .interrupted
                 run.error = "The runner stopped during this run. It was not repeated."

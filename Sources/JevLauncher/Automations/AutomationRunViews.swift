@@ -1,6 +1,18 @@
 import SwiftUI
 import LauncherCore
 
+struct RunContentVersion: Hashable {
+    let id: String
+    let state: String
+    let outputFile: String?
+    let journalFile: String?
+    let finished: Date?
+    init(_ run: RunRecord) {
+        id = run.id; state = run.state.rawValue; outputFile = run.outputFile
+        journalFile = run.journalFile; finished = run.finished
+    }
+}
+
 /// Needs You, Running, Failed, and History: runs on the left, the chosen run on the right.
 struct RunListSplit: View {
     @ObservedObject var model: AutomationsViewModel
@@ -110,7 +122,7 @@ struct RunScreen: View {
     var body: some View {
         switch run.state {
         case .needsApproval: ApprovalView(model: model, run: run)
-        case .needsInput: RunQuestionView(model: model, run: run)
+        case .needsInput: RunQuestionView(model: model, run: run).id(run.questions.last?.round)
         default: RunDetailView(model: model, run: run)
         }
     }
@@ -124,6 +136,8 @@ struct RunDetailView: View {
     @State private var rendered: AttributedString?
     @State private var raw = false
     @State private var loaded = false
+    @State private var journal: ApplyJournal?
+    @State private var undoResult: ApplyJournal?
 
     var body: some View {
         ScrollView {
@@ -140,6 +154,10 @@ struct RunDetailView: View {
                             .buttonStyle(.borderedProminent)
                         Button("Open Run Folder") { model.reveal(run) }
                     }
+                }
+                if let journal {
+                    ApplyResultView(journal: journal, undoResult: undoResult) { Task { undoResult = await model.undo(run) } }
+                        .frame(minHeight: 240)
                 }
                 outputCard
                 if !run.questions.isEmpty {
@@ -164,10 +182,13 @@ struct RunDetailView: View {
             }
             .padding(20)
         }
-        .task(id: run.id) {
-            // Read and parse once per run, not on every redraw.
-            let text = model.output(of: run)
-            output = text; rendered = text.map(MarkdownText.render); loaded = true
+        .task(id: RunContentVersion(run)) {
+            loaded = false
+            let text = await model.readOutput(of: run)
+            guard !Task.isCancelled else { return }
+            output = text; rendered = text.map(MarkdownText.render)
+            journal = model.journal(for: run)
+            loaded = true
         }
     }
 
@@ -233,7 +254,7 @@ struct RunQuestionView: View {
                     if sent {
                         Label("Answer sent. The run continues in the background.", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
                     } else if let choices = question?.choices, !choices.isEmpty {
-                        HStack { ForEach(choices, id: \.self) { choice in Button(choice) { send(choice) }.controlSize(.large) } }
+                        VStack(alignment: .leading) { ForEach(Array(choices.enumerated()), id: \.offset) { _, choice in Button(choice) { send(choice) }.controlSize(.large) } }
                     } else {
                         TextField("Your answer", text: $answer, axis: .vertical)
                             .textFieldStyle(.roundedBorder).lineLimit(3...8)
@@ -255,7 +276,6 @@ struct RunQuestionView: View {
     private func send(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !sent else { return }
-        sent = true
-        model.answer(run, trimmed)
+        sent = model.answer(run, trimmed)
     }
 }

@@ -69,6 +69,7 @@ final class ClientMetricsTests: XCTestCase {
 
     /// Decodes the real sidecars when present. Prints nothing from them.
     func testRealFiles() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["JEVCAST_LIVE_TESTS"] == "1", "Requires explicit access to real user files")
         let docs = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Dev/docs")
         let files: [(String, ClientMetricsProfile)] = [
             ("4-delivery/clients/robert-parish/meta-ads/robert-parish-dashboard.metrics.json", .robertParish),

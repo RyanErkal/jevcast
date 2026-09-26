@@ -26,7 +26,7 @@ public final class AutomationStore: @unchecked Sendable {
                     else { problems[name] = "automation.json is missing."; continue }
                     let a = try AutomationJSON.decoder().decode(Automation.self, from: data)
                     guard a.id == name else { problems[name] = "The ID inside does not match the folder."; continue }
-                    guard a.version <= Automation.formatVersion else { problems[name] = "Made by a newer Jevcast."; continue }
+                    guard a.version == Automation.formatVersion else { problems[name] = "Made by a newer Jevcast."; continue }
                     list.append(a)
                 } catch { problems[name] = "\(error)" }
             }
@@ -37,9 +37,11 @@ public final class AutomationStore: @unchecked Sendable {
     public func automation(id: String) -> Automation? {
         guard AutomationID.isValid(id) else { return nil }
         return locked {
-            guard let data = try? SecureFile.read(folder(id).appendingPathComponent("automation.json"), maxBytes: SecureFile.maxJSON)
-            else { return nil }
-            return try? AutomationJSON.decoder().decode(Automation.self, from: data)
+            guard let dir = try? automationDir(id, create: false),
+                  let data = try? SecureFile.read(dir.appendingPathComponent("automation.json"), maxBytes: SecureFile.maxJSON),
+                  let automation = try? AutomationJSON.decoder().decode(Automation.self, from: data),
+                  automation.id == id, automation.version == Automation.formatVersion else { return nil }
+            return automation
         }
     }
 
@@ -162,11 +164,16 @@ public final class AutomationStore: @unchecked Sendable {
 
     /// IDs of request files that could not be read, so the runner can drop them.
     public func unreadableRequestIDs() -> [String] {
-        let good = Set(pendingRequests().map(\.id))
-        return locked {
+        locked {
             guard let dir = try? requestsDir(create: false),
                   let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return [] }
-            return names.filter { $0.hasSuffix(".json") }.map { String($0.dropLast(5)) }.filter { RunID.isValid($0) && !good.contains($0) }
+            return names.sorted().prefix(1000).compactMap { name in
+                guard name.hasSuffix(".json"), RunID.isValid(String(name.dropLast(5))) else { return nil }
+                if let data = try? SecureFile.read(dir.appendingPathComponent(name), maxBytes: 64 * 1024),
+                   let request = try? AutomationJSON.decoder().decode(RunnerRequest.self, from: data),
+                   request.id + ".json" == name { return nil }
+                return String(name.dropLast(5))
+            }
         }
     }
 
@@ -217,6 +224,12 @@ public final class AutomationStore: @unchecked Sendable {
     /// Creates the root folder (0700) when it is missing.
     public func ensureRoot() throws {
         try locked { try createParentsOfRoot(); try SecureFile.ensureDirectory(root) }
+    }
+
+    /// The caller must hold this descriptor for the runner's entire lifetime and never unlink it.
+    public func acquireRunnerLock() throws -> Int32? {
+        try ensureRoot()
+        return try SecureFile.acquireLock(in: root)
     }
 
     // MARK: Prune
@@ -307,8 +320,7 @@ public final class AutomationStore: @unchecked Sendable {
 
     /// `Application Support/Jevcast` may not exist yet. Parents are created normally; the root itself is checked.
     private func createParentsOfRoot() throws {
-        try FileManager.default.createDirectory(at: root.deletingLastPathComponent(), withIntermediateDirectories: true,
-                                                attributes: [.posixPermissions: 0o700])
+        try SecureFile.ensureParents(of: root)
     }
 
     private func automationFolderNames() -> [String] {

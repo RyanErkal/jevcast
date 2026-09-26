@@ -112,6 +112,7 @@ final class CodexImportTests: XCTestCase {
 
     /// Parses the real Codex folder when present. Prints no prompt text.
     func testRealCodexFilesParse() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["JEVCAST_LIVE_TESTS"] == "1", "Requires explicit access to real user files")
         let real = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".codex/automations")
         try XCTSkipUnless(FileManager.default.fileExists(atPath: real.path), "No Codex automations folder")
         let entries = CodexImport.readAll(folder: real)

@@ -25,26 +25,15 @@ public enum CodexSourceGuard {
         if status.uppercased() == "ACTIVE" {
             return .blocked("The Codex original is still ACTIVE. Pause it in Codex first so the work does not run twice.")
         }
+        guard status.uppercased() == "PAUSED" else {
+            return .blocked("The Codex original has an unknown status, so this copy will not run.")
+        }
         return .clear
     }
 
     /// The value of `status = "..."` before the first table header.
     static func topLevelStatus(_ text: String) -> String? {
-        for raw in text.split(whereSeparator: \.isNewline).prefix(5000) {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix("[") { return nil }
-            guard line.hasPrefix("status") else { continue }
-            let rest = line.dropFirst("status".count).trimmingCharacters(in: .whitespaces)
-            guard rest.hasPrefix("=") else { continue }
-            var value = rest.dropFirst().trimmingCharacters(in: .whitespaces)
-            if let q = value.first, q == "\"" || q == "'" {
-                value.removeFirst()
-                guard let end = value.firstIndex(of: q) else { return nil }
-                return String(value[..<end])
-            }
-            if let hash = value.firstIndex(of: "#") { value = String(value[..<hash]).trimmingCharacters(in: .whitespaces) }
-            return value
-        }
-        return nil
+        guard let table = try? TomlLite.parse(text), case .string(let status)? = table["status"] else { return nil }
+        return status
     }
 }

@@ -56,9 +56,9 @@ extension ApplyJournal {
 extension ApplyJournal {
     public static let fileName = "journal.json"
 
-    /// Reads `journal.json` as `ProposalApplier` writes it (ISO 8601 dates).
+    /// Reads `journal.json` with the shared automation date format.
     public static func decode(_ data: Data) -> ApplyJournal? {
-        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        let decoder = AutomationJSON.decoder()
         return try? decoder.decode(ApplyJournal.self, from: data)
     }
 }

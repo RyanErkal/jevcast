@@ -23,7 +23,8 @@ struct ApprovalView: View {
             content
         }
         .task(id: run.id) {
-            manifest = model.proposal(for: run)
+            manifest = await model.proposal(for: run)
+            guard !Task.isCancelled else { return }
             journal = model.journal(for: run)
             if case .success(let m) = manifest { chosen = Set(m.checked.map(\.id)) }
             loaded = true
@@ -34,7 +35,7 @@ struct ApprovalView: View {
 
     @ViewBuilder private var content: some View {
         if let journal {
-            ApplyResultView(journal: journal, undoResult: undoResult) { undoResult = model.undo(run) }
+            ApplyResultView(journal: journal, undoResult: undoResult) { Task { undoResult = await model.undo(run) } }
         } else if !loaded {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -93,8 +94,8 @@ struct ApprovalView: View {
             Button("Reject All", role: .destructive) { model.reject(run) }
             Button("Ask for Changes…") { revising = true }
             Spacer()
-            Button("Approve \(chosen.count) Change\(chosen.count == 1 ? "" : "s")") { journal = model.approve(run, items: chosen) }
-                .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(chosen.isEmpty)
+            Button("Approve \(chosen.count) Change\(chosen.count == 1 ? "" : "s")") { Task { journal = await model.approve(run, items: chosen) } }
+                .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(chosen.isEmpty || model.live?.applyingProposal == true)
         }
         .padding(.horizontal, 20).padding(.vertical, 12)
         .background(.bar)
@@ -104,12 +105,14 @@ struct ApprovalView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Ask for changes").font(.headline)
             Text("The agent makes a new proposal with your note. You approve it again.").font(.callout).foregroundStyle(.secondary)
-            TextEditor(text: $note).font(.body).frame(width: 400, height: 110)
+            TextEditor(text: $note).accessibilityLabel("Changes to request").font(.body).frame(width: 400, height: 110)
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
             HStack {
                 Spacer()
                 Button("Cancel") { revising = false }.keyboardShortcut(.cancelAction)
-                Button("Send") { model.revise(run, note: note); revising = false; note = "" }
+                Button("Send") {
+                    if model.revise(run, note: note) { revising = false; note = "" }
+                }
                     .keyboardShortcut(.defaultAction).disabled(note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
@@ -156,7 +159,8 @@ struct ProposalRow: View {
             FileIconView(path: source, size: 28)
             VStack(alignment: .leading, spacing: 3) {
                 Text(URL(fileURLWithPath: source).lastPathComponent).font(.body.weight(.medium)).lineLimit(1)
-                pathLine
+                pathLine.help(source + (destination.map { " → " + $0 } ?? ""))
+                    .accessibilityLabel(source + (destination.map { " to " + $0 } ?? ""))
                 Text(item.reason).font(.caption).foregroundStyle(.secondary)
                 if let refusal { Label(refusal, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange) }
             }
@@ -206,7 +210,7 @@ struct ApplyResultView: View {
                     Text("Items that changed on disk after the proposal were skipped.").font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()
-                if undoResult == nil { Button { undo() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }.controlSize(.large) }
+                if shown.entries.contains(where: { $0.status == .done }) { Button { undo() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }.controlSize(.large) }
             }
             List(shown.entries, id: \.itemID) { entry in
                 HStack(spacing: 8) {
@@ -216,7 +220,7 @@ struct ApplyResultView: View {
                         if let message = entry.message { Text(message).font(.caption).foregroundStyle(.secondary) }
                     }
                     Spacer()
-                    Text(entry.status.rawValue.capitalized).font(.caption).foregroundStyle(.secondary)
+                    Text(entry.status == .undoBlocked ? "Undo blocked" : entry.status.rawValue.capitalized).font(.caption).foregroundStyle(.secondary)
                 }
             }
             .listStyle(.inset)

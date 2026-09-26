@@ -34,6 +34,8 @@ extension AutomationCenter {
 
     /// The same, for callers that wait for fresh numbers, such as the launcher's "clients" rows.
     func readClientsNow(seed: Bool = false) async {
+        clientReadGeneration += 1
+        let generation = clientReadGeneration
         let store = self.store
         let previous = Dictionary(clients.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let isolated = self.isolated
@@ -47,14 +49,14 @@ extension AutomationCenter {
             if configs == nil, isolated { return nil }
             return (configs ?? []).map { Self.read($0, previous: previous[$0.id]) }
         }.value
-        guard let entries else { return }
+        guard generation == clientReadGeneration, let entries else { return }
         clients = entries
         if clientViewers > 0 { watchClientFolders() }
     }
 
     /// One sidecar. A failed read keeps the last good snapshot, marked with the error.
     nonisolated static func read(_ config: ClientConfig, previous: ClientEntry?) -> ClientEntry {
-        var entry = ClientEntry(config: config, snapshot: previous?.snapshot, readError: nil, readAt: Date())
+        var entry = ClientEntry(config: config, snapshot: previous?.config == config ? previous?.snapshot : nil, readError: nil, readAt: Date())
         do {
             entry.snapshot = try ClientMetricsReader.read(url: URL(fileURLWithPath: config.metricsPath), profile: config.profile)
         } catch {
@@ -78,6 +80,7 @@ extension AutomationCenter {
     }
 
     private func writeClients(_ list: [ClientConfig]) {
+        clientReadGeneration += 1
         guard !isolated else {
             clients = list.map { c in clients.first { $0.id == c.id }.map { var e = $0; e.config = c; return e } ?? ClientEntry(config: c, snapshot: nil, readError: nil, readAt: nil) }
             return
@@ -96,9 +99,13 @@ extension AutomationCenter {
     /// Reads one sidecar again, without running anything.
     func rereadClient(_ id: String) {
         guard let entry = clients.first(where: { $0.id == id }) else { return }
+        clientRefreshGenerations[id, default: 0] += 1
+        let refresh = clientRefreshGenerations[id]
+        let generation = clientReadGeneration
         Task { @MainActor [weak self] in
             let fresh = await Task.detached(priority: .utility) { Self.read(entry.config, previous: entry) }.value
-            guard let self, let index = self.clients.firstIndex(where: { $0.id == id }) else { return }
+            guard let self, self.clientReadGeneration == generation, self.clientRefreshGenerations[id] == refresh,
+                  let index = self.clients.firstIndex(where: { $0.id == id }), self.clients[index].config == entry.config else { return }
             self.clients[index] = fresh
         }
     }

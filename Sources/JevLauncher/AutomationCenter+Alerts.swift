@@ -10,7 +10,7 @@ extension AutomationCenter {
         guard !isolated else { return }
         let settings = alertSettings()
         var wake: Date?
-        let candidates = runs.values.flatMap { $0.prefix(10) }.filter { !$0.alerted }.sorted { $0.queued < $1.queued }
+        let candidates = runs.values.flatMap { $0 }.filter { !$0.alerted }.sorted { $0.queued < $1.queued }
         for run in candidates where !shownAlerts.contains(Self.alertID(run)) {
             let a = automation(run.automationID)
             switch AlertDecision.decide(run, policy: a?.policy, settings: settings, now: now) {
@@ -47,15 +47,10 @@ extension AutomationCenter {
         markAlerted(run)
     }
 
-    /// Sets `alerted` in run.json after showing. Re-reads first so a newer runner write is not lost,
-    /// and writes only when the run is still in the state that was shown.
+    /// Save delivery without a read-modify-write of run.json.
     private func markAlerted(_ run: RunRecord) {
         let store = self.store
-        Task.detached(priority: .utility) {
-            guard var current = store.run(automationID: run.automationID, runID: run.id), current.state == run.state, !current.alerted else { return }
-            current.alerted = true
-            try? store.saveRun(current)
-        }
+        Task.detached(priority: .utility) { try? AutomationAlertReceipt.save(run, store: store) }
     }
 
     /// Handles a notch button for an automation alert. Returns false for alerts that are not ours.

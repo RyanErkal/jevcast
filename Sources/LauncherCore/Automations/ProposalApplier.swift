@@ -46,7 +46,11 @@ public struct ProposalApplier {
             case .skipped(let m): journal.entries[index].status = .skipped; journal.entries[index].message = m
             case .failed(let m): journal.entries[index].status = .failed; journal.entries[index].message = m; stop = true
             }
-            _ = save(journal)
+            guard save(journal) else {
+                journal.entries[index].status = .failed
+                journal.entries[index].message = "The change ran, but its result could not be saved. Check the files before continuing."
+                return journal
+            }
             if stop { break }
         }
         journal.finished = Date()
@@ -56,6 +60,7 @@ public struct ProposalApplier {
 
     public func undo(journal: ApplyJournal) -> ApplyJournal {
         var journal = journal
+        guard journal.digest == manifest.digest else { return journal }
         let byID = Dictionary(manifest.checked.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         for index in journal.entries.indices.reversed() where journal.entries[index].status == .done {
             let entry = journal.entries[index]
@@ -65,13 +70,16 @@ public struct ProposalApplier {
             case .done: journal.entries[index].status = .undone; journal.entries[index].message = nil
             case .skipped(let m), .failed(let m): journal.entries[index].status = .undoBlocked; journal.entries[index].message = m
             }
-            _ = save(journal)
+            guard save(journal) else {
+                journal.entries[index].message = "Undo stopped because its result could not be saved. Check the files before continuing."
+                break
+            }
         }
         return journal
     }
 
     private func save(_ journal: ApplyJournal) -> Bool {
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]; encoder.dateEncodingStrategy = .iso8601
+        let encoder = AutomationJSON.encoder()
         guard let data = try? encoder.encode(journal) else { return false }
         return (try? SafeFS.writeDurably(data, to: journalURL)) != nil
     }
@@ -132,7 +140,8 @@ public struct ProposalApplier {
         defer { close(fd) }
         let leaf = SafeFS.leaf(c.source)
         guard let st = SafeFS.statAt(fd, leaf) else { return .skipped("Source is missing") }
-        guard SafeFS.sameObject(SafeFS.identity(st), c.identity) else { return .skipped("Source changed since approval") }
+        guard (st.st_mode & S_IFMT == S_IFDIR || st.st_nlink == 1),
+              SafeFS.sameObject(SafeFS.identity(st), c.identity) else { return .skipped("Source changed since approval") }
         return body(fd, leaf)
     }
 
@@ -148,19 +157,23 @@ public struct ProposalApplier {
     // MARK: Undo steps
 
     private func undoStep(_ e: Entry, item c: CheckedItem) -> Outcome {
+        guard e.op == c.item.op, e.source == c.source, e.destination == c.destination else {
+            return .failed("Journal does not match the approved item")
+        }
         switch e.op {
         case .move, .rename:
             guard let dst = e.destination else { return .failed("Journal entry has no destination") }
-            return moveBack(from: dst, to: e.source, inode: c.identity.inode)
+            return moveBack(from: dst, to: e.source, identity: c.identity)
         case .trash:
             guard let trash = e.trashURL else { return .failed("Trash location unknown. Restore it from the Trash by hand.") }
-            return moveBackFromTrash(trash, to: e.source, inode: c.identity.inode)
+            return moveBackFromTrash(trash, to: e.source, identity: c.identity)
         case .mkdir:
             guard let fd = SafeFS.openDirectory(SafeFS.parent(e.source)) else { return .failed("Parent folder changed or is missing") }
             defer { close(fd) }
             let leaf = SafeFS.leaf(e.source)
             guard let st = SafeFS.statAt(fd, leaf), st.st_mode & S_IFMT == S_IFDIR else { return .failed("Folder is gone or replaced") }
-            if let inode = e.createdInode, UInt64(st.st_ino) != inode { return .failed("Folder was replaced") }
+            guard let inode = e.createdInode, UInt64(st.st_ino) == inode,
+                  SafeFS.identity(st).device == c.identity.device else { return .failed("Folder was replaced or its identity is missing") }
             removeFinderMetadata(in: fd, leaf, inode: UInt64(st.st_ino))
             // rmdir only removes an empty folder.
             guard unlinkat(fd, leaf, AT_REMOVEDIR) == 0 else {
@@ -170,16 +183,19 @@ public struct ProposalApplier {
         case .tag:
             guard let fd = SafeFS.openDirectory(SafeFS.parent(e.source)) else { return .failed("Folder changed or is missing") }
             defer { close(fd) }
-            guard let st = SafeFS.statAt(fd, SafeFS.leaf(e.source)), UInt64(st.st_ino) == c.identity.inode else { return .failed("Item changed or is missing") }
+            guard let st = SafeFS.statAt(fd, SafeFS.leaf(e.source)), SafeFS.sameObject(SafeFS.identity(st), c.identity),
+                  (st.st_mode & S_IFMT == S_IFDIR || st.st_nlink == 1),
+                  let tags = try? URL(fileURLWithPath: e.source).resourceValues(forKeys: [.tagNamesKey]).tagNames,
+                  Set(tags) == Set(c.item.tags ?? []) else { return .failed("Item or tags changed since apply") }
             do { try setTags(e.previousTags ?? [], on: URL(fileURLWithPath: e.source)); return .done } catch { return .failed("Could not restore tags: \(error.localizedDescription)") }
         }
     }
 
-    /// Moves an applied object back, only if it is still the same inode and the original place is empty.
-    private func moveBack(from current: String, to original: String, inode: UInt64) -> Outcome {
+    /// Moves an applied object back, only if it is still the same unchanged object and the original place is empty.
+    private func moveBack(from current: String, to original: String, identity: FileIdentity) -> Outcome {
         guard let curFD = SafeFS.openDirectory(SafeFS.parent(current)) else { return .failed("Current folder changed or is missing") }
         defer { close(curFD) }
-        guard let st = SafeFS.statAt(curFD, SafeFS.leaf(current)), UInt64(st.st_ino) == inode else { return .failed("Item was moved or replaced") }
+        guard let st = SafeFS.statAt(curFD, SafeFS.leaf(current)), st.st_nlink == 1, SafeFS.sameObject(SafeFS.identity(st), identity) else { return .failed("Item was changed, moved or replaced") }
         guard let origFD = SafeFS.openDirectory(SafeFS.parent(original)) else { return .failed("Original folder changed or is missing") }
         defer { close(origFD) }
         guard SafeFS.statAt(origFD, SafeFS.leaf(original)) == nil else { return .failed("Something now exists at the original place") }
@@ -190,11 +206,11 @@ public struct ProposalApplier {
     }
 
     /// macOS privacy protection refuses to open `~/.Trash` itself, but a known item in it can still be
-    /// checked and renamed by path. The inode check and the no-overwrite rename keep this safe.
-    private func moveBackFromTrash(_ current: String, to original: String, inode: UInt64) -> Outcome {
+    /// checked and renamed by path. Recheck its identity and refuse to overwrite the original path.
+    private func moveBackFromTrash(_ current: String, to original: String, identity: FileIdentity) -> Outcome {
         var st = stat()
         guard lstat(current, &st) == 0 else { return .failed("It is no longer in the Trash") }
-        guard UInt64(st.st_ino) == inode, st.st_mode & S_IFMT == S_IFREG else { return .failed("The item in the Trash was replaced") }
+        guard st.st_nlink == 1, SafeFS.sameObject(SafeFS.identity(st), identity), st.st_mode & S_IFMT == S_IFREG else { return .failed("The item in the Trash was replaced") }
         guard let origFD = SafeFS.openDirectory(SafeFS.parent(original)) else { return .failed("Original folder changed or is missing") }
         defer { close(origFD) }
         guard SafeFS.statAt(origFD, SafeFS.leaf(original)) == nil else { return .failed("Something now exists at the original place") }

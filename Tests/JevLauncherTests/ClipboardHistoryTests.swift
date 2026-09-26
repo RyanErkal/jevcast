@@ -10,6 +10,7 @@ import XCTest
     /// Richer contents for the next read, such as an image or files.
     var raw: ClipRaw?
     var written: ClipPayload?
+    var onRead: (() -> Void)?
     func string() -> String? { text }
     func copy(_ text: String, types: [String] = ["public.utf8-plain-text"]) {
         self.text = text; self.types = types; raw = nil; changeCount += 1
@@ -18,7 +19,9 @@ import XCTest
     func write(_ text: String) -> Int { copy(text); return changeCount }
     func read(limit: Int, expected: Int) async -> ClipRaw? {
         guard changeCount == expected else { return nil }
-        return raw ?? text.map { ClipRaw(types: types, string: $0) }
+        let value = raw ?? text.map { ClipRaw(types: types, string: $0) }
+        onRead?()
+        return value
     }
     func write(_ payload: ClipPayload) -> Int {
         written = payload; text = payload.string; raw = nil; changeCount += 1
@@ -281,6 +284,126 @@ import XCTest
         await copy("memory", board, history)
         await history.flush()
         XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
+    }
+
+    func testClearRejectsQueuedCopyAndPersistsImmediately() async throws {
+        let board = FakePasteboard(), folder = tempFolder()
+        let history = await make(board, folder: folder)
+        await copy("stored secret", board, history)
+        await history.flush()
+        board.copy("queued secret"); history.poll()
+        history.clear(includingPins: true)
+        await history.settle()
+        XCTAssertTrue(history.entries.isEmpty)
+        let reopened = await make(folder: folder)
+        XCTAssertTrue(reopened.entries.isEmpty)
+    }
+
+    func testClearDuringReadCannotRestorePrivateBlob() async throws {
+        let folder = tempFolder(), board = FakePasteboard()
+        let history = await make(board, folder: folder)
+        board.onRead = { history.clear(includingPins: true) }
+        board.copy(String(repeating: "private", count: 1000))
+        history.poll(); await history.settle()
+        board.onRead = nil
+        XCTAssertTrue(history.entries.isEmpty)
+        let names = try FileManager.default.contentsOfDirectory(atPath: folder.path)
+        XCTAssertFalse(names.contains { UUID(uuidString: $0) != nil })
+        let reopened = await make(folder: folder)
+        XCTAssertTrue(reopened.entries.isEmpty)
+    }
+
+    func testDisabledStartupDeletesExistingHistory() async throws {
+        let folder = tempFolder(), board = FakePasteboard()
+        let history = await make(board, folder: folder)
+        await copy("stored secret", board, history)
+        await history.flush()
+        var settings = ClipboardSettings(); settings.enabled = false
+        let disabled = await make(folder: folder, settings: settings)
+        await disabled.flush()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
+        XCTAssertTrue(disabled.entries.isEmpty)
+    }
+
+    func testOffOnDoesNotRecordQueuedCopies() async {
+        let board = FakePasteboard()
+        let capturing = await make(board)
+        board.copy("queued secret"); capturing.poll()
+        capturing.setEnabled(false); capturing.setEnabled(true)
+        await capturing.settle()
+        XCTAssertTrue(capturing.entries.isEmpty)
+    }
+
+    func testMemoryOnlyStartupKeepsLoadedTextAndBlobs() async throws {
+        let folder = tempFolder(), board = FakePasteboard()
+        let history = await make(board, folder: folder)
+        let long = String(repeating: "private ", count: 2000)
+        await copy(long, board, history); await history.flush()
+        var settings = ClipboardSettings(); settings.persist = false
+        let memory = await make(folder: folder, settings: settings)
+        let entry = try XCTUnwrap(memory.entries.first)
+        let restored = await memory.worker.fullText(entry)
+        XCTAssertEqual(restored, long)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
+    }
+
+    func testClearDuringLoadKeepsOnlyPins() async throws {
+        let folder = tempFolder(), board = FakePasteboard()
+        let original = await make(board, folder: folder)
+        await copy("pin", board, original)
+        original.togglePin(try XCTUnwrap(original.entries.first).id)
+        await copy("remove", board, original); await original.flush()
+        let loading = ClipboardHistory(pasteboard: FakePasteboard(), folder: folder)
+        var settings = ClipboardSettings(); settings.ocr = false
+        loading.apply(settings)
+        loading.clear(includingPins: false)
+        await loading.settle()
+        XCTAssertEqual(loading.entries.compactMap(\.text), ["pin"])
+        let reopened = await make(folder: folder)
+        XCTAssertEqual(reopened.entries.compactMap(\.text), ["pin"])
+    }
+
+    func testRichCopiesWithDifferentFormattingAreDistinct() async {
+        let board = FakePasteboard()
+        let capture = await make(board)
+        await copy("same", board, capture)
+        for formatting in ["bold", "italic"] {
+            board.copy(ClipRaw(types: ["public.rtf"], string: "same", rtf: Data(formatting.utf8)))
+            capture.poll(); await capture.settle()
+        }
+        XCTAssertEqual(capture.entries.count, 3)
+    }
+
+    func testIdlePollExpiresOldEntries() async {
+        let board = FakePasteboard(); let history = await make(board)
+        await copy("old", board, history)
+        history.poll(now: Date().addingTimeInterval(31 * 86_400))
+        await history.settle()
+        XCTAssertTrue(history.entries.isEmpty)
+    }
+
+    func testAddTextWhileDisabledDoesNotStoreBlob() async {
+        let folder = tempFolder()
+        var settings = ClipboardSettings(); settings.enabled = false
+        let history = await make(folder: folder, settings: settings)
+        let added = await history.addText(String(repeating: "secret", count: 5000))
+        await history.flush()
+        XCTAssertNil(added)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
+    }
+
+    func testLongTextSizeCountsBlobOnce() {
+        let text = String(repeating: "a", count: ClipEntry.indexTextLimit + 1)
+        let made = ClipboardCapture.text(text, source: nil, now: Date())
+        XCTAssertEqual(made.entry.byteSize, Int64(text.utf8.count))
+    }
+
+    func testMissingIndexPrunesOrphanBlobs() throws {
+        let folder = tempFolder(), id = UUID()
+        let store = ClipboardStore(folder: folder)
+        store.write([ClipEntry.Blob.text: Data("secret".utf8)], for: id)
+        XCTAssertTrue(store.loadIndex().isEmpty)
+        XCTAssertNil(store.read(ClipEntry.Blob.text, for: id))
     }
 
     // MARK: Search and transforms

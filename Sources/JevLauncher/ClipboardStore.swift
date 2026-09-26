@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import LauncherCore
 
 /// Blob files and the index for clipboard history. With a folder, everything is on disk
@@ -27,27 +28,36 @@ final class ClipboardStore {
         if !fm.fileExists(atPath: url.path) {
             try fm.createDirectory(at: url, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         }
-        try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
     }
 
     private func writeFile(_ data: Data, to url: URL) throws {
-        try data.write(to: url, options: [.atomic])
-        try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        // mkstemp creates the staging file with mode 0600 before any private bytes are written.
+        var template = Array(url.deletingLastPathComponent().appendingPathComponent(".clipboard-XXXXXX").path.utf8CString)
+        let descriptor = mkstemp(&template)
+        guard descriptor >= 0 else { throw POSIXError(.EIO) }
+        let temporary = String(cString: template)
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        defer { try? handle.close(); unlink(temporary) }
+        try handle.write(contentsOf: data)
+        try handle.synchronize()
+        guard rename(temporary, url.path) == 0 else { throw POSIXError(.EIO) }
     }
 
     // MARK: Index
 
     /// Entries in the index, newest first. Folders with no entry, left by a quit during a delete, are removed.
     func loadIndex() -> [ClipEntry] {
-        guard let folder, let url = indexURL, let data = try? Data(contentsOf: url),
-              let file = try? JSONDecoder().decode(IndexFile.self, from: data) else { return [] }
-        let ids = Set(file.entries.map(\.id))
+        guard let folder, let url = indexURL else { return [] }
+        let file = (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(IndexFile.self, from: $0) }
+        let entries = file?.version == 1 ? file?.entries ?? [] : []
+        let ids = Set(entries.map(\.id))
         let children = (try? fm.contentsOfDirectory(atPath: folder.path)) ?? []
         for name in children {
             guard let id = UUID(uuidString: name), !ids.contains(id) else { continue }
             try? fm.removeItem(at: folder.appendingPathComponent(name))
         }
-        return file.entries
+        return entries
     }
 
     func saveIndex(_ entries: [ClipEntry]) {

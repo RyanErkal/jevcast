@@ -58,6 +58,10 @@ struct ClipboardPageView: View {
                             .id(entry.id)
                             .onTapGesture(count: 2) { page.select(entry.id); page.copy(page.selectedEntries) }
                             .onTapGesture { page.click(entry.id, modifiers: NSEvent.modifierFlags) }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityValue(page.selection.contains(entry.id) ? "Selected" : "")
+                            .accessibilityAction { page.select(entry.id) }
                     }
                 }
                 .padding(.horizontal, 8).padding(.vertical, 8)

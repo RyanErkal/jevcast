@@ -83,7 +83,8 @@ final class SystemPasteboard: PasteboardReading {
     nonisolated private static func readGeneral(limit: Int) -> ClipRaw? {
         let board = NSPasteboard.general
         guard let item = board.pasteboardItems?.first else { return nil }
-        let types = item.types.map(\.rawValue)
+        let types = (board.pasteboardItems ?? []).flatMap { $0.types.map(\.rawValue) }
+        guard !types.contains(where: { ClipboardHistory.skippedTypes.contains($0) }) else { return nil }
         var raw = ClipRaw(types: types)
         raw.string = item.string(forType: .string)
         raw.rtf = item.data(forType: .rtf)

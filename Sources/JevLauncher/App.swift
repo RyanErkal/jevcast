@@ -93,6 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
                                    actions: { [weak self] in self?.showActions() })
         panel.host(content)
         panel.delegate = self
+        model.clipboardPasteTarget = { [weak self] in self?.previousApp?.processIdentifier }
         model.onClose = { [weak self] restore in self?.hide(restoreFocus: restore) }
         model.openQuillSettings = { [weak self] in self?.showSettings(tab: .ai, aiPart: .quill) }
         model.openSettingsTab = { [weak self] name in

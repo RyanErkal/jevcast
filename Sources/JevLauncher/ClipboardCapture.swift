@@ -39,6 +39,8 @@ enum ClipboardCapture {
         guard let text, hasText else { return .skipped("empty") }
         guard settings.recordText else { return .skipped("text off") }
         guard text.utf8.count <= ClipboardSettings.maxTextBytes else { return .skipped("text too large") }
+        guard (raw.rtf?.count ?? 0) <= ClipboardSettings.maxTextBytes,
+              (raw.html?.count ?? 0) <= ClipboardSettings.maxTextBytes else { return .skipped("formatting too large") }
         let rich = settings.recordRichText
         return .made(self.text(text, rtf: rich ? raw.rtf : nil, html: rich ? raw.html : nil, source: source, now: now))
     }
@@ -53,8 +55,9 @@ enum ClipboardCapture {
         if let html { blobs[ClipEntry.Blob.html] = html }
         let long = text.count > ClipEntry.indexTextLimit
         if long { blobs[ClipEntry.Blob.text] = Data(text.utf8) }
-        let size = Int64(text.utf8.count) + blobs.values.reduce(0) { $0 + Int64($1.count) }
-        let entry = ClipEntry(hash: "t:" + sha(Data(text.utf8)), kind: kind, copiedAt: now,
+        let size = Int64(long ? 0 : text.utf8.count) + blobs.values.reduce(0) { $0 + Int64($1.count) }
+        let fingerprint = sha(Data(text.utf8)) + ":" + (rtf.map(sha) ?? "") + ":" + (html.map(sha) ?? "")
+        let entry = ClipEntry(hash: "t:" + sha(Data(fingerprint.utf8)), kind: kind, copiedAt: now,
                               text: long ? String(text.prefix(ClipEntry.indexTextLimit)) : text, textLength: text.count,
                               textInBlob: long, language: language, hasRTF: rtf != nil, hasHTML: html != nil,
                               sourceBundleID: source?.bundleID, sourceName: source?.name, byteSize: size)
@@ -68,6 +71,8 @@ enum ClipboardCapture {
               let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any],
               let width = properties[kCGImagePropertyPixelWidth] as? Int, let height = properties[kCGImagePropertyPixelHeight] as? Int
         else { return nil }
+        // A small compressed file can still expand to gigabytes during encoding.
+        guard width > 0, height > 0, width <= 64_000_000 / height else { return nil }
         var stored = data, storedType = uti
         let keep = uti == UTType.gif.identifier || (data.count <= keepOriginalBytes && uti != UTType.tiff.identifier)
         if !keep, let image = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) {
@@ -124,8 +129,8 @@ enum ClipboardCapture {
     static func files(_ urls: [URL], source: ClipSource?, now: Date) async -> Made {
         var files: [ClipFile] = []
         for url in urls {
-            let values = try? url.resourceValues(forKeys: [.contentTypeKey, .fileSizeKey, .isDirectoryKey])
-            let type = values?.contentType
+            let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey])
+            let type = (try? url.resourceValues(forKeys: [.contentTypeKey]))?.contentType
             let category = self.category(type, isDirectory: values?.isDirectory ?? false)
             var file = ClipFile(path: url.path, name: url.lastPathComponent,
                                 bookmark: try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil),

@@ -185,6 +185,7 @@ final class LauncherModel: ObservableObject {
     let catalogue: AppCatalogue
     let speech = SpeechService()
     let windows = WindowManager()
+    var clipboardPasteTarget: (() -> pid_t?)?
     var onClose: ((Bool) -> Void)?
     var onFailure: ((String) -> Void)?
     var focusSearch: (() -> Void)?
@@ -634,7 +635,7 @@ final class LauncherModel: ObservableObject {
             case .url(let url):
                 guard Frontmost.open(url) else { throw LauncherError("The URL could not be opened.") }
             case .copy(let text): copy(text)
-            case .clipboard(let item): clipboard.restore(item, paste: paste)
+            case .clipboard(let item): clipboard.restore(item, paste: paste, target: clipboardPasteTarget?())
             case .command(let command): run(command)
             case .custom(let command, let input): run(command, input: input)
             case .stopProcess(let listener):

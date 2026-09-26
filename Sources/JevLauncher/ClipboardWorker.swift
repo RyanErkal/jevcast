@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import LauncherCore
+import UniformTypeIdentifiers
 
 /// The serial worker for clipboard history: reading large data, hashing, encoding, thumbnails,
 /// and disk I/O all happen here, off the main thread.
@@ -26,6 +27,7 @@ actor ClipboardWorker {
     var isPersistent: Bool { store.folder != nil }
 
     func load() -> [ClipEntry] {
+        ClipboardStore.removePreviewFiles()
         let entries = store.loadIndex()
         for entry in entries { remember(entry) }
         return entries
@@ -56,6 +58,7 @@ actor ClipboardWorker {
             if let hash = hashByID.removeValue(forKey: id) { hashes[hash] = nil }
         }
         store.delete(ids)
+        ClipboardStore.removePreviewFiles()
     }
 
     func saveIndex(_ entries: [ClipEntry]) { store.saveIndex(entries) }
@@ -92,7 +95,7 @@ actor ClipboardWorker {
             return ClipboardCapture.decode(data, maxPixels: maxPixels)
         }
         if entry.kind == .files, let file = entry.files.first, file.category == .image,
-           let data = try? Data(contentsOf: URL(fileURLWithPath: file.path), options: .mappedIfSafe) {
+           let url = Self.resolve(file), let data = try? Data(contentsOf: url, options: .mappedIfSafe) {
             return ClipboardCapture.decode(data, maxPixels: maxPixels)
         }
         return thumbnail(for: entry, maxPixels: maxPixels)
@@ -108,7 +111,8 @@ actor ClipboardWorker {
         if entry.kind == .image { return store.read(ClipEntry.Blob.image, for: entry.id) }
         guard entry.kind == .files, entry.files.count == 1, let file = entry.files.first, file.category == .image,
               (file.size ?? 0) <= Int64(ClipboardSettings.maxImageBytes) else { return nil }
-        return try? Data(contentsOf: URL(fileURLWithPath: file.path), options: .mappedIfSafe)
+        guard let url = Self.resolve(file) else { return nil }
+        return try? Data(contentsOf: url, options: .mappedIfSafe)
     }
 
     /// What to write to the pasteboard. Plain text leaves out formatting; for an image it is the text found in it.
@@ -135,11 +139,31 @@ actor ClipboardWorker {
         }
     }
 
+    func quickLookURL(for entry: ClipEntry) -> URL? {
+        if entry.kind == .files { return entry.files.first.flatMap(Self.resolve) }
+        guard entry.kind == .image, let data = store.read(ClipEntry.Blob.image, for: entry.id) else { return nil }
+        let folder = ClipboardStore.previewFolder
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
+            let suffix = entry.image.flatMap { UTType($0.uti)?.preferredFilenameExtension } ?? "png"
+            let url = folder.appendingPathComponent(UUID().uuidString + "." + suffix)
+            guard FileManager.default.createFile(atPath: url.path, contents: data, attributes: [.posixPermissions: 0o600]) else { return nil }
+            return url
+        } catch { return nil }
+    }
+
+    func removePreview(_ url: URL) { try? FileManager.default.removeItem(at: url) }
+
     /// The file at its path, or where its bookmark says it moved to.
     static func resolve(_ file: ClipFile) -> URL? {
-        if FileManager.default.fileExists(atPath: file.path) { return URL(fileURLWithPath: file.path) }
-        guard let bookmark = file.bookmark else { return nil }
-        var stale = false
-        return try? URL(resolvingBookmarkData: bookmark, options: [.withoutUI], relativeTo: nil, bookmarkDataIsStale: &stale)
+        if let bookmark = file.bookmark {
+            var stale = false
+            guard let url = try? URL(resolvingBookmarkData: bookmark, options: [.withoutUI, .withoutMounting], relativeTo: nil,
+                                     bookmarkDataIsStale: &stale), FileManager.default.fileExists(atPath: url.path) else { return nil }
+            return url
+        }
+        let url = URL(fileURLWithPath: file.path)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 }

@@ -258,7 +258,7 @@ private struct ClipColorPreview: View {
             Text(value).font(.system(size: 13, design: .monospaced)).textSelection(.enabled)
             Spacer()
             Button { page.copyNew(value, message: "\(value) copied.") } label: { Image(systemName: "doc.on.doc") }
-                .buttonStyle(.borderless).help("Copy \(label)")
+                .buttonStyle(.borderless).help("Copy \(label)").accessibilityLabel("Copy \(label)")
         }
         .padding(.horizontal, 12).padding(.vertical, 9)
     }
@@ -397,6 +397,7 @@ enum ClipFileIcons {
         } else {
             icon = NSWorkspace.shared.icon(for: file.uti.flatMap { UTType($0) } ?? .data)
         }
+        if cache.count >= 300 { cache.removeAll() }
         cache[file.path] = icon
         return icon
     }
@@ -431,7 +432,7 @@ private struct ClipVideoPreview: View {
                     Image(systemName: "play.fill").font(.system(size: 26)).foregroundStyle(.white)
                         .frame(width: 64, height: 64).background(.ultraThinMaterial, in: Circle())
                 }
-                .buttonStyle(.plain).help("Play")
+                .buttonStyle(.plain).help("Play").accessibilityLabel("Play video")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

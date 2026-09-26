@@ -36,6 +36,7 @@ final class ClipboardPage: ObservableObject, LauncherPage {
     private var watch: AnyCancellable?
     private let quickLook = FilePreview()
     private var quickLookFile: URL?
+    private var quickLookRequest = UUID()
     /// A view inside the panel, for the actions menu and Quick Look.
     weak var anchorView: NSView?
     let actions = ClipboardActions()
@@ -76,6 +77,7 @@ final class ClipboardPage: ObservableObject, LauncherPage {
 
     func refresh() {
         rows = history.matches(text, chip: chip)
+        if quickLook.isVisible, !rows.contains(where: { $0.id == cursor }) { closeQuickLook() }
         let ids = Set(rows.map(\.id))
         let kept = selection.intersection(ids)
         if let cursor, ids.contains(cursor) {
@@ -127,7 +129,10 @@ final class ClipboardPage: ObservableObject, LauncherPage {
     // MARK: Keys
 
     func handle(_ key: PageKey) -> Bool {
-        guard isOn else { return key != .delete }
+        guard isOn else {
+            if case .open = key { turnOn(); return true }
+            return key != .delete
+        }
         switch key {
         case .down: step(1, extend: false)
         case .up: step(-1, extend: false)
@@ -186,18 +191,19 @@ final class ClipboardPage: ObservableObject, LauncherPage {
     func paste(_ entries: [ClipEntry], plain: Bool) {
         guard !entries.isEmpty else { return }
         let history = history
+        let target = model?.clipboardPasteTarget?() ?? NSWorkspace.shared.frontmostApplication?.processIdentifier
         Task {
             guard entries.count > 1, AXIsProcessTrusted() else {
                 guard await history.restore(entries, plain: plain) else { show(plain ? "This entry has no text." : "This entry could not be copied."); return }
                 model?.onClose?(true)
-                Paster.pasteSoon()
+                _ = await history.pasteRestored(to: target)
                 return
             }
             model?.onClose?(true)
             try? await Task.sleep(nanoseconds: 200_000_000)
             for entry in entries {
                 guard await history.restore([entry], plain: plain) else { continue }
-                TextInserter.postPaste()
+                guard await history.pasteRestored(to: target) else { return }
                 try? await Task.sleep(nanoseconds: 250_000_000)
             }
         }
@@ -314,54 +320,35 @@ final class ClipboardPage: ObservableObject, LauncherPage {
         Task { await openQuickLook() }
     }
 
-    private func quickLookURL(for entry: ClipEntry) async -> URL? {
-        switch entry.kind {
-        case .files: return entry.files.first.flatMap(ClipboardWorker.resolve)
-        case .image:
-            if let url = await history.worker.fileURL(ClipEntry.Blob.image, for: entry.id) {
-                // The blob has no extension; Quick Look needs one, so a linked copy is made in a private temp folder.
-                return temporaryCopy(of: url, entry: entry)
-            }
-            guard let data = await history.worker.read(ClipEntry.Blob.image, for: entry.id) else { return nil }
-            return temporaryFile(data, entry: entry)
-        default:
-            // Text shows in the preview pane; it is not written to a file.
-            return nil
+    private func showQuickLook(updating: Bool) async {
+        guard let entry = selected, let window = anchorView?.window else { return }
+        let request = UUID()
+        quickLookRequest = request
+        let worker = history.worker
+        guard let url = await worker.quickLookURL(for: entry) else {
+            if quickLookRequest == request { closeQuickLook() }
+            return
         }
+        guard quickLookRequest == request, selected?.id == entry.id,
+              history.entries.contains(where: { $0.id == entry.id }), history.isEnabled else {
+            if entry.kind == .image { await worker.removePreview(url) }
+            return
+        }
+        if let old = quickLookFile { Task { await worker.removePreview(old) } }
+        quickLookFile = entry.kind == .image ? url : nil
+        if updating { quickLook.update(path: url.path) } else { quickLook.toggle(path: url.path, beside: window) }
     }
 
-    private static var temporaryFolder: URL { ClipboardStore.previewFolder }
-
-    private func temporaryFile(_ data: Data, entry: ClipEntry, ext: String? = nil) -> URL? {
-        let folder = Self.temporaryFolder
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        let suffix = ext ?? (entry.image.flatMap { UTType($0.uti)?.preferredFilenameExtension } ?? "png")
-        let url = folder.appendingPathComponent("\(entry.id.uuidString).\(suffix)")
-        if let quickLookFile, quickLookFile != url { try? FileManager.default.removeItem(at: quickLookFile) }
-        try? FileManager.default.removeItem(at: url)
-        guard FileManager.default.createFile(atPath: url.path, contents: data, attributes: [.posixPermissions: 0o600]) else { return nil }
-        quickLookFile = url
-        return url
-    }
-
-    private func temporaryCopy(of blob: URL, entry: ClipEntry) -> URL? {
-        guard let data = try? Data(contentsOf: blob) else { return nil }
-        return temporaryFile(data, entry: entry)
-    }
-
-    private func openQuickLook() async {
-        guard let entry = selected, let window = anchorView?.window, let url = await quickLookURL(for: entry) else { return }
-        quickLook.toggle(path: url.path, beside: window)
-    }
-
-    private func updateQuickLook() async {
-        guard let entry = selected, let url = await quickLookURL(for: entry) else { closeQuickLook(); return }
-        quickLook.update(path: url.path)
-    }
+    private func openQuickLook() async { await showQuickLook(updating: false) }
+    private func updateQuickLook() async { await showQuickLook(updating: true) }
 
     private func closeQuickLook() {
+        quickLookRequest = UUID()
         quickLook.close()
-        if let quickLookFile { try? FileManager.default.removeItem(at: quickLookFile) }
+        if let quickLookFile {
+            let worker = history.worker
+            Task { await worker.removePreview(quickLookFile) }
+        }
         quickLookFile = nil
     }
 

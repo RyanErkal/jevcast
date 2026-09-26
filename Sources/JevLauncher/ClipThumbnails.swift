@@ -9,17 +9,25 @@ final class ClipThumbnails {
     private var cache: [UUID: NSImage] = [:]
     private var order: [UUID] = []
     private let limit = 300
+    private var generation = 0
     private var previews: [UUID: NSImage] = [:]
     private var previewOrder: [UUID] = []
 
     init(worker: ClipboardWorker) { self.worker = worker }
+
+    func removeAll() {
+        generation += 1
+        cache = [:]; order = []; previews = [:]; previewOrder = []
+    }
 
     func cached(_ id: UUID) -> NSImage? { cache[id] }
 
     func thumbnail(for entry: ClipEntry) async -> NSImage? {
         if let hit = cache[entry.id] { touch(entry.id); return hit }
         guard entry.hasThumbnail || entry.kind == .image else { return nil }
+        let generation = generation
         guard let image = await worker.thumbnail(for: entry, maxPixels: 160) else { return nil }
+        guard generation == self.generation, !Task.isCancelled else { return nil }
         let made = NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
         store(made, for: entry.id)
         return made
@@ -28,7 +36,9 @@ final class ClipThumbnails {
     /// A large image for the preview pane. Only the last few are kept.
     func preview(for entry: ClipEntry) async -> NSImage? {
         if let hit = previews[entry.id] { return hit }
+        let generation = generation
         guard let image = await worker.previewImage(for: entry, maxPixels: 1600) else { return nil }
+        guard generation == self.generation, !Task.isCancelled else { return nil }
         let made = NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
         previews[entry.id] = made
         previewOrder.removeAll { $0 == entry.id }
@@ -56,6 +66,7 @@ enum ClipAppIcons {
     static func icon(_ bundleID: String?) -> NSImage? {
         guard let bundleID, !missing.contains(bundleID) else { return nil }
         if let hit = cache[bundleID] { return hit }
+        if cache.count + missing.count >= 300 { cache.removeAll(); missing.removeAll() }
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { missing.insert(bundleID); return nil }
         let icon = NSWorkspace.shared.icon(forFile: url.path)
         icon.size = NSSize(width: 32, height: 32)

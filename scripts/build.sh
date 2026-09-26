@@ -11,6 +11,8 @@ cd "$(dirname "$0")/.."
 APP_NAME="Jevcast"
 BUNDLE_ID="com.ryanerkal.jevlauncher"
 EXECUTABLE="JevLauncher"
+RUNNER="jevcast-runner"
+RUNNER_LABEL="com.ryanerkal.jevlauncher.runner"
 source scripts/version.env
 DEV_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -1)"
 IDENTITY="${SIGNING_IDENTITY:-${DEV_IDENTITY:--}}"
@@ -27,13 +29,19 @@ mkdir -p dist
 STAGE="$(mktemp -d "$PWD/dist/.stage.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
 APP="$STAGE/$APP_NAME.app"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Library/LaunchAgents"
 # SwiftPM can stamp the deployment target as the SDK version. That makes macOS 26
 # draw standard windows in the old style. Update the load command before signing;
 # SwiftPM's -Xlinker handling differs between Xcode 26 and 27.
 xcrun vtool -set-build-version macos 14.0 "$(xcrun --show-sdk-version)" -replace \
   -output "$APP/Contents/MacOS/$EXECUTABLE" "$BIN_DIR/$EXECUTABLE"
 chmod 755 "$APP/Contents/MacOS/$EXECUTABLE"
+# The background automation runner. SMAppService registers it from the LaunchAgents plist.
+xcrun vtool -set-build-version macos 14.0 "$(xcrun --show-sdk-version)" -replace \
+  -output "$APP/Contents/MacOS/$RUNNER" "$BIN_DIR/$RUNNER"
+chmod 755 "$APP/Contents/MacOS/$RUNNER"
+cp scripts/runner-agent.plist "$APP/Contents/Library/LaunchAgents/$RUNNER_LABEL.plist"
+plutil -lint -s "$APP/Contents/Library/LaunchAgents/$RUNNER_LABEL.plist"
 # macOS 26 draws the Icon Composer bundle as a Liquid Glass icon. actool also writes an
 # AppIcon.icns fallback for older systems. Without actool (no Xcode), ship the static .icns.
 if [ -d Resources/AppIcon.icon ] && xcrun --find actool >/dev/null 2>&1; then
@@ -82,8 +90,12 @@ plutil -lint -s "$APP/Contents/Info.plist"
 SIGN_FLAGS=(--force --sign "$IDENTITY" --options runtime --entitlements scripts/entitlements.plist)
 # Notarization needs a secure timestamp. Only a Developer ID build is notarized.
 if [[ "$IDENTITY" == "Developer ID Application:"* ]]; then SIGN_FLAGS+=(--timestamp); fi
+# Sign nested code first. The runner needs no entitlements.
+RUNNER_SIGN_FLAGS=(--force --sign "$IDENTITY" --options runtime --identifier "$RUNNER_LABEL")
+if [[ "$IDENTITY" == "Developer ID Application:"* ]]; then RUNNER_SIGN_FLAGS+=(--timestamp); fi
+codesign "${RUNNER_SIGN_FLAGS[@]}" "$APP/Contents/MacOS/$RUNNER"
 codesign "${SIGN_FLAGS[@]}" "$APP"
-codesign --verify --strict "$APP"
+codesign --verify --deep --strict "$APP"
 rm -rf "dist/$APP_NAME.app"
 mv "$APP" "dist/$APP_NAME.app"
 printf '%s\n' "$(pwd)/dist/$APP_NAME.app"

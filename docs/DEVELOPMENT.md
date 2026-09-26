@@ -2,9 +2,10 @@
 
 ## Layout
 
-The package has two targets.
+The package has three targets.
 
 - `Sources/LauncherCore`: pure logic with no AppKit, so tests are fast and exact. Calculator and unit conversion, time zone conversion (`TimeZoneQuery.swift`, with the bundled place table in `TimeZonePlaces.swift`), file-query parsing, search ranking, frecency, window geometry, the built-in command list (`SystemCommands.swift`), port-query and `lsof` parsing (`Ports.swift`), Jev usage totals, learned requests, timer parsing, emoji, and query text helpers. Tests are in `Tests/LauncherCoreTests`.
+- `Sources/JevRunner`: `jevcast-runner`, the background automation scheduler in `Jevcast.app/Contents/MacOS`, registered from `Contents/Library/LaunchAgents/com.ryanerkal.jevlauncher.runner.plist` (template `scripts/runner-agent.plist`). Its logic lives in `LauncherCore/Automations`: `RRule`, `Scheduler`, `AutomationStore`, `RunnerCommand`, `RunnerEvents`, `ProcessSupervisor`, `RunEngine`. `jevcast-runner --root <dir>` runs it against another store folder.
 - `Sources/JevLauncher`: the app.
   - `App.swift`: app delegate, global shortcuts, open and close, snapshot runs.
   - `LauncherModel.swift`: builds, ranks, and runs results.

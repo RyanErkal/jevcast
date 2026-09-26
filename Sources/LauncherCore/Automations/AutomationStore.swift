@@ -194,6 +194,31 @@ public final class AutomationStore: @unchecked Sendable {
         try locked { try encodeTop(heartbeat, "runner.json") }
     }
 
+    // MARK: Other files in the root
+
+    /// Reads a small JSON file directly in the root, such as `clients.json`. Nil when missing or unreadable.
+    public func readTopFile<T: Decodable>(_ type: T.Type, name: String) -> T? {
+        guard SecureFile.isSafeName(name) else { return nil }
+        return locked { decodeTop(name) }
+    }
+
+    /// Writes a JSON file (0600) directly in the root, creating the root.
+    public func writeTopFile<T: Encodable>(_ value: T, name: String) throws {
+        guard SecureFile.isSafeName(name), !["settings.json", "runner.json"].contains(name) else { throw AutomationStoreError.invalidID(name) }
+        try locked { try encodeTop(value, name) }
+    }
+
+    /// True when a file with this name exists directly in the root.
+    public func hasTopFile(_ name: String) -> Bool {
+        guard SecureFile.isSafeName(name) else { return false }
+        return locked { (try? SecureFile.read(root.appendingPathComponent(name), maxBytes: SecureFile.maxJSON)) != nil }
+    }
+
+    /// Creates the root folder (0700) when it is missing.
+    public func ensureRoot() throws {
+        try locked { try createParentsOfRoot(); try SecureFile.ensureDirectory(root) }
+    }
+
     // MARK: Prune
 
     /// Deletes finished runs beyond each automation's `keepRuns` or older than `historyDays`.
@@ -213,6 +238,21 @@ public final class AutomationStore: @unchecked Sendable {
                     guard run.state.isFinished else { continue }
                     let old = (run.finished ?? run.queued) < cutoff
                     guard index >= keep || old else { continue }
+                    if (try? FileManager.default.removeItem(at: runFolder(automationID: id, runID: run.id))) != nil { removed += 1 }
+                }
+            }
+            return removed
+        }
+    }
+
+    /// Deletes every finished run folder now, for "Delete finished history". Active runs and runs
+    /// waiting for the user stay. Returns how many were removed.
+    @discardableResult
+    public func removeFinishedRuns() -> Int {
+        locked {
+            var removed = 0
+            for id in automationFolderNames() {
+                for run in loadRuns(id, limit: 100_000) where run.state.isFinished {
                     if (try? FileManager.default.removeItem(at: runFolder(automationID: id, runID: run.id))) != nil { removed += 1 }
                 }
             }

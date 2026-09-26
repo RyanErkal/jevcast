@@ -99,7 +99,7 @@ final class ProposalTests: XCTestCase {
     func testDependentItemsAndDigest() {
         let m = check([
             ["id": "1", "op": "move", "from": root + "/a.txt", "to": root + "/Sub/a.txt", "reason": ""],
-            ["id": "2", "op": "trash", "path": root + "/Sub", "reason": ""],
+            ["id": "2", "op": "tag", "path": root + "/A.TXT", "tags": ["y"], "reason": ""],
             ["id": "3", "op": "tag", "path": root + "/b.txt", "tags": ["x"], "reason": ""],
         ])
         XCTAssertEqual(Set(m.refused.keys), ["1", "2"])
@@ -184,5 +184,61 @@ final class ProposalTests: XCTestCase {
         let j = ProposalApplier(manifest: m, approved: ["bad"], journalURL: base.appendingPathComponent("j.json")).apply()
         XCTAssertEqual(j.entries.map(\.status), [.skipped])
         XCTAssertFalse(fm.fileExists(atPath: root + "/One"))
+    }
+
+    // MARK: v1 limits
+
+    func testFoldersCannotBeMovedRenamedOrTrashed() {
+        let reason = "Folders cannot be moved or trashed yet"
+        XCTAssertEqual(refusal(["op": "move", "from": root + "/Sub", "to": root + "/Other"]), reason)
+        XCTAssertEqual(refusal(["op": "trash", "path": root + "/Sub"]), reason)
+        XCTAssertEqual(refusal(["op": "rename", "path": root + "/Sub", "name": "Other"]), reason)
+        XCTAssertNil(refusal(["op": "tag", "path": root + "/Sub", "tags": ["Red"]]))
+        XCTAssertNil(refusal(["op": "trash", "path": root + "/a.txt"]))
+    }
+
+    func testDependenciesIgnoreCase() {
+        let m = check([
+            ["id": "1", "op": "move", "from": root + "/a.txt", "to": root + "/Sub/x.txt", "reason": ""],
+            ["id": "2", "op": "move", "from": root + "/b.txt", "to": root + "/sub/X.TXT", "reason": ""],
+        ])
+        XCTAssertEqual(Set(m.refused.keys), ["1", "2"])
+    }
+
+    func testProtectedPathsIgnoreCase() {
+        XCTAssertNotNil(refusal(["op": "trash", "path": root + "/a.txt"], protected: [root.uppercased() + "/A.TXT"]))
+    }
+
+    func testExpiry() {
+        let m = check([["id": "t", "op": "tag", "path": root + "/b.txt", "tags": ["x"], "reason": ""]])
+        XCTAssertFalse(ProposalValidator.isExpired(m, now: m.created.addingTimeInterval(6 * 86400)))
+        XCTAssertTrue(ProposalValidator.isExpired(m, now: m.created.addingTimeInterval(7 * 86400 + 1)))
+    }
+
+    func testMkdirUndoRemovesFinderMetadataAndChecksInode() throws {
+        let m = check([["id": "mk", "op": "mkdir", "path": root + "/Made", "reason": ""]])
+        let applier = ProposalApplier(manifest: m, approved: ["mk"], journalURL: base.appendingPathComponent("j.json"))
+        let j = applier.apply()
+        XCTAssertNotNil(j.entries.first?.createdInode)
+        try Data().write(to: URL(fileURLWithPath: root + "/Made/.DS_Store"))
+        XCTAssertEqual(applier.undo(journal: j).entries.first?.status, .undone)
+        XCTAssertFalse(fm.fileExists(atPath: root + "/Made"))
+
+        // A folder made again by someone else is not the one we made.
+        let j2 = applier.apply()
+        try fm.removeItem(atPath: root + "/Made")
+        try fm.createDirectory(atPath: root + "/Spacer", withIntermediateDirectories: false)
+        try fm.createDirectory(atPath: root + "/Made", withIntermediateDirectories: false)
+        var entry = j2.entries[0]; entry.createdInode = (entry.createdInode ?? 0) &+ 999_999
+        var forged = j2; forged.entries[0] = entry
+        XCTAssertEqual(applier.undo(journal: forged).entries.first?.status, .undoBlocked)
+        XCTAssertTrue(fm.fileExists(atPath: root + "/Made"))
+    }
+
+    func testJournalDecodes() throws {
+        let m = check([["id": "mk", "op": "mkdir", "path": root + "/Made", "reason": ""]])
+        let url = base.appendingPathComponent("j.json")
+        let j = ProposalApplier(manifest: m, approved: ["mk"], journalURL: url).apply()
+        XCTAssertEqual(ApplyJournal.decode(try Data(contentsOf: url))?.entries.map(\.status), j.entries.map(\.status))
     }
 }

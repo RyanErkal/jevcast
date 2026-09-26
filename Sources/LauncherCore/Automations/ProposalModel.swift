@@ -93,6 +93,8 @@ public struct ApplyJournal: Codable, Equatable, Sendable {
         public var trashURL: String?
         /// Tags before a tag operation.
         public var previousTags: [String]?
+        /// Inode of the folder a mkdir created, so undo removes only that folder.
+        public var createdInode: UInt64?
         public var status: Status
         public var message: String?
         public init(itemID: String, op: ProposalItem.Operation, source: String, destination: String?, status: Status) {

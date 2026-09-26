@@ -5,7 +5,7 @@
 The package has three targets.
 
 - `Sources/LauncherCore`: pure logic with no AppKit, so tests are fast and exact. Calculator and unit conversion, time zone conversion (`TimeZoneQuery.swift`, with the bundled place table in `TimeZonePlaces.swift`), file-query parsing, search ranking, frecency, window geometry, the built-in command list (`SystemCommands.swift`), port-query and `lsof` parsing (`Ports.swift`), Jev usage totals, learned requests, timer parsing, emoji, and query text helpers. Tests are in `Tests/LauncherCoreTests`.
-- `Sources/JevRunner`: `jevcast-runner`, the background automation scheduler in `Jevcast.app/Contents/MacOS`, registered from `Contents/Library/LaunchAgents/com.ryanerkal.jevlauncher.runner.plist` (template `scripts/runner-agent.plist`). Its logic lives in `LauncherCore/Automations`: `RRule`, `Scheduler`, `AutomationStore`, `RunnerCommand`, `RunnerEvents`, `ProcessSupervisor`, `RunEngine`. `jevcast-runner --root <dir>` runs it against another store folder.
+- `Sources/JevRunner`: `jevcast-runner`, the background automation scheduler in `Jevcast.app/Contents/MacOS`, registered from `Contents/Library/LaunchAgents/com.ryanerkal.jevlauncher.runner.plist` (template `scripts/runner-agent.plist`). Its logic lives in `LauncherCore/Automations`: `RRule`, `Scheduler`, `AutomationStore`, `RunnerCommand`, `RunnerEvents`, `ProcessSupervisor`, `RunEngine`. The app side also uses `Proposal*` (check, apply, undo), `CodexImport*`, `ClientMetrics*`, `AlertDecision.swift` (when a run alerts, quiet hours, alert words), and `ToolLocator.swift` (where to find `codex` and `claude`, and apply summaries). `jevcast-runner --root <dir>` runs it against another store folder.
 - `Sources/JevLauncher`: the app.
   - `App.swift`: app delegate, global shortcuts, open and close, snapshot runs.
   - `LauncherModel.swift`: builds, ranks, and runs results.
@@ -25,7 +25,7 @@ The package has three targets.
   - `MenuScanner.swift`, `Notifier.swift`, `UserItems.swift`: front-app menus, local notifications and timers, and the user's commands, workflows, and snippets.
   - `JevService.swift`: Jev selection through TypeSafe or OpenRouter, chosen by the key. Validates every reply before use.
   - `UpdateService.swift`, `UpdateChecker.swift`: the daily GitHub release check.
-  - `Settings*.swift`, `WelcomeWindow.swift`, `StatusMenu.swift`, `AppMenus.swift`: windows and menus. Settings tabs: General (permissions, network), Search, Library (`SettingsCommands.swift`, export and import in `LibraryFile.swift`), Windows, Voice, AI (`SettingsAI.swift`: Jev, Quill, Usage), and Mail.
+  - `Settings*.swift`, `WelcomeWindow.swift`, `StatusMenu.swift`, `AppMenus.swift`: windows and menus. Settings tabs: General (permissions, network), Search, Library (`SettingsCommands.swift`, export and import in `LibraryFile.swift`), Windows, Voice, AI (`SettingsAI.swift`: Jev, Quill, Usage), Automations (`SettingsAutomations.swift`, clients in `SettingsAutomationClients.swift`), and Mail.
   - `AppIdentity.swift`: name, bundle ID, and project links.
   - `Thing.swift`, `Sources.swift`: rows with their own verbs, and sources that load them for a query such as "scheduled tasks". `SourceQuery.swift` in LauncherCore reads the keywords.
   - `ScheduledSource.swift`: launchd jobs, crontab, and timers. `ScheduledJobs.swift` in LauncherCore parses plists and cron lines and computes the next run.
@@ -34,7 +34,8 @@ The package has three targets.
   - `QuillService.swift`, `LauncherModel+Quill.swift`, `SettingsQuill.swift`: Quill through OpenRouter, the context switches, and the activity log. `QuillPrompt.swift` in LauncherCore builds each request. `QuillStorageKeys.swift` holds the stored names; they keep the old "luna" spelling so settings, keys, and history survive the rename.
   - `Mail*.swift`: the mail window. `MailStore.swift` reads Apple Mail's index and `.emlx` files; `MailActions.swift` changes mail through Apple Mail; `MIMEMessage.swift` and `MailIndex.swift` in LauncherCore parse messages and hold Mail's fixed AppleScript.
   - `SQLiteReader.swift`: a read-only SQLite reader with bound values.
-  - `QuillTaskCenter.swift`, `QuillTaskViews.swift`, `TaskRunsSource.swift`: scheduled Quill tasks, their results, and the result window. `QuillTasks.swift` in LauncherCore parses schedules and decides when a task is due.
+  - `AutomationCenter.swift` and `AutomationCenter+*.swift`: the app's side of automations. It watches the Automations folder and the runner signal, writes definitions and requests, maps SMAppService and the heartbeat to a runner status, finds the CLIs, checks and applies proposals, reads Codex and client metrics, and shows notch alerts (`NotchAlert.swift`). `AutomationSecrets.swift` keeps script secrets in the Keychain. `AutomationsSource.swift` and `ClientsSource.swift` are the "automations" and "clients" launcher rows.
+  - `QuillTaskCenter.swift`, `QuillTaskViews.swift`, `TaskRunsSource.swift`: scheduled Quill tasks, their results, and the result window. A failed task shows a notch alert; there are no system notifications for tasks. `QuillTasks.swift` in LauncherCore parses schedules and decides when a task is due.
   - `Dictation*.swift`, `AudioCapture.swift`, `AppleSpeechEngine.swift`, `TextInserter.swift`, `SettingsDictation.swift`: hold Right Command to dictate (macOS 26). Audio stays in memory; transcripts are JSON Lines in `~/Library/Application Support/Jevcast/Dictation/`. `DictationHold.swift`, `DictationText.swift`, and `TranscriptStore.swift` in LauncherCore hold the key state machine, local clean-up, and the history files.
   - `JevLayers.swift` in LauncherCore: the kinds of request for layered Jev matching, and how the two first answers are combined.
 
@@ -55,10 +56,12 @@ Run the executable inside the app bundle, for example `"dist/Jevcast.app/Content
 | `--diagnose-jev 'request' …`               | Runs each request through the launcher with the stored TypeSafe key and prints the pick, the top row, and the tokens used. Billed, and counted in Settings › AI › Usage. |
 | `echo KEY \| … --store-jev-key`            | Saves a TypeSafe or OpenRouter key in the Keychain from standard input, as Settings › AI › Jev does. The key is never an argument or printed. |
 | `--open`                                   | Shows the launcher at launch.                                                                          |
+| `--automation-alerts`                      | Starts without the welcome window or the launcher and shows pending automation alerts. The runner uses it. |
+| `--notch-demo`                             | Shows two invented notch alerts, one to review and one failure, then quits after 20 seconds.           |
 | `--welcome`                                | Shows the welcome window at launch.                                                                    |
 | `--trace-latency`                          | Prints panel and result timings. No query text.                                                        |
 | `--trace-interaction`                      | Prints open, close, focus, and resize events. No query text.                                           |
-| `--snapshot-ui <dir>`                      | Renders the launcher states, each panel view, each Settings pane, and the welcome window to PNG files, then quits. Mail, Calendar, and Clean Up views render empty. |
+| `--snapshot-ui <dir>`                      | Renders the launcher states, each panel view, each Settings pane, and the welcome window to PNG files, then quits. Automations use a temporary empty store; the real Automations folder, the runner, and the CLIs are never touched. Mail, Calendar, and Clean Up views render empty. |
 | `--snapshot-ui <dir> --demo`               | The same, with invented sample files, Apple apps only, and fresh settings. Use this for public images. |
 
 Snapshots render the app's own views. They show layout only, not window material, shadows, or the toolbar. Snapshot windows stay transparent and never take focus, clicks, or typing.

@@ -126,4 +126,27 @@ final class AutomationStoreTests: XCTestCase {
         do { try store.remove(id: a.id) } catch { throw XCTSkip("No Trash for the temp volume: \(error)") }
         XCTAssertTrue(store.loadAutomations().automations.isEmpty)
     }
+
+    func testRemoveFinishedRunsKeepsActiveAndWaiting() throws {
+        let a = sample(); try store.save(a)
+        var ids: [RunState: String] = [:]
+        for (i, state) in [RunState.succeeded, .failed, .needsInput, .running].enumerated() {
+            var run = RunRecord(id: RunID.make(at: Date(timeIntervalSince1970: 1_800_000_000 + Double(i))), automation: a,
+                                trigger: .manual, occurrence: nil)
+            run.state = state; try store.saveRun(run); ids[state] = run.id
+        }
+        XCTAssertEqual(store.removeFinishedRuns(), 2)
+        XCTAssertEqual(Set(store.runs(for: a.id, limit: 10).map(\.id)), [ids[.needsInput]!, ids[.running]!])
+    }
+
+    func testTopFiles() throws {
+        struct Item: Codable, Equatable { var name: String }
+        XCTAssertNil(store.readTopFile([Item].self, name: "clients.json"))
+        XCTAssertFalse(store.hasTopFile("clients.json"))
+        try store.writeTopFile([Item(name: "Stein")], name: "clients.json")
+        XCTAssertEqual(store.readTopFile([Item].self, name: "clients.json"), [Item(name: "Stein")])
+        XCTAssertEqual(try mode(store.root.appendingPathComponent("clients.json")), 0o600)
+        XCTAssertThrowsError(try store.writeTopFile(Item(name: "x"), name: "../x.json"))
+        XCTAssertThrowsError(try store.writeTopFile(Item(name: "x"), name: "runner.json"))
+    }
 }

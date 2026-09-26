@@ -45,8 +45,9 @@ public enum ProposalValidator {
     }
 
     /// Items whose paths overlap (same path, or one inside the other) depend on each other. Both are refused.
+    /// Paths compare without case and Unicode form, as APFS does by default, so "a.txt" and "A.txt" count as one.
     static func dependencies(_ items: [CheckedItem]) -> [String: String] {
-        let paths = items.map { c in ([c.source] + (c.destination.map { [$0] } ?? [])).compactMap(SafeFS.components) }
+        let paths = items.map { c in ([c.source] + (c.destination.map { [$0] } ?? [])).map(SafeFS.folded).compactMap(SafeFS.components) }
         var result: [String: String] = [:]
         for a in items.indices {
             for b in items.indices where b > a {
@@ -57,6 +58,15 @@ public enum ProposalValidator {
             }
         }
         return result
+    }
+}
+
+extension ProposalValidator {
+    /// Proposals older than this cannot be approved. Their journals stay for undo.
+    public static let maxAge: TimeInterval = 7 * 86400
+
+    public static func isExpired(_ manifest: ProposalManifest, now: Date) -> Bool {
+        now.timeIntervalSince(manifest.created) > maxAge
     }
 }
 

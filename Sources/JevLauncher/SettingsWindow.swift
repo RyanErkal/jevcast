@@ -7,12 +7,13 @@ import SwiftUI
 @MainActor
 final class SettingsWindow: NSWindowController, NSToolbarDelegate {
     enum Tab: String, CaseIterable {
-        case general, search, library, windows, voice, dictation, ai, mail
+        case general, search, library, windows, voice, dictation, ai, automations, mail
         var title: String {
             switch self {
             case .general: return "General"; case .search: return "Search"
             case .library: return "Library"; case .windows: return "Windows"
             case .voice: return "Voice"; case .dictation: return "Dictation"; case .ai: return "AI"; case .mail: return "Mail"
+            case .automations: return "Automations"
             }
         }
         var symbol: String {
@@ -20,6 +21,7 @@ final class SettingsWindow: NSWindowController, NSToolbarDelegate {
             case .general: return "gearshape"; case .search: return "magnifyingglass"
             case .library: return "books.vertical"; case .windows: return "macwindow"
             case .voice: return "waveform"; case .dictation: return "mic"; case .ai: return "sparkles"; case .mail: return "envelope"
+            case .automations: return "bolt.badge.clock"
             }
         }
         var identifier: NSToolbarItem.Identifier { NSToolbarItem.Identifier(rawValue) }
@@ -36,15 +38,16 @@ final class SettingsWindow: NSWindowController, NSToolbarDelegate {
     private let status: LauncherStatus
     private let updates: UpdateChecker
     private let dictation: DictationController
+    private let automations: AutomationCenter
     private let changed: () -> Void
     private let openMail: () -> Void
     private let hosting = NSHostingView(rootView: AnyView(EmptyView()))
     private var current: Tab = .general
 
     init(preferences: Preferences, model: LauncherModel, catalogue: AppCatalogue, status: LauncherStatus, updates: UpdateChecker,
-         dictation: DictationController, changed: @escaping () -> Void, openMail: @escaping () -> Void) {
+         dictation: DictationController, automations: AutomationCenter, changed: @escaping () -> Void, openMail: @escaping () -> Void) {
         self.preferences = preferences; self.model = model; self.catalogue = catalogue; self.status = status; self.updates = updates
-        self.dictation = dictation; self.changed = changed; self.openMail = openMail
+        self.dictation = dictation; self.automations = automations; self.changed = changed; self.openMail = openMail
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 400),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -103,6 +106,7 @@ final class SettingsWindow: NSWindowController, NSToolbarDelegate {
         case .voice: VoiceSettings(preferences: preferences, speech: model.speech)
         case .dictation: DictationSettings(preferences: preferences, dictation: dictation, openQuill: { [weak self] in self?.select(.ai) })
         case .ai: AISettings(preferences: preferences, model: model, resized: resized)
+        case .automations: AutomationSettingsPane(preferences: preferences, center: automations, resized: resized)
         case .mail: MailSettings(preferences: preferences, openMail: openMail)
         }
     }

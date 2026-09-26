@@ -10,8 +10,12 @@ final class ScheduledSource: ThingSource {
     private let catalogue: AppCatalogue
     private let tasks: QuillTaskCenter?
     private let openRun: (QuillTaskRun) -> Void
-    init(timers: TimerCenter, catalogue: AppCatalogue, tasks: QuillTaskCenter? = nil, openRun: @escaping (QuillTaskRun) -> Void = { _ in }) {
+    private let automations: AutomationCenter?
+    private let showCodex: () -> Bool
+    init(timers: TimerCenter, catalogue: AppCatalogue, tasks: QuillTaskCenter? = nil, openRun: @escaping (QuillTaskRun) -> Void = { _ in },
+         automations: AutomationCenter? = nil, showCodex: @escaping () -> Bool = { false }) {
         self.timers = timers; self.catalogue = catalogue; self.tasks = tasks; self.openRun = openRun
+        self.automations = automations; self.showCodex = showCodex
     }
 
     nonisolated static let folders: [(path: String, domain: LaunchJob.Domain)] = [
@@ -41,6 +45,7 @@ final class ScheduledSource: ThingSource {
                 rows.append(quillRow(task, center: tasks, now: now))
             }
         }
+        if let automations { rows += automationRows(automations, text: text, failingOnly: failingOnly) }
         for timer in timers.active where text.isEmpty && !failingOnly {
             rows.append(LauncherResult(id: "cancel:" + timer.id, title: timer.title,
                                        detail: "Jevcast timer · ends " + timer.fires.formatted(date: .omitted, time: .shortened),
@@ -210,7 +215,7 @@ final class ScheduledSource: ThingSource {
         var verbs: [Verb] = []
         let openRun = self.openRun
         if let last { verbs.append(Verb(title: "Show Last Result", after: .keepOpen) { openRun(last); return nil }) }
-        verbs.append(Verb(title: "Run Now", after: .stay) { center.run(task); return "Running \(task.name). A notification shows the result." })
+        verbs.append(Verb(title: "Run Now", after: .stay) { center.run(task); return "Running \(task.name). The result shows in Quill Task Results." })
         verbs.append(Verb(title: task.enabled ? "Pause" : "Resume", after: .stay) {
             center.setEnabled(task.id, !task.enabled); return task.enabled ? "Paused \(task.name)." : "Resumed \(task.name)."
         })
@@ -222,6 +227,54 @@ final class ScheduledSource: ThingSource {
         let symbol = !refused.isEmpty || last?.succeeded == false ? "exclamationmark.triangle" : task.enabled ? "sparkles" : "pause.circle"
         return LauncherResult(id: QuillStorageKeys.taskRowPrefix + task.id, title: task.name, detail: parts.joined(separator: " · "), symbol: symbol,
                               action: .thing(Thing(verbs: verbs)), score: 3050)
+    }
+
+    /// Jevcast automations, and read-only Codex automations when Settings shows them. The runner owns
+    /// their schedules, so these rows never use launchctl.
+    private func automationRows(_ center: AutomationCenter, text: String, failingOnly: Bool) -> [LauncherResult] {
+        var rows: [LauncherResult] = []
+        for a in center.automations {
+            let last = center.lastRun(a.id)
+            if failingOnly, last?.state != .failed { continue }
+            if !text.isEmpty, SearchRanking.score(query: text, title: a.name, aliases: ["automation", "jevcast"]) == nil { continue }
+            var parts = [AutomationText.schedule(a)]
+            if !a.enabled { parts.append("paused") } else if let next = center.nextRun(a.id) {
+                parts.append("next " + next.formatted(.relative(presentation: .named)))
+            }
+            if let result = AutomationText.lastResult(last) { parts.append(result) }
+            parts.append("Jevcast automation")
+            let id = a.id, name = a.name, enabled = a.enabled
+            var verbs = [Verb(title: "Open") { center.openWindow?(id, nil); return nil },
+                         Verb(title: "Run Now", after: .stay) { center.runNow(id); return center.message ?? "Asked the runner to start \(name)." },
+                         Verb(title: enabled ? "Pause" : "Resume", after: .stay) {
+                             if let problem = center.setEnabled(id, !enabled) { throw LauncherError(problem) }
+                             return enabled ? "Paused \(name)." : "Resumed \(name)."
+                         }]
+            if let last { verbs.append(Verb(title: "Open Last Result") { center.openWindow?(id, last.id); return nil }) }
+            rows.append(LauncherResult(id: "automation:" + a.id, title: a.name, detail: parts.joined(separator: " · "),
+                                       symbol: AutomationText.symbol(a, last: last), action: .thing(Thing(verbs: verbs)), score: 3060))
+        }
+        guard showCodex(), !failingOnly else { return rows }
+        for item in center.codex {
+            let title = item.name.isEmpty ? item.id : item.name
+            if !text.isEmpty, SearchRanking.score(query: text, title: title, aliases: ["codex"]) == nil { continue }
+            var parts: [String] = []
+            if let error = item.error { parts.append("could not read: " + error) } else {
+                parts.append(item.status == .active ? "active" : item.status == .paused ? "paused" : "status unknown")
+                var rule = item.rrule
+                if rule.uppercased().hasPrefix("RRULE:") { rule = String(rule.dropFirst(6)) }
+                if let parsed = try? RRule(rule) { parts.append(parsed.summary()) }
+            }
+            if center.importedCopy(of: item) != nil { parts.append("imported") }
+            parts.append("Codex automation, read only")
+            let path = item.path
+            let verbs = [Verb(title: "Open in Automations") { center.openWindow?(center.importedCopy(of: item)?.id, nil); return nil },
+                         Verb(title: "Show in Finder") { Frontmost.reveal([URL(fileURLWithPath: path)]); return nil }]
+            rows.append(LauncherResult(id: "codex:" + item.id, title: title, detail: parts.joined(separator: " · "),
+                                       symbol: item.error != nil ? "exclamationmark.triangle" : "terminal", action: .thing(Thing(verbs: verbs)),
+                                       score: 2950))
+        }
+        return rows
     }
 
     private func cronRow(_ job: CronJob, index: Int, now: Date) -> LauncherResult {

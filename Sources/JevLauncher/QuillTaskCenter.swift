@@ -1,7 +1,6 @@
 import AppKit
 import EventKit
 import LauncherCore
-import UserNotifications
 
 /// One finished run of a scheduled task. The full text is in a Markdown file on this Mac.
 struct QuillTaskRun: Codable, Identifiable, Equatable {
@@ -16,8 +15,9 @@ struct QuillTaskRun: Codable, Identifiable, Equatable {
 }
 
 /// Runs scheduled Quill tasks while Jevcast is open: at the time, it reads the data the task may
-/// read, asks Quill, saves the result as Markdown, and posts a notification. A run missed while
-/// the Mac slept for hours is skipped, not run late.
+/// read, asks Quill, and saves the result as Markdown. Successes stay silent in the history; a failure
+/// calls `onFailure`, which the app shows in the notch panel. A run missed while the Mac slept for hours
+/// is skipped, not run late.
 @MainActor
 final class QuillTaskCenter: ObservableObject {
     @Published private(set) var tasks: [QuillTask]
@@ -33,6 +33,8 @@ final class QuillTaskCenter: ObservableObject {
     /// Where results go. Tests use a temporary folder.
     let resultsFolder: URL
     static let runLimit = 200
+    /// Called on the main actor when a run fails. The app shows a notch alert. No system notifications.
+    var onFailure: ((QuillTaskRun) -> Void)?
 
     init(defaults: UserDefaults = .standard, folder: URL = QuillTaskCenter.folder,
          send: @escaping (QuillRequest) async throws -> QuillReply, allowed: @escaping () -> Set<QuillContext>) {
@@ -129,11 +131,10 @@ final class QuillTaskCenter: ObservableObject {
                 let file = Self.write(task, text: reply.text, date: date, in: self.resultsFolder)
                 let run = QuillTaskRun(taskID: task.id, taskName: task.name, date: date, succeeded: true, preview: Self.preview(reply.text), file: file)
                 self.record(run)
-                await Self.notify(run, body: run.preview)
             } catch {
                 let run = QuillTaskRun(taskID: task.id, taskName: task.name, date: date, succeeded: false, preview: error.localizedDescription, file: nil)
                 self.record(run)
-                await Self.notify(run, body: "Did not run: " + error.localizedDescription)
+                self.onFailure?(run)
             }
         }
     }
@@ -170,18 +171,6 @@ final class QuillTaskCenter: ObservableObject {
             try Data(body.utf8).write(to: file, options: .atomic)
             return file.path
         } catch { return nil }
-    }
-
-    static func notify(_ run: QuillTaskRun, body: String) async {
-        guard await Notifier.authorize() else { return }
-        let content = UNMutableNotificationContent()
-        content.title = run.taskName
-        content.subtitle = run.succeeded ? "Quill · scheduled task" : "Scheduled task"
-        content.body = body
-        content.sound = .default
-        content.threadIdentifier = QuillStorageKeys.notificationThreadPrefix + run.taskID
-        content.userInfo = [QuillStorageKeys.notificationRunKey: run.id]
-        try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: QuillStorageKeys.notificationRunPrefix + run.id, content: content, trigger: nil))
     }
 
     // MARK: Data a task may read

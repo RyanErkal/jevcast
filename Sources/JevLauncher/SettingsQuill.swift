@@ -61,10 +61,12 @@ struct QuillSettings: View {
                     Toggle("Dictation transcripts, to fix punctuation and remove fillers", isOn: $preferences.quillSendsDictation)
                 }
                 InfoCaption("File paths, clipboard history, and audio are never sent.",
-                            detail: "Task results show in notifications, which can appear on the lock screen. Change that in System Settings › Notifications.")
+                            detail: "Task results stay in Quill Task Results. Only a failed task shows an alert below the notch.")
             }
             Section("Scheduled tasks") {
                 QuillTaskSettings(center: tasks)
+                Text("For background work that runs when Jevcast is closed, use Settings › Automations.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Activity") {
                 if log.entries.isEmpty {

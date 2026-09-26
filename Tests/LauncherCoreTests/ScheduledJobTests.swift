@@ -126,7 +126,13 @@ final class ScheduledJobTests: XCTestCase {
 
 final class DiscoveryQueryTests: XCTestCase {
     func testDiscoveryWords() {
-        XCTAssertEqual(SourceQuery.parse("show automations")?.kind, .scheduled)
+        XCTAssertEqual(SourceQuery.parse("show automations")?.kind, .automations)
+        XCTAssertEqual(SourceQuery.parse("background tasks")?.kind, .automations)
+        XCTAssertEqual(SourceQuery.parse("automation tidy")?.filter, "tidy")
+        XCTAssertEqual(SourceQuery.parse("scheduled")?.kind, .scheduled)
+        XCTAssertEqual(SourceQuery.parse("meta ads")?.kind, .clients)
+        XCTAssertEqual(SourceQuery.parse("clients stein")?.filter, "stein")
+        XCTAssertEqual(SourceQuery.parse("metrics")?.kind, .clients)
         XCTAssertEqual(SourceQuery.parse("schedule")?.kind, .scheduled)
         XCTAssertEqual(SourceQuery.parse("help")?.kind, .help)
         XCTAssertEqual(SourceQuery.parse("what can you do")?.kind, .help)

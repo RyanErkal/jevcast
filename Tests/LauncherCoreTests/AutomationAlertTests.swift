@@ -65,7 +65,8 @@ final class AutomationAlertTests: XCTestCase {
     func testToolCandidatesOrder() {
         let list = ToolLocator.candidates(name: "codex", saved: "/x/codex", home: "/Users/r", nvmVersions: ["v20.11.1", "v22.3.0", "v9.0.0"])
         XCTAssertEqual(list, ["/x/codex", "/Users/r/.local/bin/codex", "/opt/homebrew/bin/codex", "/usr/local/bin/codex",
-                              "/Users/r/.nvm/versions/node/v22.3.0/bin/codex", "/Users/r/.bun/bin/codex"])
+                              "/Users/r/.nvm/versions/node/v22.3.0/bin/codex", "/Users/r/.nvm/versions/node/v20.11.1/bin/codex",
+                              "/Users/r/.nvm/versions/node/v9.0.0/bin/codex", "/Users/r/.bun/bin/codex"])
         XCTAssertEqual(ToolLocator.versionLine("codex-cli 0.50.0\nmore"), "codex-cli 0.50.0")
         XCTAssertNil(ToolLocator.versionLine("  \n"))
     }

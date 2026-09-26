@@ -2,12 +2,13 @@ import Foundation
 
 /// Where to look for the `codex` and `claude` CLIs. Never asks a login shell: its startup files run code.
 public enum ToolLocator {
-    /// Candidate paths, in order: the saved path, then fixed folders, then the newest nvm Node, then Bun.
+    /// Candidate paths, in order: the saved path, then fixed folders, then each nvm Node from newest to oldest
+    /// (a CLI is often installed under an older Node than the newest one), then Bun.
     public static func candidates(name: String, saved: String, home: String, nvmVersions: [String]) -> [String] {
         var list: [String] = []
         if !saved.isEmpty { list.append(saved) }
         list += ["\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin"].map { $0 + "/" + name }
-        if let newest = nvmVersions.sorted(by: newerVersion).first { list.append("\(home)/.nvm/versions/node/\(newest)/bin/\(name)") }
+        list += nvmVersions.sorted(by: newerVersion).map { "\(home)/.nvm/versions/node/\($0)/bin/\(name)" }
         list.append("\(home)/.bun/bin/\(name)")
         var seen = Set<String>()
         return list.filter { seen.insert($0).inserted }

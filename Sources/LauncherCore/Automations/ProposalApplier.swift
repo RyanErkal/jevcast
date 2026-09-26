@@ -115,21 +115,32 @@ public struct ProposalApplier {
                 return .done
             }
         case .trash:
-            return withSource(c) { _, _ in
+            return withSourceFile(c) { parentFD, leaf, _, verified in
+                var result: NSURL?
                 do {
-                    var result: NSURL?
                     try FileManager.default.trashItem(at: URL(fileURLWithPath: c.source), resultingItemURL: &result)
-                    entry.trashURL = result?.path
-                    return .done
                 } catch {
                     return .failed("Could not move to Trash: \(error.localizedDescription)")
                 }
+                guard let trashed = result?.path else { return .failed("The Trash did not report where it put the item. Check the Trash.") }
+                entry.trashURL = trashed
+                // The path could have named another object between the check and the move. Confirm the Trash got the checked one.
+                if let st = SafeFS.lstatPath(trashed), UInt64(bitPattern: Int64(st.st_dev)) == verified.device, UInt64(st.st_ino) == verified.inode {
+                    return .done
+                }
+                return .failed("A different item than the approved one went to the Trash. " + putBackFromTrash(trashed, parentFD: parentFD, leaf: leaf))
             }
         case .tag:
-            return withSource(c) { _, _ in
-                let url = URL(fileURLWithPath: c.source)
-                entry.previousTags = (try? url.resourceValues(forKeys: [.tagNamesKey]).tagNames) ?? []
-                do { try setTags(c.item.tags ?? [], on: url); return .done } catch { return .failed("Could not set tags: \(error.localizedDescription)") }
+            return withSourceFile(c) { _, _, fd, _ in
+                // Read and write through the checked descriptor, so the change reaches the approved object.
+                let previous: [String]
+                switch UserTags.read(fd) {
+                case .success(let tags): previous = tags
+                case .failure(let why): return .failed("Could not read tags: \(why)")
+                }
+                entry.previousTags = previous
+                if let why = UserTags.write(c.item.tags ?? [], to: fd) { return .failed("Could not set tags: \(why)") }
+                return .done
             }
         }
     }
@@ -143,6 +154,30 @@ public struct ProposalApplier {
         guard (st.st_mode & S_IFMT == S_IFDIR || st.st_nlink == 1),
               SafeFS.sameObject(SafeFS.identity(st), c.identity) else { return .skipped("Source changed since approval") }
         return body(fd, leaf)
+    }
+
+    /// As `withSource`, and also opens the source itself without following links, relative to the checked
+    /// parent, and checks the open object's identity. `body` gets the parent, the leaf, the object, and its identity.
+    private func withSourceFile(_ c: CheckedItem, _ body: (Int32, String, Int32, FileIdentity) -> Outcome) -> Outcome {
+        withSource(c) { parentFD, leaf in
+            // O_NONBLOCK: a special file swapped in must not hang the open.
+            let fd = openat(parentFD, leaf, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+            guard fd >= 0 else { return .skipped(errno == ELOOP ? "Source is now a symbolic link" : "Source changed since approval") }
+            defer { close(fd) }
+            guard let st = SafeFS.fstatFD(fd), (st.st_mode & S_IFMT == S_IFDIR || st.st_mode & S_IFMT == S_IFREG),
+                  (st.st_mode & S_IFMT == S_IFDIR || st.st_nlink == 1),
+                  SafeFS.sameObject(SafeFS.identity(st), c.identity) else { return .skipped("Source changed since approval") }
+            return body(parentFD, leaf, fd, SafeFS.identity(st))
+        }
+    }
+
+    /// Moves an item the Trash took by mistake back to where it was. Never deletes and never overwrites.
+    private func putBackFromTrash(_ trashed: String, parentFD: Int32, leaf: String) -> String {
+        if SafeFS.statAt(parentFD, leaf) == nil,
+           renameatx_np(AT_FDCWD, trashed, parentFD, leaf, UInt32(RENAME_EXCL)) == 0 {
+            return "It was moved back. Nothing else changed."
+        }
+        return "It could not be moved back (\(errorText())). Restore \((trashed as NSString).lastPathComponent) from the Trash by hand."
     }
 
     private func withDir(_ path: String, expect: FileIdentity, _ body: (Int32) -> Outcome) -> Outcome {
@@ -181,13 +216,17 @@ public struct ProposalApplier {
             }
             return .done
         case .tag:
-            guard let fd = SafeFS.openDirectory(SafeFS.parent(e.source)) else { return .failed("Folder changed or is missing") }
+            guard let dirFD = SafeFS.openDirectory(SafeFS.parent(e.source)) else { return .failed("Folder changed or is missing") }
+            defer { close(dirFD) }
+            let fd = openat(dirFD, SafeFS.leaf(e.source), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+            guard fd >= 0 else { return .failed("Item or tags changed since apply") }
             defer { close(fd) }
-            guard let st = SafeFS.statAt(fd, SafeFS.leaf(e.source)), SafeFS.sameObject(SafeFS.identity(st), c.identity),
+            guard let st = SafeFS.fstatFD(fd), SafeFS.sameObject(SafeFS.identity(st), c.identity),
                   (st.st_mode & S_IFMT == S_IFDIR || st.st_nlink == 1),
-                  let tags = try? URL(fileURLWithPath: e.source).resourceValues(forKeys: [.tagNamesKey]).tagNames,
-                  Set(tags) == Set(c.item.tags ?? []) else { return .failed("Item or tags changed since apply") }
-            do { try setTags(e.previousTags ?? [], on: URL(fileURLWithPath: e.source)); return .done } catch { return .failed("Could not restore tags: \(error.localizedDescription)") }
+                  case .success(let tags) = UserTags.read(fd),
+                  Set(tags.map(UserTags.name)) == Set(c.item.tags ?? []) else { return .failed("Item or tags changed since apply") }
+            if let why = UserTags.write(e.previousTags ?? [], to: fd) { return .failed("Could not restore tags: \(why)") }
+            return .done
         }
     }
 
@@ -228,10 +267,6 @@ public struct ProposalApplier {
         guard let st = SafeFS.fstatFD(dirFD), UInt64(st.st_ino) == inode, let names = SafeFS.names(inDirectory: dirFD),
               names == [".DS_Store"], let file = SafeFS.statAt(dirFD, ".DS_Store"), file.st_mode & S_IFMT == S_IFREG else { return }
         unlinkat(dirFD, ".DS_Store", 0)
-    }
-
-    private func setTags(_ tags: [String], on url: URL) throws {
-        try (url as NSURL).setResourceValue(tags as NSArray, forKey: .tagNamesKey)
     }
 
     private func errorText() -> String { String(cString: strerror(errno)) }

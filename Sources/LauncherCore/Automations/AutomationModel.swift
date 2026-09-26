@@ -23,6 +23,11 @@ public struct Automation: Codable, Equatable, Identifiable, Sendable {
     /// Where this came from when imported, for example a Codex automation.
     public var source: ImportSource?
     public var notes: String
+    /// The script's program as the user approved it on the last save. The runner refuses a changed program.
+    /// Nil in files written before this field existed; such scripts run unchecked until saved again.
+    public var approvedProgram: ProgramIdentity?
+    /// The agent CLI as it was on the last save. A change only adds a note; CLIs update themselves.
+    public var approvedAgentCLI: ProgramIdentity?
 
     public init(id: String, name: String, symbol: String = "gearshape.2", kind: Kind, schedule: Schedule,
                 policy: Policy = Policy(), enabled: Bool = false, revision: Int = 1, created: Date = Date(),
@@ -288,6 +293,10 @@ public struct RunRecord: Codable, Equatable, Identifiable, Sendable {
     /// Runner process that owns an active run, with its start time, so a reused PID is not mistaken for it.
     public var ownerPID: Int32?
     public var ownerStart: Date?
+    /// Process group of the running child and its leader's kernel start time, so a runner that restarts
+    /// after a crash can stop only that group. Nil when no child runs, and in older files.
+    public var childPGID: Int32?
+    public var childStart: Date?
     /// Set once the notch panel showed this run, so a relaunch does not show it again.
     public var alerted: Bool
 
@@ -306,6 +315,15 @@ public enum RunID {
         let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "UTC")
         f.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
         return f.string(from: date) + "-" + String(UUID().uuidString.prefix(4)).lowercased()
+    }
+    /// The one run ID for a scheduled occurrence: "20260926T081500Z-occ-1a2b3c4d". The same automation and
+    /// occurrence always give the same ID, so a claimed occurrence is never queued twice. The time comes first
+    /// so run folders still sort by time.
+    public static func occurrence(automationID: String, date: Date) -> String {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
+        let key = automationID + "|" + String(date.timeIntervalSinceReferenceDate.bitPattern, radix: 16)
+        return f.string(from: date) + "-occ-" + String(Sha256.hex(Data(key.utf8)).prefix(8))
     }
     public static func isValid(_ id: String) -> Bool {
         (1...64).contains(id.count) && id.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }

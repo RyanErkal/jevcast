@@ -136,11 +136,15 @@ public final class RunEngine: @unchecked Sendable {
             guard let value = context.secret(name) else { return (.done(.failed, "The secret \(name) could not be read from the Keychain."), nil) }
             env[name] = value
         }
+        if let approved = automation.approvedProgram,
+           !approved.matches(ProgramIdentity.read(path: script.executable, hash: approved.sha256 != nil)) {
+            return (.done(.failed, Self.programChanged), nil)
+        }
         let launch = ProcessLaunch(executable: script.executable, arguments: script.arguments, environment: env,
                                    workingDirectory: script.workingDirectory, stdin: Data())
         let supervisor = control.supervisor(killGrace: context.killGrace)
         supervisor.stdoutTailBytes = Self.scriptOutputBytes
-        let outcome = supervisor.run(launch, timeout: TimeInterval(automation.policy.timeout))
+        let outcome = supervise(&run, supervisor, launch, timeout: TimeInterval(automation.policy.timeout))
         run.exitCode = outcome.exitCode
         let secrets = script.secretNames.compactMap { env[$0] } + Array(script.environment.values)
         let text = Redactor.redact(Redactor.tail(outcome.stdoutTail, maxBytes: Self.scriptOutputBytes), known: secrets)
@@ -178,7 +182,24 @@ public final class RunEngine: @unchecked Sendable {
         """
     }
 
+    public static let programChanged = "The program changed since you saved this automation. Open it and save again to approve the new version."
+
     // MARK: Shared
+
+    /// Runs one process and keeps its group ID and kernel start time in the run record while it runs,
+    /// so a runner restarted after a crash can find and stop exactly this group.
+    func supervise(_ run: inout RunRecord, _ supervisor: ProcessSupervisor, _ launch: ProcessLaunch, timeout: TimeInterval,
+                   onLine: @escaping (Data) -> Void = { _ in }) -> ProcessOutcome {
+        let outcome = supervisor.runRecording(launch, timeout: timeout, onStart: { pid in
+            run.childPGID = pid
+            run.childStart = ProcessInfoReader.startTime(pid)
+            // A failed save only loses crash cleanup for this child; the run itself goes on.
+            try? store.saveRun(run)
+        }, onLine: onLine)
+        run.childPGID = nil; run.childStart = nil
+        return outcome
+    }
+
 
     func writeOutput(_ run: inout RunRecord, _ text: String, name: String = "output.md") -> Bool {
         do {
@@ -206,6 +227,7 @@ public final class RunEngine: @unchecked Sendable {
         run.error = state == .succeeded || state.needsUser ? nil : error
         if state.isFinished { run.finished = Date() }
         if !state.isActive { run.ownerPID = nil; run.ownerStart = nil }
+        run.childPGID = nil; run.childStart = nil
         if run.summary.isEmpty, let error { run.summary = String(error.prefix(200)) }
         save(&run)
         return run

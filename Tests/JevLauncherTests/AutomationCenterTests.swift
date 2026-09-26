@@ -27,6 +27,28 @@ final class AutomationCenterTests: XCTestCase {
                    kind: .agent(AgentTask(prompt: "tidy", workingDirectory: work, output: output)), schedule: Schedule(rule: .manual))
     }
 
+    func testSaveRecordsApprovedProgramsEveryTime() throws {
+        let script = workURL.appendingPathComponent("job.sh")
+        try "#!/bin/sh\necho one\n".write(to: script, atomically: true, encoding: .utf8)
+        let cli = workURL.appendingPathComponent("codex")
+        try "#!/bin/sh\n".write(to: cli, atomically: true, encoding: .utf8)
+        center.settings.codexPath = cli.path
+        let a = Automation(id: AutomationID.make(from: "Job"), name: "Job",
+                           kind: .scriptWithDiagnosis(ScriptTask(executable: script.path, workingDirectory: work), AgentTask(prompt: "why", workingDirectory: work)),
+                           schedule: Schedule(rule: .manual))
+        XCTAssertNil(center.save(a))
+        let first = try XCTUnwrap(center.store.automation(id: a.id))
+        let hash = SHA256.hash(data: try Data(contentsOf: script)).map { String(format: "%02x", $0) }.joined()
+        XCTAssertEqual(first.approvedProgram?.sha256, hash)
+        XCTAssertEqual(first.approvedProgram?.path, script.path)
+        XCTAssertEqual(first.approvedAgentCLI?.path, cli.path)
+        XCTAssertNil(first.approvedAgentCLI?.sha256)
+
+        try "#!/bin/sh\necho two\n".write(to: script, atomically: true, encoding: .utf8)
+        XCTAssertNil(center.save(first))
+        XCTAssertNotEqual(center.store.automation(id: a.id)?.approvedProgram?.sha256, hash, "a new save approves the new bytes")
+    }
+
     func testSaveBumpsRevisionExceptNew() {
         let a = agent()
         XCTAssertNil(center.save(a))

@@ -106,6 +106,20 @@ public final class AutomationStore: @unchecked Sendable {
         }
     }
 
+    /// Writes a new run only when no run with this ID exists. Returns false, and writes nothing, when one does.
+    /// Only the runner (one process, under `runner.lock`) creates runs, so check and write do not race.
+    public func createRun(_ run: RunRecord) throws -> Bool {
+        try locked {
+            if loadRun(run.automationID, run.id) != nil { return false }
+            let dir = try runDir(run.automationID, run.id, create: true)
+            let file = dir.appendingPathComponent("run.json")
+            // A run.json that exists but cannot be read still claims the ID.
+            if SafeFS.lstatPath(file.path) != nil { return false }
+            try SecureFile.write(try AutomationJSON.encoder().encode(run), to: file)
+            return true
+        }
+    }
+
     /// The run's folder. Not created. Returns a path under a placeholder when the IDs are invalid, so callers cannot escape the root.
     public func runFolder(automationID: String, runID: String) -> URL {
         guard AutomationID.isValid(automationID), RunID.isValid(runID) else { return root.appendingPathComponent("invalid", isDirectory: true) }

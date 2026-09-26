@@ -6,8 +6,24 @@ extension RunEngine {
     public static let proposalRawFile = "proposal-raw.json"
 
     /// One agent turn: a fresh prompt, a resumed session with an answer or revision note, or a diagnosis report.
+    static let cliUpdatedNote = "CLI updated since last run"
+
     func runAgent(_ run: inout RunRecord, _ task: AgentTask, automation: Automation, control: RunControl,
                   followUp: RunFollowUp?, diagnosis: String?) -> Step {
+        let step = runAgentTurn(&run, task, automation: automation, control: control, followUp: followUp, diagnosis: diagnosis)
+        // A changed CLI never blocks (CLIs update themselves); the run only says so.
+        let cli = task.runner == .codex ? context.settings.codexPath : context.settings.claudePath
+        if let approved = automation.approvedAgentCLI, !approved.matches(ProgramIdentity.read(path: cli, hash: false)) {
+            if run.summary.isEmpty, case .done(_, let error?) = step { run.summary = String(error.prefix(200)) }
+            if !run.summary.contains(Self.cliUpdatedNote) {
+                run.summary = run.summary.isEmpty ? Self.cliUpdatedNote : run.summary + " (\(Self.cliUpdatedNote))"
+            }
+        }
+        return step
+    }
+
+    private func runAgentTurn(_ run: inout RunRecord, _ task: AgentTask, automation: Automation, control: RunControl,
+                              followUp: RunFollowUp?, diagnosis: String?) -> Step {
         if task.access.canWrite {
             let controlPath = store.root.resolvingSymlinksInPath().path
             let roots = [task.workingDirectory] + task.allowedRoots
@@ -71,7 +87,8 @@ extension RunEngine {
         } catch { return .done(.failed, "\(error)") }
 
         let events = EventBox(runner: task.runner)
-        let outcome = control.supervisor(killGrace: context.killGrace).run(launch, timeout: TimeInterval(automation.policy.timeout)) { events.consume($0) }
+        let outcome = supervise(&run, control.supervisor(killGrace: context.killGrace), launch,
+                                timeout: TimeInterval(automation.policy.timeout)) { events.consume($0) }
         let parsed = events.value
         if let u = parsed.usage { run.usage = (run.usage ?? TokenUsage()) + u }
         if let s = parsed.sessionID, UUID(uuidString: s) != nil { run.sessionID = s }

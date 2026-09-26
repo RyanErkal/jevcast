@@ -372,9 +372,14 @@ private struct ClipFileImage: View {
 private struct ClipFileRow: View {
     let file: ClipFile
     var large = false
+    @State private var icon: NSImage?
     var body: some View {
         HStack(spacing: 10) {
-            Image(nsImage: ClipFileIcons.icon(file)).resizable().frame(width: large ? 64 : 28, height: large ? 64 : 28)
+            Group {
+                if let icon { Image(nsImage: icon).resizable() }
+                else { Image(systemName: "doc").resizable() }
+            }
+            .frame(width: large ? 64 : 28, height: large ? 64 : 28)
             VStack(alignment: .leading, spacing: 2) {
                 Text(file.name).font(large ? .title3.weight(.semibold) : .system(size: 13)).lineLimit(1)
                 Text(file.size.map(ClipStyle.bytes) ?? file.category.rawValue.capitalized).font(.caption).foregroundStyle(.secondary)
@@ -382,24 +387,32 @@ private struct ClipFileRow: View {
             Spacer()
         }
         .padding(.vertical, 6)
+        .task(id: file.path) { icon = await ClipFileIcons.shared.icon(file) }
     }
 }
 
 /// File icons by path, looked up once. Missing files get their type's icon.
-@MainActor
-enum ClipFileIcons {
-    private static var cache: [String: NSImage] = [:]
-    static func icon(_ file: ClipFile) -> NSImage {
+actor ClipFileIcons {
+    static let shared = ClipFileIcons()
+    private var cache: [String: NSImage] = [:]
+    private let load: (ClipFile) -> NSImage
+
+    init(load: @escaping (ClipFile) -> NSImage = ClipFileIcons.loadIcon) { self.load = load }
+
+    func icon(_ file: ClipFile) -> NSImage {
         if let hit = cache[file.path] { return hit }
-        let icon: NSImage
-        if FileManager.default.fileExists(atPath: file.path) {
-            icon = NSWorkspace.shared.icon(forFile: file.path)
-        } else {
-            icon = NSWorkspace.shared.icon(for: file.uti.flatMap { UTType($0) } ?? .data)
-        }
+        let icon = load(file)
         if cache.count >= 300 { cache.removeAll() }
         cache[file.path] = icon
         return icon
+    }
+
+    private static func loadIcon(_ file: ClipFile) -> NSImage {
+        if FileManager.default.fileExists(atPath: file.path) {
+            return NSWorkspace.shared.icon(forFile: file.path)
+        } else {
+            return NSWorkspace.shared.icon(for: file.uti.flatMap { UTType($0) } ?? .data)
+        }
     }
 }
 

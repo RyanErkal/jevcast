@@ -190,13 +190,25 @@ final class ClipboardHistory: ObservableObject {
             // The types are checked again on what was read, in case the pasteboard changed.
             guard let raw = await pasteboard.read(limit: ClipboardSettings.maxImageBytes, expected: count),
                   !Self.shouldSkip(types: raw.types) else { return }
-            let result = await worker.ingest(raw, source: source, settings: settings, now: now)
+            let result = await self.ingest(raw, source: source, settings: settings, now: now)
             guard self.isEnabled, self.generation == generation, self.sameCapturePolicy(as: settings) else {
                 if case .added(let entry) = result { await worker.forget([entry.id]) }
                 return
             }
             self.record(result, now: now)
         }
+    }
+
+    private func ingest(_ raw: ClipRaw, source: ClipSource?, settings: ClipboardSettings, now: Date) async -> ClipboardWorker.Ingest {
+        let result = await worker.ingest(raw, source: source, settings: settings, now: now)
+        if case .duplicate(let id) = result,
+           !entries.contains(where: { $0.id == id }), !trash.contains(where: { $0.id == id }) {
+            // Retention or committed undo trash can remove a row during a capture. Its queued
+            // blob deletion is behind this capture, so discard the stale hash and store a new ID.
+            await worker.forget([id])
+            return await worker.ingest(raw, source: source, settings: settings, now: now)
+        }
+        return result
     }
 
     private func record(_ result: ClipboardWorker.Ingest, now: Date) {
@@ -230,7 +242,7 @@ final class ClipboardHistory: ObservableObject {
         var added: ClipEntry?
         enqueue { [weak self] in
             guard let self, self.isEnabled, self.generation == generation, self.sameCapturePolicy(as: settings) else { return }
-            let result = await worker.ingest(ClipRaw(types: ["public.utf8-plain-text"], string: text),
+            let result = await self.ingest(ClipRaw(types: ["public.utf8-plain-text"], string: text),
                                              source: ClipSource(bundleID: AppIdentity.bundleID, name: AppIdentity.name),
                                              settings: settings, now: now)
             guard self.isEnabled, self.generation == generation, self.sameCapturePolicy(as: settings) else {

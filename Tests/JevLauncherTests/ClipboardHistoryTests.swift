@@ -184,6 +184,26 @@ import XCTest
         XCTAssertTrue(history.entries[0].pinned)
     }
 
+    func testRecopyDuringRetentionRemovalKeepsNewCopy() async throws {
+        let board = FakePasteboard(), history = await make(board)
+        let text = String(repeating: "keep this copy", count: 400)
+        board.copy(text)
+        history.poll(now: Date().addingTimeInterval(-2 * 86_400))
+        await history.settle()
+        let oldID = try XCTUnwrap(history.entries.first).id
+        board.onRead = {
+            var settings = history.settings
+            settings.keepDays = 1
+            history.apply(settings)
+        }
+        await copy(text, board, history)
+        board.onRead = nil
+        let entry = try XCTUnwrap(history.entries.first)
+        XCTAssertNotEqual(entry.id, oldID)
+        let restored = await history.worker.fullText(entry)
+        XCTAssertEqual(restored, text)
+    }
+
     func testRestoreDoesNotAddNewEntry() async throws {
         let board = FakePasteboard(); let history = await make(board)
         await copy("a", board, history); await copy("b", board, history)
@@ -622,6 +642,20 @@ import XCTest
     }
 
     // MARK: Search and transforms
+
+    func testFileIconsLoadOffMainThreadAndCacheByPath() async {
+        var loads = 0
+        let icons = ClipFileIcons { _ in
+            XCTAssertFalse(Thread.isMainThread)
+            loads += 1
+            return NSImage(size: NSSize(width: 16, height: 16))
+        }
+        let file = ClipFile(path: "/Volumes/Example/file.txt", name: "file.txt", category: .document)
+        let first = await icons.icon(file)
+        let second = await icons.icon(file)
+        XCTAssertTrue(first === second)
+        XCTAssertEqual(loads, 1)
+    }
 
     func testSearchFindsTextInImages() async throws {
         let history = await make()

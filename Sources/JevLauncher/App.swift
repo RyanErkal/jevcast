@@ -175,6 +175,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             AutomationsWindowCapture.run(to: CommandLine.arguments[flag + 1]); return
         }
         automations.start()
+        if CommandLine.arguments.contains("--turn-on-runner") { automations.turnOnRunner() }
         updates.start()
         // The runner opened the app for an alert: AutomationCenter shows it; nothing else opens.
         if alertLaunch { return }

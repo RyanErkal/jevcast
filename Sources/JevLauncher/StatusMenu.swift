@@ -9,15 +9,18 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private let preferences: Preferences
     private let updates: UpdateChecker
     private let tasks: QuillTaskCenter
+    private let automations: AutomationCenter
     private weak var commands: AppCommands?
     private let isOpen: () -> Bool
     private let toggle: () -> Void
     private let openSettings: (SettingsWindow.Tab) -> Void
     private var subscription: AnyCancellable?
+    private var updateBadge = false
+    private var attention = 0
 
-    init(preferences: Preferences, updates: UpdateChecker, commands: AppCommands, tasks: QuillTaskCenter,
+    init(preferences: Preferences, updates: UpdateChecker, commands: AppCommands, tasks: QuillTaskCenter, automations: AutomationCenter,
          isOpen: @escaping () -> Bool, toggle: @escaping () -> Void, openSettings: @escaping (SettingsWindow.Tab) -> Void) {
-        self.preferences = preferences; self.updates = updates; self.commands = commands; self.tasks = tasks
+        self.preferences = preferences; self.updates = updates; self.commands = commands; self.tasks = tasks; self.automations = automations
         self.isOpen = isOpen; self.toggle = toggle; self.openSettings = openSettings
         super.init()
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -25,14 +28,19 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         let menu = NSMenu(); menu.delegate = self
         item.menu = menu
         self.item = item
-        subscription = updates.$state.sink { [weak self] state in
-            if case .available = state { self?.setIcon(badged: true) } else { self?.setIcon(badged: false) }
-        }
+        // A dot for an available update or for automations that need you.
+        subscription = updates.$state.map { state -> Bool in if case .available = state { return true } else { return false } }
+            .combineLatest(automations.$attentionCount)
+            .sink { [weak self] update, waiting in
+                guard let self else { return }
+                self.updateBadge = update; self.attention = waiting
+                self.setIcon(badged: update || waiting > 0)
+            }
     }
 
     /// Something a feature the user turned on needs, and the Settings tab that fixes it.
     private struct Attention { let title: String; let tab: SettingsWindow.Tab }
-    private var attention: [Attention] {
+    private var problems: [Attention] {
         var list: [Attention] = []
         if (preferences.windowShortcuts || preferences.edgeSnapping) && !Permission.accessibility.isGranted {
             list.append(Attention(title: "Allow Accessibility for Windows…", tab: .general))
@@ -60,6 +68,13 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
         menu.addItem(AppMenus.item("Mail", #selector(AppCommands.openMailWindow), commands))
         menu.addItem(AppMenus.item("Clean Up…", #selector(AppCommands.showCleanup), commands))
+        menu.addItem(AppMenus.item("Automations…", #selector(AppCommands.showAutomationsWindow), commands))
+        let waiting = automations.attentionCount
+        if waiting > 0 {
+            let row = menu.addItem(withTitle: waiting == 1 ? "1 needs you" : "\(waiting) need you", action: #selector(openNeedsYou), keyEquivalent: "")
+            row.image = NSImage(systemSymbolName: "exclamationmark.bubble.fill", accessibilityDescription: "Needs you")
+            row.target = self
+        }
         if !tasks.tasks.isEmpty || !tasks.runs.isEmpty {
             let running = tasks.running.count
             menu.addItem(AppMenus.item(running > 0 ? "Quill Tasks (\(running) running)" : "Quill Task Results",
@@ -67,7 +82,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         }
         menu.addItem(.separator())
 
-        for entry in attention {
+        for entry in problems {
             let row = menu.addItem(withTitle: entry.title, action: #selector(fix(_:)), keyEquivalent: "")
             row.image = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "Needs attention")
             row.representedObject = entry.tab.rawValue
@@ -97,11 +112,17 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             return true
         }
         image.isTemplate = true
-        image.accessibilityDescription = "\(AppIdentity.name), update available"
+        image.accessibilityDescription = attention > 0
+            ? "\(AppIdentity.name), \(attention) automation\(attention == 1 ? "" : "s") need you"
+            : "\(AppIdentity.name), update available"
         item?.button?.image = image
     }
 
     @objc private func toggleLauncher() { toggle() }
+    @objc private func openNeedsYou() {
+        let first = automations.needsYou.first
+        automations.openWindow?(first?.automationID, first?.id)
+    }
     @objc private func openUpdate() { if let release = updates.available { Frontmost.open(release.page) } }
     @objc private func fix(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let tab = SettingsWindow.Tab(rawValue: raw) else { return }

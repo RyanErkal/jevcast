@@ -254,6 +254,8 @@ final class LauncherModel: ObservableObject {
         guard let self else { throw CancellationError() }
         return try await self.sendQuill(request)
     }, allowed: { [weak self] in self?.allowedQuillContext ?? [] })
+    /// Background automations, set by the app. Nil in tests and before launch finishes.
+    var automationCenter: AutomationCenter?
     /// Opens a task result window, set by the app.
     var openTaskRun: ((QuillTaskRun) -> Void)?
     /// Opens Settings › AI › Quill, set by the app.

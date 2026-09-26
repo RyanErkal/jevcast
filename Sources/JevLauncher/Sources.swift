@@ -30,7 +30,10 @@ extension LauncherModel {
         if let existing = sources[kind] { return existing }
         let made: ThingSource?
         switch kind {
-        case .scheduled: made = ScheduledSource(timers: timers, catalogue: catalogue, tasks: quillTasks, openRun: { [weak self] in self?.openTaskRun?($0) })
+        case .scheduled: made = ScheduledSource(timers: timers, catalogue: catalogue, tasks: quillTasks, openRun: { [weak self] in self?.openTaskRun?($0) },
+                                                automations: automationCenter, showCodex: { [weak self] in self?.preferences.showCodexAutomations ?? false })
+        case .automations: made = automationCenter.map { AutomationsSource(center: $0) }
+        case .clients: made = automationCenter.map { ClientsSource(center: $0) }
         case .help: made = HelpSource()
         case .cleanup: made = CleanupSource(preferences: preferences)
         case .taskRuns: made = TaskRunsSource(tasks: quillTasks, openRun: { [weak self] in self?.openTaskRun?($0) })

@@ -5,7 +5,7 @@ import Foundation
 /// these rows to a normal search, so "calendar" still lists the Calendar app.
 public struct SourceQuery: Equatable, Sendable {
     public enum Kind: String, CaseIterable, Sendable {
-        case scheduled, calendar, reminders, contacts, tabs, history, mail, taskRuns, help, cleanup, dictation
+        case scheduled, automations, clients, calendar, reminders, contacts, tabs, history, mail, taskRuns, help, cleanup, dictation
     }
     public let kind: Kind
     /// Words after the keyword, such as "slack" in "tabs slack". Empty lists everything.
@@ -23,8 +23,11 @@ public struct SourceQuery: Equatable, Sendable {
         ("dictation history", .dictation, true), ("dictations", .dictation, true), ("dictation", .dictation, true), ("transcripts", .dictation, true),
         ("task results", .taskRuns, true), ("quill results", .taskRuns, true), ("task log", .taskRuns, true), ("task runs", .taskRuns, true),
         ("what can you do", .help, false), ("what can jevcast do", .help, false), ("help", .help, true), ("jevcast", .help, true),
-        ("my automations", .scheduled, true), ("automations", .scheduled, true), ("automation", .scheduled, true),
-        ("quill tasks", .scheduled, true), ("scheduled tasks", .scheduled, true), ("schedule", .scheduled, true), ("scheduled jobs", .scheduled, true), ("background tasks", .scheduled, true),
+        ("my automations", .automations, true), ("automations", .automations, true), ("automation", .automations, true),
+        ("background tasks", .automations, true), ("needs you", .automations, false),
+        ("client metrics", .clients, true), ("meta ads", .clients, true), ("ad metrics", .clients, true),
+        ("clients", .clients, true), ("metrics", .clients, true),
+        ("quill tasks", .scheduled, true), ("scheduled tasks", .scheduled, true), ("schedule", .scheduled, true), ("scheduled jobs", .scheduled, true),
         ("background items", .scheduled, true), ("launch agents", .scheduled, true), ("launch daemons", .scheduled, true),
         ("login items", .scheduled, true), ("cron jobs", .scheduled, true), ("what runs at login", .scheduled, false),
         ("what runs on my mac", .scheduled, false), ("scheduled", .scheduled, true), ("schedules", .scheduled, true),

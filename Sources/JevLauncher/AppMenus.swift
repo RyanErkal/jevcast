@@ -12,6 +12,7 @@ import AppKit
     func openMailWindow()
     func showCleanup()
     func showTaskResults()
+    func showAutomationsWindow()
 }
 
 /// Standard main menu so Command shortcuts (⌘, ⌘Q ⌘W and text editing) work

@@ -54,6 +54,26 @@ final class Preferences: ObservableObject {
         get { defaults.object(forKey: "lastUpdateCheck") as? Date }
         set { defaults.set(newValue, forKey: "lastUpdateCheck") }
     }
+    // Automations: app-side choices. Runner-shared values live in `AutomationSettings`.
+    /// Notch alerts for automations at all.
+    @Published var automationAlerts: Bool { didSet { defaults.set(automationAlerts, forKey: "automationAlerts") } }
+    @Published var automationAlertFailures: Bool { didSet { defaults.set(automationAlertFailures, forKey: "automationAlertFailures") } }
+    @Published var automationQuietHours: Bool { didSet { defaults.set(automationQuietHours, forKey: "automationQuietHours") } }
+    /// Minutes after local midnight.
+    @Published var automationQuietStart: Int { didSet { defaults.set(automationQuietStart, forKey: "automationQuietStart") } }
+    @Published var automationQuietEnd: Int { didSet { defaults.set(automationQuietEnd, forKey: "automationQuietEnd") } }
+    @Published var automationHideNames: Bool { didSet { defaults.set(automationHideNames, forKey: "automationHideNames") } }
+    @Published var automationAlertSeconds: Double { didSet { defaults.set(automationAlertSeconds, forKey: "automationAlertSeconds") } }
+    @Published var automationRunner: AgentRunner { didSet { defaults.set(automationRunner.rawValue, forKey: "automationRunner") } }
+    @Published var automationCodexModel: String { didSet { defaults.set(automationCodexModel, forKey: "automationCodexModel") } }
+    @Published var automationClaudeModel: String { didSet { defaults.set(automationClaudeModel, forKey: "automationClaudeModel") } }
+    @Published var automationEffort: ReasoningEffort { didSet { defaults.set(automationEffort.rawValue, forKey: "automationEffort") } }
+    @Published var automationFast: Bool { didSet { defaults.set(automationFast, forKey: "automationFast") } }
+    @Published var automationAccess: AgentAccess { didSet { defaults.set(automationAccess.rawValue, forKey: "automationAccess") } }
+    /// Minutes before a new automation's run is stopped.
+    @Published var automationTimeoutMinutes: Int { didSet { defaults.set(automationTimeoutMinutes, forKey: "automationTimeoutMinutes") } }
+    static let automationTimeoutChoices = [5, 10, 20, 30, 60]
+    @Published var showCodexAutomations: Bool { didSet { defaults.set(showCodexAutomations, forKey: "showCodexAutomations") } }
     @Published private(set) var recentIDs: [String]
     @Published private(set) var frecency: Frecency
     private let defaults: UserDefaults
@@ -103,6 +123,21 @@ final class Preferences: ObservableObject {
         snippets = Self.load(d, "snippets") ?? []
         learned = Self.load(d, "learnedIntents") ?? LearnedIntents()
         clipboardHistory = d.object(forKey: "clipboardHistory") as? Bool ?? true
+        automationAlerts = d.object(forKey: "automationAlerts") as? Bool ?? true
+        automationAlertFailures = d.object(forKey: "automationAlertFailures") as? Bool ?? true
+        automationQuietHours = d.bool(forKey: "automationQuietHours")
+        automationQuietStart = d.object(forKey: "automationQuietStart") as? Int ?? 22 * 60
+        automationQuietEnd = d.object(forKey: "automationQuietEnd") as? Int ?? 7 * 60
+        automationHideNames = d.bool(forKey: "automationHideNames")
+        automationAlertSeconds = min(max(d.object(forKey: "automationAlertSeconds") as? Double ?? 6, 4), 12)
+        automationRunner = d.string(forKey: "automationRunner").flatMap(AgentRunner.init(rawValue:)) ?? .codex
+        automationCodexModel = d.string(forKey: "automationCodexModel") ?? ""
+        automationClaudeModel = d.string(forKey: "automationClaudeModel") ?? ""
+        automationEffort = d.string(forKey: "automationEffort").flatMap(ReasoningEffort.init(rawValue:)) ?? .medium
+        automationFast = d.bool(forKey: "automationFast")
+        automationAccess = d.string(forKey: "automationAccess").flatMap(AgentAccess.init(rawValue:)) ?? .readOnly
+        showCodexAutomations = d.object(forKey: "showCodexAutomations") as? Bool ?? true
+        automationTimeoutMinutes = (d.object(forKey: "automationTimeoutMinutes") as? Int).flatMap { Self.automationTimeoutChoices.contains($0) ? $0 : nil } ?? 20
         recentIDs = d.stringArray(forKey: "recentIDs") ?? []
         if let data = d.data(forKey: "frecency"), let stored = try? JSONDecoder().decode(Frecency.self, from: data) {
             frecency = stored
@@ -143,6 +178,21 @@ final class Preferences: ObservableObject {
     func toggleFavourite(_ id: String) {
         if favourites.contains(id) { favourites.removeAll { $0 == id } } else { favourites.append(id) }
     }
+    /// The alert switches as the pure decision logic reads them.
+    var automationAlertSettings: AlertSettings {
+        AlertSettings(enabled: automationAlerts, failures: automationAlertFailures,
+                      quietHours: automationQuietHours ? QuietHours(start: automationQuietStart, end: automationQuietEnd) : nil,
+                      hideNames: automationHideNames)
+    }
+    /// A new agent task with the default runner, model, effort, and access. Fast applies to Codex only.
+    func defaultAgentTask(prompt: String = "", workingDirectory: String = "") -> AgentTask {
+        AgentTask(runner: automationRunner, prompt: prompt,
+                  model: automationRunner == .codex ? automationCodexModel : automationClaudeModel,
+                  effort: automationEffort, fast: automationRunner == .codex && automationFast,
+                  workingDirectory: workingDirectory, access: automationAccess)
+    }
+    /// The policy new automations start with.
+    var defaultAutomationPolicy: Policy { Policy(timeout: automationTimeoutMinutes * 60, alertOnFailure: automationAlertFailures) }
     var loginStatus: SMAppService.Status { SMAppService.mainApp.status }
     /// Registers or unregisters the login item and returns the resulting status.
     @discardableResult func setLogin(_ enabled: Bool) throws -> SMAppService.Status {

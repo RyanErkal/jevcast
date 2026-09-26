@@ -69,6 +69,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     private var previousApp: NSRunningApplication?
     private let preview = FilePreview()
     private let resultActions = ResultActions()
+    /// Background automations. Snapshot runs use a throwaway store and never touch the real folder.
+    private lazy var automations: AutomationCenter = {
+        guard UISnapshots.directory != nil else { return AutomationCenter() }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("jevcast-snapshot-automations-\(getpid())", isDirectory: true)
+        return AutomationCenter(isolatedStore: AutomationStore(root: root))
+    }()
+    private var automationsWindow: AutomationsWindow?
+    /// `--automation-alerts`: the runner opened the app to show alerts. No welcome, no launcher.
+    private let alertLaunch = CommandLine.arguments.contains("--automation-alerts")
+    private let notchDemo = CommandLine.arguments.contains("--notch-demo")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         panel = LauncherPanel()
@@ -92,6 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         }
         viewSizeWatch = model.$page.map { $0 != nil }.removeDuplicates().sink { [weak self] wide in self?.panel.setViewSize(wide) }
         UNUserNotificationCenter.current().delegate = self
+        configureAutomations()
         // Snapshot runs never run tasks.
         if UISnapshots.directory == nil { model.quillTasks.start() }
         model.composeMail = { [weak self] address in self?.showMail(compose: address) }
@@ -100,11 +111,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             self.show(); self.model.message = text
         }
         AppMenus.install(commands: self)
-        statusMenu = StatusMenu(preferences: preferences, updates: updates, commands: self, tasks: model.quillTasks,
+        statusMenu = StatusMenu(preferences: preferences, updates: updates, commands: self, tasks: model.quillTasks, automations: automations,
                                 isOpen: { [weak self] in self?.wasVisible ?? false }, toggle: { [weak self] in self?.toggle() },
                                 openSettings: { [weak self] tab in self?.showSettings(tab: tab) })
         // Snapshot runs leave global shortcuts to the running copy of the app.
-        if UISnapshots.directory == nil {
+        if UISnapshots.directory == nil, !notchDemo {
             configureHotkeys()
             dictation.canStart = { [weak self] in !(self?.wasVisible ?? false) }
             dictation.start()
@@ -157,7 +168,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         // A menu-bar app stays quiet at login; `--open` shows the panel for diagnostics.
         // A new install shows the welcome window once instead.
         if let directory = UISnapshots.directory { runSnapshots(to: directory); return }
+        if notchDemo { runNotchDemo(); return }
+        automations.start()
         updates.start()
+        // The runner opened the app for an alert: AutomationCenter shows it; nothing else opens.
+        if alertLaunch { return }
         if CommandLine.arguments.contains("--open") { show() }
         else if !preferences.welcomeShown || CommandLine.arguments.contains("--welcome") { showWelcome() }
     }
@@ -199,18 +214,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             guard let self else { return }
             rig.close()
             self.settings = SettingsWindow(preferences: shownPreferences, model: shownModel, catalogue: shownModel.catalogue, status: self.status, updates: self.updates,
-                                           dictation: DictationController(preferences: shownPreferences, model: shownModel), changed: {}, openMail: {})
+                                           dictation: DictationController(preferences: shownPreferences, model: shownModel),
+                                           automations: self.automations, changed: {}, openMail: {})
             self.settings?.window?.alphaValue = 0
             self.settings?.window?.ignoresMouseEvents = true
             self.settings?.window?.orderFrontRegardless()
         }))
         // Panes with parts render each part. The stored choice is put back after the last capture.
-        let partKeys = ["settingsAIPart", "settingsLibraryPart"]
+        let partKeys = ["settingsAIPart", "settingsLibraryPart", "settingsAutomationsPart"]
         let storedParts = partKeys.map { UserDefaults.standard.string(forKey: $0) }
         for tab in SettingsWindow.Tab.allCases {
             let parts: (key: String, values: [String])? = switch tab {
             case .ai: ("settingsAIPart", AISettings.Part.allCases.map(\.rawValue))
             case .library: ("settingsLibraryPart", CommandSettings.Part.allCases.map(\.rawValue))
+            case .automations: ("settingsAutomationsPart", AutomationSettingsPane.Part.allCases.map(\.rawValue))
             default: nil
             }
             guard let parts else {
@@ -218,7 +235,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
                 continue
             }
             for value in parts.values {
-                steps.append(("settings-\(tab.rawValue)-\(value.lowercased())", 0.9, settingsView, { [weak self] in
+                let slug = value.lowercased().replacingOccurrences(of: " & ", with: "-")
+                steps.append(("settings-\(tab.rawValue)-\(slug)", 0.9, settingsView, { [weak self] in
                     UserDefaults.standard.set(value, forKey: parts.key)
                     self?.settings?.select(tab)
                 }))
@@ -387,6 +405,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         // Never leave a stale click catcher after a display is disconnected.
         hide()
     }
+    // MARK: Automations
+
+    /// Connects the automation center to preferences, windows, and the notch panel. Snapshot runs leave it isolated.
+    private func configureAutomations() {
+        model.automationCenter = automations
+        automations.alertSettings = { [weak self] in self?.preferences.automationAlertSettings ?? AlertSettings() }
+        automations.alertSeconds = { [weak self] in self?.preferences.automationAlertSeconds ?? 6 }
+        automations.openWindow = { [weak self] automationID, runID in self?.showAutomations(automationID: automationID, runID: runID) }
+        automations.openSettings = { [weak self] in self?.showSettings(tab: .automations) }
+        NotchAlertController.shared.onAction = { [weak self] id, action in
+            guard let self, !self.automations.handleAlertAction(id, action) else { return }
+            guard id.hasPrefix("quill:"), action == "open" else { return }
+            let runID = String(id.dropFirst("quill:".count))
+            if let run = self.model.quillTasks.runs.first(where: { $0.id == runID }) { self.showRun(run) }
+        }
+        // Quill task failures use the notch panel; successes stay silent in the history.
+        model.quillTasks.onFailure = { [weak self] run in
+            guard let self, self.preferences.automationAlerts, UISnapshots.directory == nil else { return }
+            let hide = self.preferences.automationHideNames
+            NotchAlertController.shared.visibleSeconds = self.preferences.automationAlertSeconds
+            NotchAlertController.shared.show(NotchAlert(id: "quill:" + run.id, symbol: "sparkles",
+                                                        title: hide ? "A Quill task" : run.taskName,
+                                                        message: hide ? "It did not finish." : run.preview, tone: .failure,
+                                                        actions: [.init("Open", id: "open", primary: true), .init("Later", id: "later")]))
+        }
+    }
+
+    /// The Automations window, made on first use.
+    func showAutomations(automationID: String? = nil, runID: String? = nil) {
+        hide(restoreFocus: false)
+        if automationsWindow == nil { automationsWindow = AutomationsWindow(center: automations, quill: model.quillTasks) }
+        automationsWindow?.show(automationID: automationID, runID: runID)
+    }
+
+    @objc func showAutomationsWindow() { showAutomations() }
+
+    /// `--notch-demo`: two invented alerts, then quit after 20 seconds.
+    private func runNotchDemo() {
+        NotchAlertController.shared.onAction = { id, action in print("[Jev notch] \(id) \(action)"); fflush(stdout) }
+        NotchAlertController.shared.show(NotchAlert(id: "demo-approval", symbol: "folder.badge.gearshape", title: "Desktop tidy",
+                                                    message: "12 files to move. Review before anything changes.", tone: .attention,
+                                                    actions: [.init("Review", id: "review", primary: true), .init("Later", id: "later")]))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+            NotchAlertController.shared.show(NotchAlert(id: "demo-failure", symbol: "chart.bar.xaxis", title: "Sample metrics refresh",
+                                                        message: "Failed: the sample source did not answer.", tone: .failure,
+                                                        actions: [.init("Retry", id: "retry", primary: true), .init("Open", id: "open")]))
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20) { NSApp.terminate(nil) }
+    }
+
     /// A scheduled task's result.
     func showRun(_ run: QuillTaskRun) {
         hide(restoreFocus: false)
@@ -439,7 +507,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         hide(restoreFocus: false)
         if settings == nil {
             settings = SettingsWindow(preferences: preferences, model: model, catalogue: catalogue, status: status, updates: updates,
-                                      dictation: dictation,
+                                      dictation: dictation, automations: automations,
                                       changed: { [weak self] in self?.configureHotkeys() },
                                       openMail: { [weak self] in self?.showMail() })
         }

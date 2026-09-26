@@ -12,6 +12,11 @@ enum SafeFS {
         return parts
     }
 
+    /// A comparison key for a path on a case- and normalization-insensitive volume.
+    static func folded(_ path: String) -> String {
+        path.precomposedStringWithCanonicalMapping.folding(options: [.caseInsensitive], locale: nil)
+    }
+
     static func join(_ parts: [String]) -> String { "/" + parts.joined(separator: "/") }
 
     /// Component-wise: "/a/b" is inside "/a", "/a2" is not. A path is inside itself.
@@ -60,6 +65,22 @@ enum SafeFS {
     static func statAt(_ dirFD: Int32, _ name: String) -> stat? {
         var st = stat()
         return fstatat(dirFD, name, &st, AT_SYMLINK_NOFOLLOW) == 0 ? st : nil
+    }
+
+    /// Entry names in an open directory, without "." and "..". Reads a duplicate descriptor, so `fd` stays open.
+    static func names(inDirectory fd: Int32) -> [String]? {
+        let copy = dup(fd)
+        guard copy >= 0, let dir = fdopendir(copy) else { return nil }
+        defer { closedir(dir) }
+        var names: [String] = []
+        while let entry = readdir(dir) {
+            let name = withUnsafePointer(to: entry.pointee.d_name) { ptr in
+                ptr.withMemoryRebound(to: CChar.self, capacity: Int(entry.pointee.d_namlen) + 1) { String(cString: $0) }
+            }
+            if name != ".", name != ".." { names.append(name) }
+            if names.count > 64 { break }
+        }
+        return names
     }
 
     static func parent(_ path: String) -> String { (path as NSString).deletingLastPathComponent }

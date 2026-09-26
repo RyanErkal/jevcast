@@ -93,6 +93,7 @@ public struct ProposalApplier {
                 guard mkdirat(fd, SafeFS.leaf(c.source), 0o755) == 0 else {
                     return errno == EEXIST ? .skipped("Folder now exists") : .failed(errorText())
                 }
+                entry.createdInode = SafeFS.statAt(fd, SafeFS.leaf(c.source)).map { UInt64($0.st_ino) }
                 return .done
             }
         case .trash:
@@ -147,9 +148,12 @@ public struct ProposalApplier {
         case .mkdir:
             guard let fd = SafeFS.openDirectory(SafeFS.parent(e.source)) else { return .failed("Parent folder changed or is missing") }
             defer { close(fd) }
-            guard let st = SafeFS.statAt(fd, SafeFS.leaf(e.source)), st.st_mode & S_IFMT == S_IFDIR else { return .failed("Folder is gone or replaced") }
+            let leaf = SafeFS.leaf(e.source)
+            guard let st = SafeFS.statAt(fd, leaf), st.st_mode & S_IFMT == S_IFDIR else { return .failed("Folder is gone or replaced") }
+            if let inode = e.createdInode, UInt64(st.st_ino) != inode { return .failed("Folder was replaced") }
+            removeFinderMetadata(in: fd, leaf, inode: UInt64(st.st_ino))
             // rmdir only removes an empty folder.
-            guard unlinkat(fd, SafeFS.leaf(e.source), AT_REMOVEDIR) == 0 else {
+            guard unlinkat(fd, leaf, AT_REMOVEDIR) == 0 else {
                 return .failed(errno == ENOTEMPTY ? "Folder is not empty" : errorText())
             }
             return .done
@@ -173,6 +177,16 @@ public struct ProposalApplier {
             return .failed(errno == EXDEV ? "Item is on another volume. Move it back by hand." : errorText())
         }
         return .done
+    }
+
+    /// Finder may write `.DS_Store` into a folder it showed. When that is the only thing inside, remove it so the folder can go.
+    private func removeFinderMetadata(in parentFD: Int32, _ leaf: String, inode: UInt64) {
+        let dirFD = openat(parentFD, leaf, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard dirFD >= 0 else { return }
+        defer { close(dirFD) }
+        guard let st = SafeFS.fstatFD(dirFD), UInt64(st.st_ino) == inode, let names = SafeFS.names(inDirectory: dirFD),
+              names == [".DS_Store"], let file = SafeFS.statAt(dirFD, ".DS_Store"), file.st_mode & S_IFMT == S_IFREG else { return }
+        unlinkat(dirFD, ".DS_Store", 0)
     }
 
     private func setTags(_ tags: [String], on url: URL) throws {

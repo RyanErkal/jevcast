@@ -20,15 +20,16 @@ struct ItemChecker {
         case .move:
             try only(item, ["from", "to"])
             let src = try existing(try required(item.from, "from"))
+            try notFolder(src.identity)
             let (dstParent, dstParentID, leaf) = try newPath(try required(item.to, "to"))
             let dst = dstParent + [leaf]
             guard src.identity.device == dstParentID.device else { throw Refusal("Moves between volumes are not supported") }
-            if src.identity.isDirectory, SafeFS.isInside(dst, src.parts) { throw Refusal("Cannot move a folder inside itself") }
             return CheckedItem(item: item, source: SafeFS.join(src.parts), destination: SafeFS.join(dst),
                                identity: src.identity, parentIdentity: dstParentID)
         case .rename:
             try only(item, ["path", "name"])
             let src = try existing(try required(item.path, "path"))
+            try notFolder(src.identity)
             let name = try required(item.name, "name")
             try validName(name)
             let parentParts = Array(src.parts.dropLast())
@@ -45,6 +46,7 @@ struct ItemChecker {
         case .trash:
             try only(item, ["path"])
             let src = try existing(try required(item.path, "path"))
+            try notFolder(src.identity)
             return CheckedItem(item: item, source: SafeFS.join(src.parts), destination: nil, identity: src.identity, parentIdentity: nil)
         case .tag:
             try only(item, ["path", "tags"])
@@ -57,6 +59,11 @@ struct ItemChecker {
             }
             return CheckedItem(item: item, source: SafeFS.join(src.parts), destination: nil, identity: src.identity, parentIdentity: nil)
         }
+    }
+
+    /// v1 moves, renames, and trashes files only. A folder's contents are not in the manifest, so its effect cannot be shown.
+    private func notFolder(_ identity: FileIdentity) throws {
+        if identity.isDirectory { throw Refusal("Folders cannot be moved or trashed yet") }
     }
 
     // MARK: Arguments
@@ -91,7 +98,9 @@ struct ItemChecker {
         let base = SafeFS.isInside(parts, root.real) ? root.real : root.given
         let real = root.real + parts.dropFirst(base.count)
         guard real.count > root.real.count else { throw Refusal("Cannot change an allowed folder itself") }
-        for p in [parts, real] where protected.contains(where: { SafeFS.isInside(p, $0) }) {
+        // "library" reaches ~/Library on a case-insensitive volume, so protected paths compare folded.
+        let foldedProtected = protected.map { $0.map(SafeFS.folded) }
+        for p in [parts, real] where foldedProtected.contains(where: { SafeFS.isInside(p.map(SafeFS.folded), $0) }) {
             throw Refusal("Path is in a protected folder")
         }
         // No symlink anywhere below the root, including the leaf.

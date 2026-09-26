@@ -45,6 +45,13 @@ public final class ProcessSupervisor: @unchecked Sendable {
     private var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
 
     public func run(_ launch: ProcessLaunch, timeout: TimeInterval, onLine: @escaping (Data) -> Void = { _ in }) -> ProcessOutcome {
+        runRecording(launch, timeout: timeout, onStart: { _ in }, onLine: onLine)
+    }
+
+    /// As `run`, and calls `onStart` on the caller's thread with the child's PID (also its process group ID)
+    /// right after it starts, before any wait, so the caller can record it.
+    public func runRecording(_ launch: ProcessLaunch, timeout: TimeInterval, onStart: (pid_t) -> Void,
+                             onLine: @escaping (Data) -> Void) -> ProcessOutcome {
         if isCancelled {
             return ProcessOutcome(reason: .cancelled, exitCode: nil, signal: nil,
                                   stdoutTail: Data(), stderrTail: Data(), stdoutBytes: 0)
@@ -83,6 +90,7 @@ public final class ProcessSupervisor: @unchecked Sendable {
             return failed("Cannot start \(URL(fileURLWithPath: launch.executable).lastPathComponent): \(String(cString: strerror(spawnError)))")
         }
 
+        onStart(pid)
         let group = DispatchGroup()
         let io = PipeControl()
         for fd in [inPipe[1], outPipe[0], errPipe[0]] {

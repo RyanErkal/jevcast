@@ -266,4 +266,73 @@ final class ProposalTests: XCTestCase {
         XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
     }
 
+
+    // MARK: Descriptor-based tag and trash
+
+    private func rawTags(_ path: String) -> [String] {
+        let fd = open(path, O_RDONLY | O_NOFOLLOW)
+        defer { close(fd) }
+        guard case .success(let tags) = UserTags.read(fd) else { return ["<unreadable>"] }
+        return tags
+    }
+
+    func testTagWritesXattrOnCheckedFileAndUndoRestoresExactEntries() throws {
+        let path = root + "/b.txt"
+        let fd = open(path, O_RDONLY)
+        XCTAssertNil(UserTags.write(["Work\n4"], to: fd))
+        close(fd)
+        let m = check([["id": "t", "op": "tag", "path": path, "tags": ["Blue", "Home"], "reason": ""]])
+        let applier = ProposalApplier(manifest: m, approved: ["t"], journalURL: base.appendingPathComponent("j.json"))
+        let j = applier.apply()
+        XCTAssertEqual(j.entries.first?.status, .done, j.entries.first?.message ?? "")
+        XCTAssertEqual(j.entries.first?.previousTags, ["Work\n4"])
+        XCTAssertEqual(rawTags(path), ["Blue", "Home"])
+        XCTAssertEqual(Set(try URL(fileURLWithPath: path).resourceValues(forKeys: [.tagNamesKey]).tagNames ?? []), ["Blue", "Home"])
+        XCTAssertEqual(applier.undo(journal: j).entries.first?.status, .undone)
+        XCTAssertEqual(rawTags(path), ["Work\n4"], "undo writes back the entries as they were, color included")
+    }
+
+    func testTagRefusesASymlinkSwappedInAfterApproval() throws {
+        let m = check([["id": "t", "op": "tag", "path": root + "/b.txt", "tags": ["Red"], "reason": ""]])
+        try fm.removeItem(atPath: root + "/b.txt")
+        try fm.createSymbolicLink(atPath: root + "/b.txt", withDestinationPath: root + "/a.txt")
+        let j = ProposalApplier(manifest: m, approved: ["t"], journalURL: base.appendingPathComponent("j.json")).apply()
+        XCTAssertEqual(j.entries.first?.status, .skipped)
+        XCTAssertEqual(rawTags(root + "/a.txt"), [], "the link target was not tagged")
+    }
+
+    func testTagRefusesAReplacedFile() throws {
+        let m = check([["id": "t", "op": "tag", "path": root + "/b.txt", "tags": ["Red"], "reason": ""]])
+        try fm.removeItem(atPath: root + "/b.txt")
+        try Data("b".utf8).write(to: URL(fileURLWithPath: root + "/b.txt"))
+        let j = ProposalApplier(manifest: m, approved: ["t"], journalURL: base.appendingPathComponent("j.json")).apply()
+        XCTAssertEqual(j.entries.first?.status, .skipped)
+        XCTAssertEqual(rawTags(root + "/b.txt"), [])
+    }
+
+    /// Touches the real Trash, so it runs only with JV_ALLOW_TRASH_TESTS=1.
+    func testTrashMovesTheCheckedFileAndUndoPutsItBack() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["JV_ALLOW_TRASH_TESTS"] == "1", "Set JV_ALLOW_TRASH_TESTS=1 to use the real Trash")
+        let path = root + "/b.txt"
+        let inode = try XCTUnwrap(SafeFS.lstatPath(path)).st_ino
+        let m = check([["id": "t", "op": "trash", "path": path, "reason": ""]])
+        let applier = ProposalApplier(manifest: m, approved: ["t"], journalURL: base.appendingPathComponent("j.json"))
+        let j = applier.apply()
+        XCTAssertEqual(j.entries.first?.status, .done, j.entries.first?.message ?? "")
+        let trashed = try XCTUnwrap(j.entries.first?.trashURL)
+        XCTAssertEqual(SafeFS.lstatPath(trashed)?.st_ino, inode)
+        XCTAssertFalse(fm.fileExists(atPath: path))
+        XCTAssertEqual(applier.undo(journal: j).entries.first?.status, .undone)
+        XCTAssertEqual(SafeFS.lstatPath(path)?.st_ino, inode)
+    }
+
+    func testTrashRefusesAReplacedFileWithoutTouchingTrash() throws {
+        let m = check([["id": "t", "op": "trash", "path": root + "/b.txt", "reason": ""]])
+        try fm.removeItem(atPath: root + "/b.txt")
+        try fm.createSymbolicLink(atPath: root + "/b.txt", withDestinationPath: root + "/a.txt")
+        let j = ProposalApplier(manifest: m, approved: ["t"], journalURL: base.appendingPathComponent("j.json")).apply()
+        XCTAssertEqual(j.entries.first?.status, .skipped)
+        XCTAssertNil(j.entries.first?.trashURL)
+        XCTAssertTrue(fm.fileExists(atPath: root + "/a.txt"))
+    }
 }

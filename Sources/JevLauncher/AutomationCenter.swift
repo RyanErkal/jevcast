@@ -207,6 +207,8 @@ final class AutomationCenter: ObservableObject {
         a.updated = Date()
         var blocked: String?
         if a.enabled, let reason = enableProblem(a) { a.enabled = false; blocked = reason }
+        // Saving approves the program as it is now; the runner refuses a script that changes after this.
+        a.recordApprovedPrograms(settings: settings)
         do { try store.save(a) } catch { return "Could not save: \(error)" }
         if let index = automations.firstIndex(where: { $0.id == a.id }) { automations[index] = a } else {
             automations.append(a)

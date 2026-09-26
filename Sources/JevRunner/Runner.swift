@@ -99,33 +99,34 @@ final class Runner: @unchecked Sendable {
 
     private func scheduleDue(_ settings: AutomationSettings) {
         let now = Date()
+        let claim = OccurrenceClaim(store: store)
         for automation in store.loadAutomations().automations where automation.enabled {
-            var state = store.state(for: automation.id)
-            let due = Scheduler.due(automation, lastCovered: state.lastCovered, now: now)
-            guard let covered = due.coveredThrough else { continue }
-            state.lastCovered = covered
-            if let occurrence = due.runs.first, !isBusy(automation.id) {
-                state.lastRunID = enqueue(automation, trigger: .schedule, occurrence: occurrence)
+            let result = claim.claimDue(automation, now: now, busy: isBusy(automation.id)) { self.prepare(&$0, automation) }
+            switch result {
+            case .queued(let run):
+                if run.state == .queued { pending.append((automation.id, run.id)) } else { alertIfNeeded(run, automation) }
+                AutomationSignal.post()
+            case .failed(let why): log("Could not queue a scheduled run of \(automation.id): \(why)")
+            case .nothing, .skipped, .alreadyClaimed: break
             }
-            try? store.saveState(state, for: automation.id)
         }
     }
 
     /// Writes a queued run owned by this runner. The Codex guard is checked here and again at start.
-    @discardableResult
-    private func enqueue(_ automation: Automation, trigger: RunTrigger, occurrence: Date?, runID: String = RunID.make()) -> String {
+    private func enqueue(_ automation: Automation, trigger: RunTrigger, occurrence: Date?, runID: String) {
         var run = RunRecord(id: runID, automation: automation, trigger: trigger, occurrence: occurrence)
+        prepare(&run, automation)
+        saveRun(run)
+        if run.state == .queued { pending.append((automation.id, run.id)) } else { alertIfNeeded(run, automation) }
+    }
+
+    /// Sets this runner as owner, or fails the run at once when its Codex original still runs.
+    private func prepare(_ run: inout RunRecord, _ automation: Automation) {
         run.ownerPID = pid; run.ownerStart = started
         if case .blocked(let why) = CodexSourceGuard.check(automation) {
             run.state = .failed; run.error = why; run.summary = "Blocked: Codex original is not paused"; run.finished = Date()
             run.ownerPID = nil; run.ownerStart = nil
-            saveRun(run)
-            alertIfNeeded(run, automation)
-            return run.id
         }
-        saveRun(run)
-        pending.append((automation.id, run.id))
-        return run.id
     }
 
     private func startQueued(_ settings: AutomationSettings) {
@@ -215,11 +216,10 @@ final class Runner: @unchecked Sendable {
                 let copy = store.runFolder(automationID: automation.id, runID: run.id).appendingPathComponent(ClaudeSignIn.fileName)
                 try? FileManager.default.removeItem(at: copy)
             }
-            for var run in store.runs(for: automation.id, limit: 200) where [.queued, .running, .retryWaiting].contains(run.state) {
-                run.state = .interrupted
-                run.error = "The runner stopped during this run. It was not repeated."
-                run.finished = Date(); run.ownerPID = nil; run.ownerStart = nil
-                saveRun(run)
+            for run in store.runs(for: automation.id, limit: 200) where [.queued, .running, .retryWaiting].contains(run.state) {
+                guard !OrphanRecovery.ownerIsAlive(run, currentPID: pid) else { continue }
+                // Stops the run's child group only when its leader's start time proves it is the same process.
+                saveRun(OrphanRecovery.interrupt(run))
             }
         }
     }

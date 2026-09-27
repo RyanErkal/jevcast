@@ -102,6 +102,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         model.onClose = { [weak self] restore in self?.hide(restoreFocus: restore) }
         model.openQuillSettings = { [weak self] in self?.showSettings(tab: .ai, aiPart: .quill) }
         model.openSettingsTab = { [weak self] name in
+            if name == "keys" {
+                UserDefaults.standard.set(WindowSettings.Part.keys.rawValue, forKey: "settingsWindowsPart")
+                self?.showSettings(tab: .windows); return
+            }
             if let tab = SettingsWindow.Tab(rawValue: name) { self?.showSettings(tab: tab) }
         }
         model.openMail = { [weak self] rowID in self?.showMailView(select: rowID) }

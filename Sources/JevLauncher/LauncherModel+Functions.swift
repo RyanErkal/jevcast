@@ -79,6 +79,16 @@ extension LauncherModel {
             + preferences.snippets.map { item(snippetRow($0, score: 0), "Snippet") }
     }
 
+    /// "Keyboard Shortcuts" in a normal search, for words such as "keys" or "shortcuts".
+    func keyboardShortcutsRow(_ q: String) -> LauncherResult? {
+        guard let entry = FunctionCatalog.settings.first(where: { $0.id == "settings:keys" }),
+              let score = SearchRanking.score(query: q, title: entry.title, aliases: entry.keywords),
+              var row = functionRow(entry) else { return nil }
+        row.detail = entry.summary
+        row.score = score * 100
+        return row
+    }
+
     /// A runnable row for a catalogue entry. Every action is fixed code; nothing becomes shell text.
     private func functionRow(_ entry: FunctionEntry) -> LauncherResult? {
         let (kind, value) = entry.id.split(separator: ":", maxSplits: 1).map(String.init).splitPair

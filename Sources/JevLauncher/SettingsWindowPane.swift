@@ -1,20 +1,20 @@
 import SwiftUI
 
-/// Settings › Windows: window moves, and the Hyper key.
+/// Settings › Windows: every keyboard shortcut in Keys, and window moves in Windows.
 struct WindowSettings: View {
-    enum Part: String, CaseIterable { case windows = "Windows", hyper = "Hyper key" }
+    enum Part: String, CaseIterable { case keys = "Keys", windows = "Windows" }
     @ObservedObject var preferences: Preferences
     @ObservedObject var model: LauncherModel
     let hyper: HyperKeyController
     let changed: () -> Void
     let resized: () -> Void
-    @AppStorage("settingsWindowsPart") private var part: Part = .windows
+    @AppStorage("settingsWindowsPart") private var part: Part = .keys
     var body: some View {
         Form {
             Section { PaneSections(selection: $part) }
             switch part {
+            case .keys: KeysSettings(preferences: preferences, controller: hyper, resized: resized)
             case .windows: windowSections
-            case .hyper: HyperKeySettings(preferences: preferences, controller: hyper, resized: resized)
             }
         }
         .formStyle(.grouped)

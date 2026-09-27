@@ -65,6 +65,7 @@ extension LauncherModel {
         if let create = CreateQuery.parse(q) { rows.append(createRow(create)) }
         rows += contextRows(q) + askRows(q) + taskRows(q)
         if let custom = customSelectionRow(q) { rows.append(custom) }
+        if let keys = keyboardShortcutsRow(q) { rows.append(keys) }
         return rows
     }
 

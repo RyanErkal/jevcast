@@ -7,6 +7,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 ### Changed
 
 - Notch alerts have a quieter design: a plain black island, grey text, colour only on the icon and main button, at most two buttons with a More menu, and a calmer open motion.
+- Settings › Windows › Keys shows every keyboard shortcut in one place, with the Hyper key layer first; type "keys" in the launcher to open it.
 
 ## [1.11.0] - 2026-09-27
 

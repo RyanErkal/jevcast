@@ -63,10 +63,18 @@ import LauncherCore
         let ids = Set(model.results.map(\.id))
         for entry in FunctionCatalog.builtIn {
             XCTAssertTrue(ids.contains(entry.id), entry.id + " has no row")
-            if entry.id.hasPrefix("settings:") { XCTAssertNotNil(SettingsWindow.Tab(rawValue: String(entry.id.dropFirst(9))), entry.id) }
+            if entry.id.hasPrefix("settings:"), entry.id != "settings:keys" { XCTAssertNotNil(SettingsWindow.Tab(rawValue: String(entry.id.dropFirst(9))), entry.id) }
             if entry.id.hasPrefix("view:") { XCTAssertNotNil(ViewID(rawValue: String(entry.id.dropFirst(5))), entry.id) }
         }
         XCTAssertEqual(Set(FunctionCatalog.views.map(\.id)), Set(ViewID.allCases.map { "view:" + $0.rawValue }))
+    }
+
+    func testKeysOpensKeyboardShortcuts() {
+        let model = makeModel(); defer { model.end() }
+        for query in ["keys", "shortcuts"] {
+            model.updateQuery(query, typed: true)
+            XCTAssertTrue(model.results.contains { $0.id == "settings:keys" }, query)
+        }
     }
 
     func testTabCompletesAndKeepsSelection() {

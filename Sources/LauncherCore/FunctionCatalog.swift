@@ -73,7 +73,8 @@ public enum FunctionCatalog {
         ("mail", "Mail", "Mail window options", "envelope", ["inbox"])
     ].map { id, title, summary, symbol, keywords in
         FunctionEntry(id: "settings:" + id, title: title + " Settings", keywords: keywords, summary: summary, symbol: symbol, group: .settings)
-    }
+    } + [FunctionEntry(id: "settings:keys", title: "Keyboard Shortcuts", keywords: ["keys", "shortcuts", "keybinds", "hotkeys", "hyper"],
+                       summary: "Hyper key and every shortcut", symbol: "keyboard", group: .settings)]
 
     public static var commands: [FunctionEntry] {
         SystemCommands.all.map {

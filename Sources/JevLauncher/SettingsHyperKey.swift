@@ -3,69 +3,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 import LauncherCore
 
-/// Settings › Windows › Hyper key: the switch, its status, and the key layer.
-struct HyperKeySettings: View {
-    @ObservedObject var preferences: Preferences
-    @ObservedObject var controller: HyperKeyController
-    let resized: () -> Void
-
-    var body: some View {
-        Section {
-            Toggle("Use Caps Lock as a Hyper key", isOn: $preferences.hyperKeyEnabled)
-            Text("Hold Caps Lock and press a key below. While this is on, Caps Lock does not type capitals. When you quit \(AppIdentity.name), Caps Lock works as before.")
-                .font(.caption).foregroundStyle(.secondary)
-            if preferences.hyperKeyEnabled { status }
-        } header: { Text("Hyper key") }
-        Section {
-            ForEach($preferences.hyperBindings) { $binding in
-                HyperBindingRow(binding: $binding, duplicate: duplicates.contains(binding.keyCode)) {
-                    preferences.hyperBindings.removeAll { $0.id == binding.id }
-                }
-            }
-            if !duplicates.isEmpty {
-                Label("A key is used twice. Only the first row runs.", systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption).foregroundStyle(.orange)
-            }
-            HStack {
-                Button("Add Key") { addBinding() }.controlSize(.small)
-                Spacer()
-                Button("Restore Defaults") { preferences.hyperBindings = HyperLayer.defaults }.controlSize(.small)
-                    .disabled(preferences.hyperBindings == HyperLayer.defaults)
-            }
-        } header: { Text("Keys") }
-        .onChange(of: preferences.hyperBindings.count) { _, _ in resized() }
-        .onChange(of: preferences.hyperKeyEnabled) { _, _ in resized() }
-    }
-
-    private var duplicates: Set<UInt16> { HyperLayer.duplicateKeys(preferences.hyperBindings) }
-
-    @ViewBuilder private var status: some View {
-        if !controller.tapRunning {
-            Label("\(AppIdentity.name) cannot read the keyboard yet. Allow both permissions below.", systemImage: "exclamationmark.triangle.fill")
-                .font(.caption).foregroundStyle(.orange)
-            PermissionRow(permission: .accessibility)
-            PermissionRow(permission: .inputMonitoring, request: Permission.requestInputMonitoring)
-        }
-        if let error = controller.remapError {
-            Label(error, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
-        }
-        if !controller.lightAvailable {
-            Text("The Caps Lock light needs Input Monitoring. The Hyper key works without it.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-    }
-
-    /// A new row on the first free letter, opening the launcher until the user changes it.
-    private func addBinding() {
-        let used = Set(preferences.hyperBindings.map(\.keyCode))
-        let letters: [UInt16] = [0, 11, 8, 2, 14, 3, 5, 4, 34, 38, 40, 37, 46, 45, 31, 35, 12, 15, 1, 17, 32, 9, 13, 7, 16, 6]
-        let key = letters.first { !used.contains($0) } ?? 0
-        preferences.hyperBindings.append(HyperBinding(keyCode: key, action: .builtIn(HyperBuiltIn.launcher.rawValue)))
-    }
-}
-
 /// One key: the recorder, what it does, and a clear button.
-private struct HyperBindingRow: View {
+struct HyperBindingRow: View {
     @Binding var binding: HyperBinding
     let duplicate: Bool
     let remove: () -> Void
@@ -73,7 +12,8 @@ private struct HyperBindingRow: View {
     var body: some View {
         HStack(spacing: 10) {
             KeyRecorder(keyCode: $binding.keyCode)
-                .frame(width: 110, alignment: .leading)
+                .frame(width: 104, alignment: .leading)
+            Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.tertiary).accessibilityHidden(true)
             if duplicate {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                     .help("This key is used by another row.")
@@ -133,9 +73,10 @@ struct KeyRecorder: View {
         Button {
             monitor == nil ? start() : stop()
         } label: {
-            HStack(spacing: 3) {
-                KeyChip("Hyper")
-                if monitor == nil { KeyChip(HyperLayer.keyName(keyCode)) }
+            HStack(spacing: 4) {
+                Keycap("⇪")
+                Text("+").font(.caption).foregroundStyle(.tertiary)
+                if monitor == nil { Keycap(HyperLayer.keyName(keyCode)) }
                 else { Text("Press a key…").font(.caption).foregroundStyle(.secondary) }
             }
         }

@@ -44,36 +44,44 @@ extension AutomationCenter {
     }
 
     /// Applies the chosen items, records the journal, and marks the run succeeded.
-    func approve(_ run: RunRecord, items: Set<String>) async -> ApplyJournal? {
+    func approve(_ run: RunRecord, items: Set<String>, shown: ProposalManifest? = nil) async -> ApplyJournal? {
         guard !applyingProposal else { message = "Wait for the current file changes to finish."; return nil }
         applyingProposal = true
         defer { applyingProposal = false }
-        guard var current = store.run(automationID: run.automationID, runID: run.id), current.state == .needsApproval else {
+        guard var current = await currentRun(run.automationID, run.id), current.state == .needsApproval else {
             message = "This run no longer waits for approval."; return nil
         }
-        guard case .success(let manifest)? = await proposal(for: current) else { message = "The proposal could not be checked."; return nil }
+        let manifest: ProposalManifest
+        if let shown { manifest = shown } else {
+            guard case .success(let checked)? = await proposal(for: current) else { message = "The proposal could not be checked."; return nil }
+            manifest = checked
+        }
         let now = Date()
         if ProposalValidator.isExpired(manifest, now: now) {
             current.state = .expired; current.finished = now; current.summary = "Proposal expired after 7 days"
-            saveApproval(current)
+            await saveApprovalAsync(current)
             message = "This proposal is older than 7 days. Run the automation again for a fresh one."
             return nil
         }
-        guard let a = store.automation(id: current.automationID), a == automation(current.automationID), a.revision == current.revision else {
+        let store = self.store
+        let automationID = current.automationID
+        let storedAutomation = await Task.detached(priority: .userInitiated) { store.automation(id: automationID) }.value
+        guard let a = storedAutomation, a == automation(current.automationID), a.revision == current.revision else {
             message = "The automation changed after this proposal. Run it again for a fresh one."; return nil
         }
         // Check again now: files may have moved since the proposal was shown. Apply only items that still pass,
         // bound to the identities the user saw.
-        let store = self.store
         let roots = roots(for: current.automationID)
         let approvalRun = current
         let checked = await Task.detached(priority: .userInitiated) { () -> Result<ProposalManifest, ProposalError>? in
             guard let raw = try? store.readRunFile(automationID: approvalRun.automationID, runID: approvalRun.id, name: RunEngine.proposalRawFile) else { return nil }
             return ProposalValidator.check(rawJSON: raw, roots: roots, now: now)
         }.value
+        let latest = await Task.detached(priority: .userInitiated) {
+            (store.run(automationID: approvalRun.automationID, runID: approvalRun.id), store.automation(id: approvalRun.automationID))
+        }.value
         guard case .success(let fresh)? = checked, fresh.digest == manifest.digest,
-              store.run(automationID: current.automationID, runID: current.id) == current,
-              store.automation(id: current.automationID) == a else {
+              latest.0 == current, latest.1 == a, automation(current.automationID) == a else {
             message = "The proposal or run changed while it was checked. Review it again."; return nil
         }
         let stillValid = Set(fresh.checked.map(\.id))
@@ -82,7 +90,7 @@ extension AutomationCenter {
         guard !approved.isEmpty else { message = "None of the chosen items can be applied now."; return nil }
 
         current.state = .applying
-        guard saveApproval(current) else { return nil }
+        guard await saveApprovalAsync(current) else { return nil }
         let journalURL = store.runFolder(automationID: current.automationID, runID: current.id).appendingPathComponent(ApplyJournal.fileName)
         var journal = await Task.detached(priority: .userInitiated) {
             ProposalApplier(manifest: manifest, approved: approved, journalURL: journalURL).apply()
@@ -93,7 +101,7 @@ extension AutomationCenter {
             current.summary = "File changes need review"
             current.journalFile = ApplyJournal.fileName
             current.finished = Date()
-            saveApproval(current)
+            await saveApprovalAsync(current)
             message = current.error
             return journal
         }
@@ -105,9 +113,11 @@ extension AutomationCenter {
             journal.entries.append(entry)
         }
         do {
-            let encoder = AutomationJSON.encoder()
-            try store.writeRunFile(automationID: current.automationID, runID: current.id, name: ApplyJournal.fileName,
-                                   data: encoder.encode(journal))
+            let completedJournal = journal
+            try await Task.detached(priority: .userInitiated) {
+                try store.writeRunFile(automationID: approvalRun.automationID, runID: approvalRun.id, name: ApplyJournal.fileName,
+                                       data: AutomationJSON.encoder().encode(completedJournal))
+            }.value
         } catch {
             message = "File changes may have finished, but the journal could not be saved. Check the run folder before you try again."
             return journal
@@ -119,7 +129,7 @@ extension AutomationCenter {
         current.finished = Date()
         // The user saw it; no alert for this outcome.
         current.alerted = true
-        saveApproval(current)
+        await saveApprovalAsync(current)
         proposals[current.id] = nil
         NotchAlertController.shared.withdraw(id: Self.alertID(current))
         return journal
@@ -142,21 +152,36 @@ extension AutomationCenter {
         guard !applyingProposal else { message = "Wait for the current file changes to finish."; return nil }
         applyingProposal = true
         defer { applyingProposal = false }
-        guard let journal = journal(for: run),
-              let data = try? store.readRunFile(automationID: run.automationID, runID: run.id, name: Self.proposalFile),
-              let manifest = try? AutomationJSON.decoder().decode(ProposalManifest.self, from: data),
-              manifest.digest == journal.digest else { message = "There is nothing to undo."; return nil }
+        let store = self.store
+        let saved = await Task.detached(priority: .userInitiated) { () -> (ApplyJournal, ProposalManifest)? in
+            guard let journalData = try? store.readRunFile(automationID: run.automationID, runID: run.id, name: ApplyJournal.fileName),
+                  let journal = ApplyJournal.decode(journalData),
+                  let data = try? store.readRunFile(automationID: run.automationID, runID: run.id, name: Self.proposalFile),
+                  let manifest = try? AutomationJSON.decoder().decode(ProposalManifest.self, from: data),
+                  manifest.digest == journal.digest else { return nil }
+            return (journal, manifest)
+        }.value
+        guard let (journal, manifest) = saved else { message = "There is nothing to undo."; return nil }
         let journalURL = store.runFolder(automationID: run.automationID, runID: run.id).appendingPathComponent(ApplyJournal.fileName)
         let result = await Task.detached(priority: .userInitiated) {
             ProposalApplier(manifest: manifest, approved: Set(journal.approvedItems), journalURL: journalURL).undo(journal: journal)
         }.value
-        if var current = store.run(automationID: run.automationID, runID: run.id) {
+        if var current = await currentRun(run.automationID, run.id) {
             let undone = result.entries.filter { $0.status == .undone }.count
             let blocked = result.entries.filter { $0.status == .undoBlocked }.count
             current.summary = "Undid \(undone)" + (blocked > 0 ? ", \(blocked) could not be undone" : "")
-            saveApproval(current)
+            await saveApprovalAsync(current)
         }
         return result
+    }
+
+    @discardableResult private func saveApprovalAsync(_ run: RunRecord) async -> Bool {
+        let store = self.store
+        do { try await Task.detached(priority: .userInitiated) { try store.saveRun(run) }.value }
+        catch { message = "Could not save the run: \(error)"; return false }
+        if !isolated { AutomationSignal.post() }
+        scheduleReload()
+        return true
     }
 
     /// Saves the approval record and refreshes. Cross-process state transitions still need a shared transaction.

@@ -58,12 +58,19 @@ extension AutomationCenter {
 
     /// Reads the checked proposal and adds its counts and Approve all to the approval alert.
     private func loadCounts(_ run: RunRecord, automation a: Automation?, hideNames: Bool) {
+        let expected = Self.makeAlert(run, automation: a, hideNames: hideNames)
         Task { @MainActor [weak self] in
-            guard let self, case .success(let manifest)? = await self.proposal(for: run) else { return }
-            var alert = Self.makeAlert(run, automation: a, hideNames: hideNames)
+            guard let self, case .success(let manifest)? = await self.proposal(for: run),
+                  Self.canAddCounts(expected: expected, current: NotchAlertController.shared.alert(expected.id)) else { return }
+            var alert = expected
             Self.addCounts(Self.counts(manifest), to: &alert)
+            alert.approvalManifest = manifest
             NotchAlertController.shared.update(alert)
         }
+    }
+
+    nonisolated static func canAddCounts(expected: NotchAlert, current: NotchAlert?) -> Bool {
+        expected.kind == .approval && current == expected
     }
 
     /// Save delivery without a read-modify-write of run.json.

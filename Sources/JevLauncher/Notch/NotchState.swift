@@ -24,6 +24,17 @@ final class NotchState: ObservableObject {
     /// The alert the reply field answers. Nil unless `mode == .reply`.
     @Published var replyTarget: String?
 
+    func present(_ alert: NotchAlert, mode: Mode) {
+        self.alert = alert
+        self.mode = mode
+        expanded = true
+    }
+
+    func endReply() {
+        replyTarget = nil
+        if mode == .reply { mode = alert.map(NotchAlertController.restingMode) ?? .card }
+    }
+
     var bodyHeight: CGFloat { geometry.bodyHeight(mode, alert: alert) }
     var width: CGFloat { geometry.width(mode) }
 
@@ -35,7 +46,7 @@ final class NotchState: ObservableObject {
     /// Sends typed text as the answer, for the reply target.
     func submitReply(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard mode == .reply, let replyTarget, !trimmed.isEmpty else { return }
         performHandler?(replyTarget, NotchAlert.replyText(trimmed))
     }
     func cancelReply() { performHandler?(replyTarget, NotchAlert.collapseAction) }

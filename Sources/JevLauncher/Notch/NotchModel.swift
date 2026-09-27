@@ -1,4 +1,5 @@
 import Foundation
+import LauncherCore
 
 /// One alert for the notch panel. Automations use it only when they need the user, or for the opt-in live indicator.
 /// Views read these fields; they never decide what an action does.
@@ -52,6 +53,7 @@ struct NotchAlert: Identifiable, Equatable {
     var choices: [String]
     /// True when the view may offer "Reply…" (`NotchAlert.replyAction`), which opens a text field.
     var allowsReply: Bool
+    var approvalManifest: ProposalManifest?
     var counts: ApprovalCounts?
     var automationID: String?
     var runID: String?

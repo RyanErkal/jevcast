@@ -53,7 +53,7 @@ struct NotchPresentation: Equatable {
             NotchAlert.Action(text, id: NotchAlert.choiceAction(index), role: .normal)
         }
         self.init(phase: phase, symbol: alert.symbol, title: alert.title, message: message, detail: detail,
-                  progress: alert.progress.map { min(1, max(0, $0)) }, startedAt: alert.started,
+                  progress: alert.progress.flatMap { $0.isFinite ? min(1, max(0, $0)) : nil }, startedAt: alert.started,
                   stackCount: max(1, alert.stackCount), choices: Array(choices), actions: actions)
     }
 

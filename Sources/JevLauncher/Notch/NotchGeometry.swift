@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 
 /// Where the notch is, and how big the panel must be for each mode. Width 0 means the screen has none.
 struct NotchGeometry: Equatable {
@@ -78,6 +79,18 @@ struct NotchGeometry: Equatable {
         let width = width(mode) + Self.margin
         let height = notchHeight + bodyHeight(mode, alert: alert) + (hasNotch ? 0 : Self.topGap) + Self.margin
         return CGRect(x: screenFrame.midX - width / 2, y: screenFrame.maxY - height, width: width, height: height)
+    }
+
+    /// Screen coordinates. Transparent margins, the top gap, and rounded corners pass through.
+    func contains(_ point: CGPoint, mode: NotchState.Mode, alert: NotchAlert) -> Bool {
+        let size = shapeSize(mode, alert: alert)
+        let rect = CGRect(x: screenFrame.midX - size.width / 2,
+                          y: hasNotch ? 0 : Self.topGap, width: size.width, height: size.height)
+        let style = NotchMode(mode)
+        let radius = NotchStyle.bottomRadius(style, hasNotch: hasNotch)
+        let shape = NotchShape(bottomRadius: radius, topRadius: hasNotch ? 0 : radius,
+                               topFlare: hasNotch ? (style.isOpen ? 10 : 7) : 0)
+        return shape.path(in: rect).contains(CGPoint(x: point.x, y: screenFrame.maxY - point.y))
     }
 
     /// The card frame, as before modes existed.

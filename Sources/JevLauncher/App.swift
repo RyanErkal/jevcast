@@ -492,8 +492,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         automations.openWindow = { [weak self] automationID, runID in self?.showAutomations(automationID: automationID, runID: runID) }
         automations.openSettings = { [weak self] in self?.showSettings(tab: .automations) }
         NotchAlertController.shared.stillApplies = { [weak self] alert in self?.automations.alertStillApplies(alert) ?? false }
-        NotchAlertController.shared.onAction = { [weak self] id, action in
-            guard let self, !self.automations.handleAlertAction(id, action) else { return }
+        NotchAlertController.shared.onAction = { [weak self] alert, action in
+            let id = alert.id
+            guard let self, !self.automations.handleAlertAction(id, action, approval: alert.approvalManifest) else { return }
             guard id.hasPrefix("quill:"), action == "open" else { return }
             let runID = String(id.dropFirst("quill:".count))
             if let run = self.model.quillTasks.runs.first(where: { $0.id == runID }) { self.showRun(run) }
@@ -535,7 +536,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     /// A running pill, then a question and an approval that stack, then a failure.
     private func runNotchDemo() {
         let notch = NotchAlertController.shared
-        notch.onAction = { id, action in print("[Jev notch] \(id) \(action)"); fflush(stdout) }
+        notch.onAction = { alert, action in print("[Jev notch] \(alert.id) \(action)"); fflush(stdout) }
         notch.show(NotchAlert(id: "demo-running", kind: .running, symbol: "gearshape.2", title: "Sample metrics refresh",
                               message: "Running", detail: "Reading the sample source", started: Date().addingTimeInterval(-42),
                               actions: [.init("Cancel", id: "cancel", role: .destructive), .init("Open", id: "open")]))

@@ -9,9 +9,9 @@ import SwiftUI
 final class NotchAlertController {
     static let shared = NotchAlertController()
 
-    /// Called with the alert ID and the action ID. "dismiss" is sent when an alert closes on its own.
+    /// Called with the displayed alert and the action ID. "dismiss" is sent when an alert closes on its own.
     /// Stack buttons arrive with `NotchQueue.stackID`.
-    var onAction: ((String, String) -> Void)?
+    var onAction: ((NotchAlert, String) -> Void)?
     /// Whether a remembered alert still applies, for "Show notifications". Nil keeps every one.
     var stillApplies: ((NotchAlert) -> Bool)?
     /// Seconds a failure stays up when the pointer is not over it.
@@ -32,12 +32,16 @@ final class NotchAlertController {
     private var panel: NotchPanel?
     private var session: NotchSession?
     private var sessionAvailable = NotchSession.isAvailable
-    private var menuOpen = false
+    private var menus = NotchMenuObservation()
     private var hovering = false
     private var timerTask: Task<Void, Never>?
     private var menuTask: Task<Void, Never>?
     private var closeTask: Task<Void, Never>?
+    private var pointerTimer: Timer?
+    private var inputReadyAt = Date.distantFuture
     private var announced: Set<String> = []
+
+    deinit { pointerTimer?.invalidate() }
 
     init() {
         session = NotchSession { [weak self] available in
@@ -82,7 +86,7 @@ final class NotchAlertController {
     @discardableResult func showLast() -> Bool {
         recent = recent.map { $0.filter { stillApplies?($0) ?? true } }.filter { !$0.isEmpty }
         guard let batch = recent.popLast() else { return false }
-        for alert in batch { queue.add(alert) }
+        for alert in batch where !queue.containsRunOrID(alert) { queue.add(alert) }
         refresh()
         return true
     }
@@ -94,6 +98,7 @@ final class NotchAlertController {
         let target = alertID ?? shown.id
         switch action {
         case NotchAlert.expandAction:
+            endReply()
             setMode(state.mode == .detail ? Self.restingMode(for: shown) : .detail)
             return
         case NotchAlert.collapseAction:
@@ -110,20 +115,22 @@ final class NotchAlertController {
             _ = queue.removeAll { alert in members.contains { $0.id == alert.id } }
             remember(members)
             if action == "later" || action == NotchAlert.dismissAction {
-                for member in members { onAction?(member.id, action) }
+                for member in members { onAction?(member, action) }
             } else {
-                onAction?(NotchQueue.stackID, action)
+                onAction?(shown, action)
             }
         } else {
             if action.hasPrefix("reply:") { endReply() }
-            if let alert = queue.remove(target) { remember([alert]) }
-            onAction?(target, action)
+            if let alert = queue.remove(target) {
+                remember([alert])
+                onAction?(alert, action)
+            }
         }
         refresh()
     }
 
     private func beginReply(_ target: String) {
-        guard let panel else { return }
+        guard let panel, Self.replyAlert(in: state.alert, target: target) != nil else { return }
         state.replyTarget = target
         setMode(.reply)
         panel.allowsKey = true
@@ -131,7 +138,12 @@ final class NotchAlertController {
     }
 
     private func endReply() {
-        state.replyTarget = nil
+        let wasReply = state.mode == .reply
+        state.endReply()
+        if wasReply {
+            deferPointerInput()
+            resize(to: state.geometry.panelFrame(state.mode, alert: state.alert))
+        }
         guard let panel else { return }
         panel.allowsKey = false
         if panel.isKeyWindow { panel.resignKey() }
@@ -165,14 +177,22 @@ final class NotchAlertController {
         switch previousMode {
         case .reply:
             guard let replyTarget else { return resting }
-            let stillThere = next.id == replyTarget || next.stack.contains { $0.id == replyTarget }
-            return stillThere ? .reply : resting
+            let old = replyAlert(in: previous, target: replyTarget)
+            let new = replyAlert(in: next, target: replyTarget)
+            return old != nil && old == new ? .reply : resting
         case .detail: return resting == .pill && next.kind != .running ? .card : .detail
         case .pill, .card: return resting
         }
     }
 
-    private var available: Bool { sessionAvailable && !menuOpen }
+    static func replyAlert(in alert: NotchAlert?, target: String) -> NotchAlert? {
+        guard let alert else { return nil }
+        let targetAlert = alert.id == target ? alert : alert.stack.first { $0.id == target }
+        guard let targetAlert, targetAlert.kind == .question, targetAlert.allowsReply else { return nil }
+        return targetAlert
+    }
+
+    private var available: Bool { sessionAvailable && !menus.isOpen }
 
     /// Brings the screen in line with the queue.
     private func refresh() {
@@ -194,6 +214,8 @@ final class NotchAlertController {
         guard let screen = NSScreen.screens.first else { return }
         let geometry = NotchGeometry(screen: screen)
         let previous = state.alert
+        let wasExpanded = state.expanded
+        let previousMode = state.mode
         let mode = Self.nextMode(previous: previous, previousMode: state.mode, next: alert, replyTarget: state.replyTarget)
         if mode != .reply { endReply() }
         let panel = self.panel ?? makePanel()
@@ -205,13 +227,19 @@ final class NotchAlertController {
             state.expanded = false
             panel.setFrame(geometry.panelFrame(mode, alert: alert), display: true)
             panel.orderFrontRegardless()
-            panel.ignoresMouseEvents = false
+            panel.ignoresMouseEvents = true
             // Let the collapsed shape draw once at notch size, then grow.
-            DispatchQueue.main.async { [weak self] in self?.withMotion { self?.state.expanded = true } }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.queue.presentation != nil, self.available else { return }
+                self.withMotion { self.state.expanded = true }
+            }
         } else {
             resize(to: geometry.panelFrame(mode, alert: alert))
-            withMotion { state.alert = alert; state.mode = mode }
+            withMotion { state.present(alert, mode: mode) }
         }
+        if opening || !wasExpanded || previous != alert || previousMode != mode { deferPointerInput() }
+        watchPointer()
+        updatePointerInput()
         announce(alert)
     }
 
@@ -226,10 +254,38 @@ final class NotchAlertController {
         return panel
     }
 
+    private func watchPointer() {
+        guard pointerTimer == nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updatePointerInput() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        pointerTimer = timer
+    }
+
     private func setMode(_ mode: NotchState.Mode) {
         guard panel != nil, state.mode != mode else { return }
+        deferPointerInput()
         resize(to: state.geometry.panelFrame(mode, alert: state.alert))
         withMotion { state.mode = mode }
+    }
+
+    // Ignore input while the shape morphs. Its final outline is not its visible outline yet.
+    private func deferPointerInput() {
+        inputReadyAt = Date().addingTimeInterval(0.8)
+        panel?.ignoresMouseEvents = true
+    }
+
+    static func acceptsPointer(expanded: Bool, visible: Bool, ready: Bool, inside: Bool) -> Bool {
+        expanded && visible && ready && inside
+    }
+
+    private func updatePointerInput() {
+        guard let panel else { return }
+        let inside = state.alert.map { state.geometry.contains(NSEvent.mouseLocation, mode: state.mode, alert: $0) } ?? false
+        panel.ignoresMouseEvents = !Self.acceptsPointer(expanded: state.expanded, visible: panel.isVisible,
+                                                       ready: Date() >= inputReadyAt, inside: inside)
+        if hovering != inside && state.expanded && panel.isVisible { hover(inside) }
     }
 
     /// Grows at once; shrinks after the shape has animated smaller, so nothing is clipped.
@@ -260,15 +316,19 @@ final class NotchAlertController {
     }
 
     private func hidePanel() {
+        pointerTimer?.invalidate(); pointerTimer = nil
+        closeTask?.cancel()
         endReply()
         // A hidden panel never sends the pointer's exit.
         hovering = false
         panel?.orderOut(nil)
         state.alert = nil
         state.expanded = false
+        state.mode = .card
     }
 
     private func close() {
+        pointerTimer?.invalidate(); pointerTimer = nil
         timerTask?.cancel()
         menuTask?.cancel()
         endReply()
@@ -298,7 +358,7 @@ final class NotchAlertController {
             guard !Task.isCancelled, let self else { return }
             let gone = self.queue.expire(now: Date())
             self.remember(gone)
-            for alert in gone { self.onAction?(alert.id, NotchAlert.dismissAction) }
+            for alert in gone { self.onAction?(alert, NotchAlert.dismissAction) }
             self.refresh()
         }
     }
@@ -306,20 +366,23 @@ final class NotchAlertController {
     /// While anything waits, checks once a second for a menu under the notch. Stops when the queue is empty.
     private func watchMenus() {
         guard menuTask == nil || menuTask?.isCancelled == true else { return }
+        let owner = menus.begin()
         menuTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                guard let self, !self.queue.isEmpty, let screen = NSScreen.screens.first else { break }
-                let area = NotchGeometry(screen: screen).panelFrame(.detail, alert: self.queue.presentation)
-                let open = NotchMenuGuard.menuOpen(over: area, screen: screen.frame)
-                if open != self.menuOpen {
-                    self.menuOpen = open
-                    self.refresh()
-                }
+                guard self?.checkMenus(owner: owner) == true else { break }
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
+            guard self?.menus.finish(owner) == true else { return }
             self?.menuTask = nil
-            self?.menuOpen = false
         }
+    }
+
+    private func checkMenus(owner: UUID) -> Bool {
+        guard !queue.isEmpty, let screen = NSScreen.screens.first else { return false }
+        let area = NotchGeometry(screen: screen).panelFrame(.detail, alert: queue.presentation)
+        let open = NotchMenuGuard.menuOpen(over: area, screen: screen.frame)
+        if menus.update(open, owner: owner) { refresh() }
+        return true
     }
 
     private func withMotion(_ change: () -> Void) {

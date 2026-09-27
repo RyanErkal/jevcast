@@ -21,3 +21,28 @@ enum NotchMenuGuard {
         }
     }
 }
+
+/// A cancelled watcher must not clear the state owned by its replacement.
+struct NotchMenuObservation {
+    private(set) var owner: UUID?
+    private(set) var isOpen = false
+
+    mutating func begin() -> UUID {
+        let id = UUID()
+        owner = id
+        return id
+    }
+
+    mutating func update(_ open: Bool, owner id: UUID) -> Bool {
+        guard owner == id, isOpen != open else { return false }
+        isOpen = open
+        return true
+    }
+
+    mutating func finish(_ id: UUID) -> Bool {
+        guard owner == id else { return false }
+        owner = nil
+        isOpen = false
+        return true
+    }
+}

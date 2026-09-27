@@ -43,7 +43,7 @@ enum NotchStyle {
 
     static func statusText(_ p: NotchPresentation) -> String {
         switch p.phase {
-        case .running: return p.progress.map { "\(Int(($0 * 100).rounded()))%" } ?? "Running"
+        case .running: return p.progress.flatMap { $0.isFinite ? "\(Int((min(1, max(0, $0)) * 100).rounded()))%" : nil } ?? "Running"
         case .question: return "Question"
         case .approval: return "Review"
         case .failure: return "Failed"

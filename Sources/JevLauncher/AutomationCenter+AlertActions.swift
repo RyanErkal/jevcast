@@ -18,13 +18,16 @@ extension AutomationCenter {
         return (parts[0], parts[1])
     }
 
-    /// The newest record of a run: the store first, then the loaded list.
-    func currentRun(_ automationID: String, _ runID: String) -> RunRecord? {
-        store.run(automationID: automationID, runID: runID) ?? runs[automationID]?.first { $0.id == runID }
+    /// Read the current record off the main thread. A missing record is not actionable.
+    func currentRun(_ automationID: String, _ runID: String) async -> RunRecord? {
+        let store = self.store
+        return await Task.detached(priority: .userInitiated) {
+            store.run(automationID: automationID, runID: runID)
+        }.value
     }
 
     /// Handles a notch button for an automation alert. Returns false for alerts that are not ours.
-    @discardableResult func handleAlertAction(_ alertID: String, _ action: String) -> Bool {
+    @discardableResult func handleAlertAction(_ alertID: String, _ action: String, approval: ProposalManifest? = nil) -> Bool {
         if alertID.hasPrefix("merged-") || alertID == NotchQueue.stackID {
             if ["open", "review", "answer"].contains(action) { openWindow?(nil, nil) }
             return true
@@ -35,27 +38,28 @@ extension AutomationCenter {
         switch action {
         case "review", "answer", "open": openWindow?(ids.automationID, ids.runID)
         case "retry": runNow(ids.automationID)
-        case "cancel":
-            if let run = currentRun(ids.automationID, ids.runID), run.state.isActive { cancel(run) }
-        case "approveAll":
-            guard let run = currentRun(ids.automationID, ids.runID) else { return true }
-            Task { @MainActor [weak self] in await self?.approveAllFromNotch(run) }
-        case "undo":
-            guard let run = currentRun(ids.automationID, ids.runID) else { return true }
+        case "cancel", "approveAll", "undo":
             Task { @MainActor [weak self] in
-                guard let self, let result = await self.undo(run) else { return }
-                let undone = result.entries.filter { $0.status == .undone }.count
-                let blocked = result.entries.filter { $0.status == .undoBlocked }.count
-                self.post(NotchAlert(id: Self.resultAlertID(run), kind: blocked > 0 ? .failure : .info, symbol: "arrow.uturn.backward",
-                                     title: self.alertTitle(run), message: "Undid \(undone)" + (blocked > 0 ? ", \(blocked) could not be undone" : ""),
-                                     actions: [.init("Open", id: "open")], automationID: run.automationID, runID: run.id))
+                guard let self, let run = await self.currentRun(ids.automationID, ids.runID) else { return }
+                if action == "cancel" {
+                    if run.state.isActive { self.cancel(run) }
+                } else if action == "approveAll" {
+                    await self.approveAllFromNotch(run, shown: approval)
+                } else if let result = await self.undo(run) {
+                    let undone = result.entries.filter { $0.status == .undone }.count
+                    let blocked = result.entries.filter { $0.status == .undoBlocked }.count
+                    self.post(NotchAlert(id: Self.resultAlertID(run), kind: blocked > 0 ? .failure : .info, symbol: "arrow.uturn.backward",
+                                         title: self.alertTitle(run), message: "Undid \(undone)" + (blocked > 0 ? ", \(blocked) could not be undone" : ""),
+                                         actions: [.init("Open", id: "open")], automationID: run.automationID, runID: run.id))
+                }
             }
         default:
-            if let text = Self.answerText(action, run: currentRun(ids.automationID, ids.runID)),
-               let run = currentRun(ids.automationID, ids.runID), run.state == .needsInput {
-                answer(run, text)
+            guard action.hasPrefix("reply:") || action.hasPrefix("choice:") else { return true }
+            Task { @MainActor [weak self] in
+                guard let self, let run = await self.currentRun(ids.automationID, ids.runID), run.state == .needsInput,
+                      let text = Self.answerText(action, run: run) else { return }
+                self.answer(run, text)
             }
-            // later, dismiss: it stays in Needs you.
         }
         return true
     }
@@ -71,28 +75,32 @@ extension AutomationCenter {
         return question.choices[index]
     }
 
+    nonisolated static func approvableItems(_ manifest: ProposalManifest) -> Set<String> {
+        Set(manifest.checked.map(\.id)).subtracting(manifest.refused.keys)
+    }
+
     /// Approves every item that passed the check, through `approve`, which checks each one again before it applies.
     /// Refused items are never included.
-    func approveAll(_ run: RunRecord) async -> ApproveAllOutcome {
-        guard let current = currentRun(run.automationID, run.id), current.state == .needsApproval else {
+    func approveAll(_ run: RunRecord, shown: ProposalManifest?) async -> ApproveAllOutcome {
+        guard let current = await currentRun(run.automationID, run.id), current.state == .needsApproval else {
             return .refused("This run no longer waits for approval.")
         }
-        guard case .success(let manifest)? = await proposal(for: current) else {
-            return .refused(message ?? "The proposal could not be checked.")
+        guard let manifest = shown else {
+            return .refused("Review the checked proposal before approving it.")
         }
-        let items = Set(manifest.checked.map(\.id))
+        let items = Self.approvableItems(manifest)
         guard !items.isEmpty else { return .refused("Nothing in this proposal can be applied.") }
-        guard let journal = await approve(current, items: items) else {
+        guard let journal = await approve(current, items: items, shown: manifest) else {
             return .refused(message ?? "The changes could not be applied.")
         }
         return .applied(journal)
     }
 
     /// Approve all from the notch, then a result with Undo for 10 seconds.
-    private func approveAllFromNotch(_ run: RunRecord) async {
+    private func approveAllFromNotch(_ run: RunRecord, shown: ProposalManifest?) async {
         post(NotchAlert(id: Self.resultAlertID(run), kind: .info, symbol: "hourglass", title: alertTitle(run),
                         message: "Applying changes…", automationID: run.automationID, runID: run.id))
-        let outcome = await approveAll(run)
+        let outcome = await approveAll(run, shown: shown)
         post(Self.resultAlert(outcome, run: run, title: alertTitle(run)))
     }
 

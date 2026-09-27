@@ -56,7 +56,7 @@ final class AutomationNotchTests: XCTestCase {
         AutomationCenter.addCounts(counts, to: &alert)
         XCTAssertEqual(alert.actions.map(\.id), ["approveAll", "review", "later"])
 
-        let outcome = await center.approveAll(run)
+        let outcome = await center.approveAll(run, shown: manifest)
         guard case .applied(let journal) = outcome else { return XCTFail("not applied: \(outcome)") }
         XCTAssertEqual(Set(journal.approvedItems), ["m", "t"], "The refused item is never approved")
         XCTAssertTrue(fm.fileExists(atPath: work + "/Done/a.txt"))
@@ -69,17 +69,54 @@ final class AutomationNotchTests: XCTestCase {
         XCTAssertEqual(NotchTiming.seconds(for: result.kind, failureSeconds: 8), 10)
 
         // A second Approve all finds nothing waiting.
-        guard case .refused = await center.approveAll(run) else { return XCTFail("approved twice") }
+        guard case .refused = await center.approveAll(run, shown: manifest) else { return XCTFail("approved twice") }
     }
 
     func testApproveAllRefusesWhenTheAutomationChanged() async throws {
         let (a, run) = try pendingApproval()
+        guard case .success(let manifest)? = await center.proposal(for: run) else { return XCTFail("no proposal") }
         var edited = center.automation(a.id)!
         edited.notes = "changed"
         center.save(edited)
-        guard case .refused = await center.approveAll(run) else { return XCTFail("applied after the automation changed") }
+        guard case .refused = await center.approveAll(run, shown: manifest) else { return XCTFail("applied after the automation changed") }
         XCTAssertTrue(fm.fileExists(atPath: work + "/a.txt"))
         XCTAssertEqual(center.store.run(automationID: a.id, runID: run.id)?.state, .needsApproval)
+    }
+
+    func testApproveAllRefusesChangedRawProposalAndMissingSnapshot() async throws {
+        let (a, run) = try pendingApproval()
+        guard case .success(let manifest)? = await center.proposal(for: run) else { return XCTFail("no proposal") }
+        guard case .refused = await center.approveAll(run, shown: nil) else { return XCTFail("approved unseen proposal") }
+        let raw = try XCTUnwrap(center.store.readRunFile(automationID: a.id, runID: run.id, name: RunEngine.proposalRawFile))
+        let changed = Data(String(decoding: raw, as: UTF8.self).replacingOccurrences(of: "a.txt", with: "changed.txt").utf8)
+        XCTAssertNotEqual(raw, changed)
+        try center.store.writeRunFile(automationID: a.id, runID: run.id, name: RunEngine.proposalRawFile, data: changed)
+        center.proposals.removeAll()
+        // Even a new cache check must not replace the proposal carried by the visible alert.
+        _ = await center.proposal(for: run)
+        guard case .refused = await center.approveAll(run, shown: manifest) else { return XCTFail("approved changed proposal") }
+        XCTAssertTrue(fm.fileExists(atPath: work + "/a.txt"))
+        XCTAssertFalse(fm.fileExists(atPath: work + "/Done/changed.txt"))
+    }
+
+    func testLateProposalCountsCannotReplaceAChangedOrDismissedAlert() {
+        var run = RunRecord(id: RunID.make(), automation: agent(), trigger: .manual, occurrence: nil)
+        run.state = .needsApproval
+        let expected = AutomationCenter.makeAlert(run, automation: nil, hideNames: false)
+        XCTAssertTrue(AutomationCenter.canAddCounts(expected: expected, current: expected))
+        XCTAssertFalse(AutomationCenter.canAddCounts(expected: expected, current: nil))
+        run.state = .needsInput
+        XCTAssertFalse(AutomationCenter.canAddCounts(expected: expected,
+                                                    current: AutomationCenter.makeAlert(run, automation: nil, hideNames: false)))
+    }
+
+    func testApprovalSelectionAlwaysExcludesRefusedIDs() async throws {
+        let (_, run) = try pendingApproval()
+        guard case .success(var manifest)? = await center.proposal(for: run) else { return XCTFail("no proposal") }
+        manifest.refused["m"] = "Refused"
+        XCTAssertEqual(AutomationCenter.approvableItems(manifest), ["t"])
+        let current = await center.currentRun(run.automationID, run.id)
+        XCTAssertEqual(current, run)
     }
 
     func testQuestionAlertOffersChoicesAndReply() {

@@ -89,7 +89,8 @@ final class NotchQueueTests: XCTestCase {
 
     @MainActor func testModesFollowTheAlert() {
         let running = alert("r", .running)
-        let question = alert("q", .question)
+        var question = alert("q", .question)
+        question.allowsReply = true
         XCTAssertEqual(NotchAlertController.restingMode(for: running), .pill)
         XCTAssertEqual(NotchAlertController.restingMode(for: question), .card)
         XCTAssertEqual(NotchAlertController.nextMode(previous: nil, previousMode: .card, next: running, replyTarget: nil), .pill)
@@ -100,6 +101,102 @@ final class NotchQueueTests: XCTestCase {
         XCTAssertEqual(NotchAlertController.nextMode(previous: stack, previousMode: .detail, next: grown, replyTarget: nil), .detail)
         XCTAssertEqual(NotchAlertController.nextMode(previous: stack, previousMode: .reply, next: grown, replyTarget: "q"), .reply)
         XCTAssertEqual(NotchAlertController.nextMode(previous: stack, previousMode: .reply, next: grown, replyTarget: "gone"), .card)
+    }
+
+    @MainActor func testReplyEndsWhenTargetChangesOrDisallowsReply() {
+        var question = alert("q", .question)
+        question.allowsReply = true
+        var changed = question
+        changed.message = "A new question"
+        XCTAssertEqual(NotchAlertController.nextMode(previous: question, previousMode: .reply, next: changed, replyTarget: "q"), .card)
+        changed = question
+        changed.allowsReply = false
+        XCTAssertEqual(NotchAlertController.nextMode(previous: question, previousMode: .reply, next: changed, replyTarget: "q"), .card)
+        XCTAssertNil(NotchAlertController.replyAlert(in: changed, target: "q"))
+        XCTAssertNil(NotchAlertController.replyAlert(in: question, target: "missing"))
+    }
+
+    @MainActor func testInterruptedCloseReexpandsAndReplyExitClearsEditing() {
+        let state = NotchState()
+        let question = alert("q", .question)
+        state.present(question, mode: .reply)
+        state.replyTarget = question.id
+        var replies: [String] = []
+        state.performHandler = { _, action in replies.append(action) }
+        state.submitReply("answer")
+        XCTAssertEqual(replies.count, 1)
+        state.endReply()
+        state.submitReply("late answer")
+        XCTAssertEqual(replies.count, 1, "A removed reply field cannot submit to the next alert")
+        XCTAssertNil(state.replyTarget)
+        XCTAssertEqual(state.mode, .card)
+        state.expanded = false
+        state.present(question, mode: .card)
+        XCTAssertTrue(state.expanded, "A new arrival cancels the collapsed state even while the panel remains visible")
+    }
+
+    @MainActor func testPointerInputClosesAndCanReopenWithoutRecreatingPanel() {
+        XCTAssertFalse(NotchAlertController.acceptsPointer(expanded: false, visible: true, ready: true, inside: true))
+        XCTAssertFalse(NotchAlertController.acceptsPointer(expanded: true, visible: false, ready: true, inside: true))
+        XCTAssertFalse(NotchAlertController.acceptsPointer(expanded: true, visible: true, ready: false, inside: true))
+        XCTAssertFalse(NotchAlertController.acceptsPointer(expanded: true, visible: true, ready: true, inside: false))
+        XCTAssertTrue(NotchAlertController.acceptsPointer(expanded: true, visible: true, ready: true, inside: true))
+    }
+
+    func testTransparentMarginsAndCornersDoNotAcceptPointer() {
+        let a = alert("a", .approval)
+        for notch in [false, true] {
+            let g = NotchGeometry(screenFrame: CGRect(x: 100, y: 200, width: 1512, height: 982),
+                                  notchWidth: notch ? 180 : 0, notchHeight: notch ? 32 : 0)
+            for mode: NotchState.Mode in [.pill, .card, .detail, .reply] {
+                let frame = g.panelFrame(mode, alert: a)
+                let size = g.shapeSize(mode, alert: a)
+                let bottom = frame.maxY - (notch ? 0 : NotchGeometry.topGap) - size.height
+                XCTAssertFalse(g.contains(CGPoint(x: frame.minX + 1, y: frame.midY), mode: mode, alert: a))
+                XCTAssertFalse(g.contains(CGPoint(x: frame.midX, y: frame.minY + 1), mode: mode, alert: a))
+                XCTAssertFalse(g.contains(CGPoint(x: frame.midX - size.width / 2 + 1, y: bottom + 1), mode: mode, alert: a))
+                XCTAssertTrue(g.contains(CGPoint(x: frame.midX, y: bottom + size.height / 2), mode: mode, alert: a))
+                if !notch { XCTAssertFalse(g.contains(CGPoint(x: frame.midX, y: frame.maxY - 1), mode: mode, alert: a)) }
+            }
+        }
+    }
+
+    func testRunDedupeIsScopedToAutomationAndRecallKeepsLiveAlert() {
+        var q = NotchQueue()
+        var a = alert("a", .question, run: "same")
+        a.automationID = "one"
+        var b = alert("b", .question, run: "same")
+        b.automationID = "two"
+        q.add(a); q.add(b)
+        XCTAssertEqual(q.entries.count, 2)
+        XCTAssertTrue(q.containsRunOrID(a))
+        XCTAssertTrue(q.containsRunOrID(NotchAlert(id: "result", kind: .success, symbol: "checkmark", title: "done", message: "done", automationID: "one", runID: "same")))
+    }
+
+    func testCancelledMenuWatcherCannotClearItsReplacement() {
+        var menus = NotchMenuObservation()
+        let old = menus.begin()
+        XCTAssertTrue(menus.update(true, owner: old))
+        let replacement = menus.begin()
+        XCTAssertFalse(menus.finish(old))
+        XCTAssertTrue(menus.isOpen)
+        XCTAssertFalse(menus.update(false, owner: old))
+        XCTAssertTrue(menus.update(false, owner: replacement), "Closing the menu still triggers a refresh")
+        XCTAssertTrue(menus.finish(replacement))
+        XCTAssertNil(menus.owner)
+    }
+
+    func testEmptyStackAndNonfiniteProgressAreSafe() {
+        XCTAssertEqual(NotchQueue.stack([]).kind, .info)
+        var a = alert("r", .running)
+        for value in [Double.nan, .infinity, -.infinity] {
+            a.progress = value
+            XCTAssertNil(a.presentation.progress)
+            XCTAssertEqual(NotchStyle.statusText(a.presentation), "Running")
+            var presentation = a.presentation
+            presentation.progress = value
+            XCTAssertEqual(NotchStyle.statusText(presentation), "Running")
+        }
     }
 
     func testGeometryGrowsForEachMode() {

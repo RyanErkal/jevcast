@@ -2,6 +2,20 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+
+- **New notch alerts for automations.** Alerts grow out of the notch in a new design. On a screen without a notch they drop from the top centre.
+- A running automation can show a small indicator beside the notch with its elapsed time. Click it to see its latest activity and Cancel.
+- Questions show their answers as buttons. Reply opens a text field under the notch.
+- Approvals show what will change, for example "12 moves, 3 to Trash".
+- When more than one alert waits, they stack. Show lists up to four, each with its own buttons.
+
+### Changed
+
+- The notch panel takes keyboard focus only while you type a reply. Clicks outside the shape go to the app below.
+
 ## [1.10.1] - 2026-09-27
 
 ### Fixed

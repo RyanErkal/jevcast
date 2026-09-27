@@ -52,6 +52,13 @@ struct NotchQueue {
     func contains(_ id: String) -> Bool { entries.contains { $0.alert.id == id } }
     func alert(_ id: String) -> NotchAlert? { entries.first { $0.alert.id == id }?.alert }
 
+    func containsRunOrID(_ alert: NotchAlert) -> Bool {
+        entries.contains { entry in
+            entry.alert.id == alert.id || (alert.runID != nil && entry.alert.runID == alert.runID
+                                          && entry.alert.automationID == alert.automationID)
+        }
+    }
+
     /// Adds an alert, or replaces the one with the same ID or run. Returns false when nothing changed.
     @discardableResult mutating func add(_ alert: NotchAlert) -> Bool {
         if let index = entries.firstIndex(where: { $0.alert.id == alert.id }) {
@@ -60,7 +67,7 @@ struct NotchQueue {
             entries[index].alert = alert
             return true
         }
-        if let runID = alert.runID, let index = entries.firstIndex(where: { $0.alert.runID == runID }) {
+        if let runID = alert.runID, let index = entries.firstIndex(where: { $0.alert.runID == runID && $0.alert.automationID == alert.automationID }) {
             counter += 1
             entries[index] = Entry(alert: alert, order: counter, deadline: nil)
             return true
@@ -112,8 +119,8 @@ struct NotchQueue {
         } else {
             title = "\(n) alerts"; symbol = "bell"
         }
-        let top = alerts[0]
-        return NotchAlert(id: stackID, kind: top.kind, symbol: symbol, title: title,
+        let kind = alerts.first?.kind ?? .info
+        return NotchAlert(id: stackID, kind: kind, symbol: symbol, title: title,
                           message: alerts.prefix(3).map(\.title).joined(separator: ", ") + (n > 3 ? "…" : ""),
                           actions: [.init("Show", id: NotchAlert.expandAction, primary: true), .init("Later", id: "later")],
                           stack: alerts)

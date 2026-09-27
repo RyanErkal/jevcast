@@ -21,7 +21,7 @@ struct MailMessageList: View {
                 }
                 if model.hasMore {
                     ProgressView().controlSize(.small).frame(maxWidth: .infinity)
-                        .onAppear { model.loadNextPage() }
+                        .task(id: model.bottom) { model.loadNextPage() }
                         .selectionDisabled()
                 }
             }

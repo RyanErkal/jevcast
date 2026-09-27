@@ -58,7 +58,7 @@ public struct MailMailbox: Equatable, Sendable, Identifiable, Hashable {
 /// One message row: what the list shows. The body is read later from its `.emlx` file.
 public struct MailSummary: Equatable, Sendable, Identifiable, Hashable {
     public let rowID: Int64
-    public let mailbox: Int64
+    public var mailbox: Int64
     public let subject: String
     public let senderName: String
     public let senderAddress: String
@@ -68,12 +68,12 @@ public struct MailSummary: Equatable, Sendable, Identifiable, Hashable {
     public var flagged: Bool
     public let conversation: Int64
     /// The same email in two mailboxes, such as Gmail's Inbox and All Mail, has the same key.
-    public let messageKey: Int64
+    public let messageKey: String
     public init(rowID: Int64, mailbox: Int64, subject: String, senderName: String, senderAddress: String, snippet: String,
-                date: Date, read: Bool, flagged: Bool, conversation: Int64, messageKey: Int64? = nil) {
+                date: Date, read: Bool, flagged: Bool, conversation: Int64, messageKey: String? = nil) {
         self.rowID = rowID; self.mailbox = mailbox; self.subject = subject; self.senderName = senderName; self.senderAddress = senderAddress
         self.snippet = snippet; self.date = date; self.read = read; self.flagged = flagged; self.conversation = conversation
-        self.messageKey = messageKey ?? rowID
+        self.messageKey = messageKey ?? "row:\(rowID)"
     }
     public var id: Int64 { rowID }
     public var sender: String { senderName.isEmpty ? senderAddress : senderName }

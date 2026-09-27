@@ -7,7 +7,7 @@ import LauncherCore
 /// unless the user turns them off in the mail window.
 struct MailHTMLView: NSViewRepresentable {
     let html: String
-    /// Identifies the message, so an update compares a number instead of the whole document.
+    /// Identifies the message. The prepared content also participates in revision checks.
     var documentID: Int64 = 0
     var inlineImages: [String: MIMEMessage.InlineImage] = [:]
     /// Web images, fonts, and style sheets load when true. Scripts never run either way.
@@ -67,14 +67,22 @@ struct MailHTMLView: NSViewRepresentable {
 
     func updateNSView(_ view: WKWebView, context: Context) {
         if abs(view.pageZoom - zoom) > 0.001 { view.pageZoom = zoom }
-        let key = "\(documentID)#\(html.utf8.count)" + (loadsRemote ? "#remote" : "#local") + (fitsWidth ? "#fit" : "#wide")
+        let key = DocumentKey(id: documentID, html: html, images: inlineImages, remote: loadsRemote, fitsWidth: fitsWidth)
         guard context.coordinator.shown != key else { return }
         context.coordinator.shown = key
         view.loadHTMLString(Self.document(html, inlineImages: inlineImages, remote: loadsRemote, fitsWidth: fitsWidth), baseURL: nil)
     }
 
+    struct DocumentKey: Equatable {
+        let id: Int64
+        let html: String
+        let images: [String: MIMEMessage.InlineImage]
+        let remote: Bool
+        let fitsWidth: Bool
+    }
+
     final class Coordinator: NSObject, WKNavigationDelegate {
-        var shown: String?
+        var shown: DocumentKey?
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
             // Only the message itself loads. A click on a web or mail link opens outside Jevcast.
             if action.navigationType == .linkActivated, let url = action.request.url {

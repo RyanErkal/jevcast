@@ -18,18 +18,24 @@ final class MailSource: ThingSource {
         let openScore = explicit ? 150.0 : Self.openScore
         let open = Verb(title: "Open Mail", after: .keepOpen) { [weak model] in model?.openMail?(nil); return nil }
         let compose = Verb(title: "New Message") { [weak model] in model?.composeMail?(""); return nil }
-        guard case .ready(let root) = MailStore.status() else {
+        let status = await Task.detached(priority: .userInitiated) { MailStore.status() }.value
+        try Task.checkCancellation()
+        guard case .ready(let root) = status else {
             return [LauncherResult(id: "mail:open", title: "Open Mail", detail: "Needs Full Disk Access to read Apple Mail", symbol: "envelope",
                                    action: .thing(Thing(verbs: [open, compose], twoLine: false)), score: openScore)]
         }
-        let (boxes, messages) = try await Task.detached(priority: .userInitiated) { () throws -> ([MailMailbox], [MailSummary]) in
-            let boxes = try MailStore.mailboxes(root: root)
-            let inboxes = boxes.filter { $0.role == .inbox }.map(\.rowID)
-            // A search looks through All Mail: every mailbox but Trash, Junk, Sent, and Drafts, one copy per email.
-            let query = filter.isEmpty ? MailStore.Query(mailboxes: inboxes, unreadOnly: true, limit: 6)
-                                       : MailModel.query(.allMail, filter, boxes).with(limit: 15)
-            return (boxes, try MailStore.messages(root: root, query))
-        }.value
+        let stop = StopFlag()
+        let (boxes, messages) = try await withTaskCancellationHandler {
+            try await Task.detached(priority: .userInitiated) { () throws -> ([MailMailbox], [MailSummary]) in
+                let boxes = try MailStore.mailboxes(root: root)
+                let inboxes = boxes.filter { $0.role == .inbox }.map(\.rowID)
+                // A search looks through All Mail: every mailbox but Trash, Junk, Sent, and Drafts, one copy per email.
+                let query = filter.isEmpty ? MailStore.Query(mailboxes: inboxes, unreadOnly: true, limit: 6)
+                                           : MailModel.query(.allMail, filter, boxes).with(limit: 15)
+                return (boxes, try MailStore.page(root: root, query, stop: stop.check).messages)
+            }.value
+        } onCancel: { stop.stop() }
+        try Task.checkCancellation()
         let unread = boxes.filter { $0.role == .inbox }.map(\.unread).reduce(0, +)
         var rows = [LauncherResult(id: "mail:open", title: "Open Mail", detail: unread == 0 ? "Inbox" : "\(unread) unread in Inbox",
                                    symbol: "envelope", action: .thing(Thing(verbs: [open, compose], twoLine: false)), score: openScore)]

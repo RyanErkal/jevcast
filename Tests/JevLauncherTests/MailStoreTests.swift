@@ -55,7 +55,7 @@ final class MailStoreTests: XCTestCase {
 
     func testFiltersAndSearch() throws {
         XCTAssertEqual(try MailStore.messages(root: root, .init(mailboxes: [1], unreadOnly: true)).map(\.rowID), [1001])
-        XCTAssertEqual(try MailStore.messages(root: root, .init(mailboxes: [], flaggedOnly: true)).map(\.rowID), [1002])
+        XCTAssertEqual(try MailStore.messages(root: root, .init(mailboxes: [1, 2], flaggedOnly: true)).map(\.rowID), [1002])
         XCTAssertEqual(try MailStore.messages(root: root, .init(mailboxes: [1], text: "sam lunch")).map(\.rowID), [1002])
         XCTAssertEqual(try MailStore.messages(root: root, .init(mailboxes: [1], text: "50%")).map(\.rowID), [1001], "% matches literally.")
         XCTAssertEqual(try MailStore.messages(root: root, .init(mailboxes: [1], text: "5_%")).map(\.rowID), [])

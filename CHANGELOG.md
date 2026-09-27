@@ -18,7 +18,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Changed
 
-- Mail reads its index through one kept connection with cached queries, and refreshes read only newer messages. On a 100,000 message test index, a page takes about 1 ms and a search under 35 ms.
+- Mail reads its index through one kept connection with cached queries, and refreshes read only newer messages. On a 100,000 message test index, a page takes about 1 ms, All Mail about 18 ms, and a search under 35 ms.
 
 ## [1.9.2] - 2026-09-27
 

@@ -15,12 +15,12 @@ extension Diagnostics {
                 guard let source = model.source(query.kind) else { print("No source for \(query.kind.rawValue) yet."); exit(1) }
                 let rows = try await source.load(query.filter)
                 print("\(source.section): \(rows.count) rows in \(Int((CFAbsoluteTimeGetCurrent() - start) * 1000)) ms")
-                for row in rows {
+                for row in query.kind == .mail ? [] : rows {
                     print("• \(row.title)\n  \(row.detail)")
                     if case .thing(let thing) = row.action { print("  verbs: " + thing.verbs.map(\.title).joined(separator: ", ")) }
                 }
             } catch {
-                print("Problem: \(error.localizedDescription)")
+                print(query.kind == .mail ? "Mail diagnostic failed." : "Problem: \(error.localizedDescription)")
             }
             fflush(stdout)
             exit(0)
@@ -70,7 +70,7 @@ extension Diagnostics {
             }
             print("Message files found for \(found) of \(min(20, recent.count)) recent messages")
         } catch {
-            print("Problem: \(error.localizedDescription)")
+            print("Mail diagnostic failed.")
             exit(3)
         }
         exit(0)
@@ -79,8 +79,8 @@ extension Diagnostics {
 
 extension Diagnostics {
     /// `--diagnose-mail-actions <file>`: checks, without changing anything, that Apple Mail can find
-    /// the newest inbox messages the way the Delete and Archive actions do. Writes account and
-    /// message IDs and any error text to `file`. Never subjects, names, or addresses.
+    /// the newest inbox messages the way the Delete and Archive actions do. Writes
+    /// counts to `file`. Never subjects, names, addresses, or raw errors.
     static func mailActions(to file: String) {
         var lines: [String] = []
         func finish() -> Never {
@@ -92,14 +92,14 @@ extension Diagnostics {
             do {
                 let boxes = try MailStore.mailboxes(root: root)
                 let inboxes = boxes.filter { $0.role == .inbox }
-                lines.append("Inbox mailboxes: " + inboxes.map { "\($0.rowID) \($0.url.components(separatedBy: "://").first ?? "")://<account>/\($0.path)" }.joined(separator: ", "))
+                lines.append("Inbox mailboxes: \(inboxes.count)")
                 let recent = try MailStore.messages(root: root, .init(mailboxes: inboxes.map(\.rowID), limit: 3))
                 let listAccounts = """
                 on run argv
                   tell application id "com.apple.mail"
                     set out to ""
                     repeat with a in accounts
-                      set out to out & (id of a) & " | " & (count of mailboxes of a) & linefeed
+                      set out to out & (count of mailboxes of a) & linefeed
                     end repeat
                     return out
                   end tell
@@ -107,14 +107,14 @@ extension Diagnostics {
                 """
                 try await MailActions.ensureRunning()
                 let accounts = (try? await AppleScript.run(listAccounts, app: MailActions.bundleID, name: "Mail", timeout: 30)) ?? "(could not list accounts)"
-                lines.append("Mail account ids | mailboxes:\n" + accounts)
-                lines.append("Index account ids: " + Set(inboxes.map(\.accountID)).sorted().joined(separator: ", "))
+                lines.append("Mailbox counts by account:\n" + accounts)
+                lines.append("Index accounts: \(Set(inboxes.map(\.accountID)).count)")
                 let probe = """
                 on run argv
                   with timeout of 20 seconds
                     tell application id "com.apple.mail"
                 \(MailScripts.findMessage)
-                      return "found, id " & (id of m)
+                      return "found"
                     end tell
                   end timeout
                 end run
@@ -122,13 +122,13 @@ extension Diagnostics {
                 for message in recent {
                     guard let box = boxes.first(where: { $0.rowID == message.mailbox }) else { continue }
                     do {
-                        let result = try await AppleScript.run(probe, [box.accountID, box.path, String(message.rowID)], app: MailActions.bundleID, name: "Mail", timeout: 30)
-                        lines.append("Row \(message.rowID) in \(box.path): \(result.trimmingCharacters(in: .whitespacesAndNewlines))")
+                        _ = try await AppleScript.run(probe, [box.accountID, box.path, String(message.rowID)], app: MailActions.bundleID, name: "Mail", timeout: 30)
+                        lines.append("Messages found: 1")
                     } catch {
-                        lines.append("Row \(message.rowID) in \(box.path): ERROR \(error.localizedDescription)")
+                        lines.append("Messages not found: 1")
                     }
                 }
-            } catch { lines.append("Problem: \(error.localizedDescription)") }
+            } catch { lines.append("Mail action diagnostic failed.") }
             finish()
         }
         RunLoop.main.run()

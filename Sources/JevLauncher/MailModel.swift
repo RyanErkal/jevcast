@@ -55,7 +55,9 @@ final class MailModel: ObservableObject {
     }
     private var selectingQuietly = false
     /// A message to select once the list that holds it loads, such as one picked in the launcher.
-    private var pending: Int64?
+    private var pending: MailSummary?
+    private var pendingOpen: Int64?
+    private var openWork: Task<Void, Never>?
     @Published private(set) var detail: MIMEMessage?
     @Published private(set) var detailMissing = false
     @Published var banner: String?
@@ -71,12 +73,16 @@ final class MailModel: ObservableObject {
     private var poll: Task<Void, Never>?
     private var searchWork: Task<Void, Never>?
     private var loadWork: Task<Void, Never>?
-    /// Paging state: the newest and oldest rows read for the current list, and the emails shown,
-    /// so a later page or refresh does not add a second copy of one email.
+    /// The newest and oldest cursors for the current list.
     private var top: MailStore.Cursor?
-    private var bottom: MailStore.Cursor?
-    private var shownKeys = Set<Int64>()
+    @Published private(set) var bottom: MailStore.Cursor?
     private var loadingMore = false
+    var isLoading: Bool { reloading || loadingMore || refreshing }
+    private var reloading = false
+    private var refreshing = false
+    private let statusProvider: @Sendable () -> MailStore.Status
+    private var statusWork: Task<Void, Never>?
+    private var indexIdentity: MailStore.FileIdentity?
     /// Changes with every full reload, so late results for an older list are dropped.
     private var generation = 0
     /// Stops the SQL of a list that a newer reload replaced.
@@ -95,7 +101,8 @@ final class MailModel: ObservableObject {
     /// Mail actions run one after another, so quick deletes never race each other.
     private var actionChain: Task<Void, Never>?
 
-    init(quill: @escaping (QuillRequest) async throws -> QuillReply, quillAllowed: @escaping () -> Bool) {
+    init(quill: @escaping (QuillRequest) async throws -> QuillReply, quillAllowed: @escaping () -> Bool, statusProvider: @escaping @Sendable () -> MailStore.Status = { MailStore.status() }) {
+        self.statusProvider = statusProvider
         self.quill = quill; self.quillAllowed = quillAllowed
         // Settings › Mail writes the same default; follow it while this window exists.
         defaultsObserver = NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
@@ -132,18 +139,18 @@ final class MailModel: ObservableObject {
         // still the one Jevcast started.
         if let quit { quit.cancel(); self.quit = nil; startedMail = true }
         refreshStatus()
-        if root != nil { fetchNewMail() }
         poll?.cancel()
         poll = Task { @MainActor [weak self] in
             var ticks = 0
             while !Task.isCancelled {
                 // Quick index checks at first, while Mail starts and fetches, then every 2 seconds.
                 try? await Task.sleep(nanoseconds: ticks < 10 ? 1_000_000_000 : 2_000_000_000)
+                guard !Task.isCancelled else { return }
                 ticks += 1
                 guard let self, let root = self.root else { continue }
                 self.updateMailRunning()
                 let current = await Task.detached { MailStore.fingerprint(root: root) }.value
-                if current != self.fingerprint { self.fingerprint = current; self.refresh() }
+                if current != self.fingerprint, self.refresh() { self.fingerprint = current }
                 // Mail fetches on its own timer, which can be minutes. Ask again soon after it
                 // starts, then every 30 seconds while the inbox is open.
                 if ticks == 5 || ticks % 15 == 0 { self.checkForNewMail() }
@@ -155,6 +162,8 @@ final class MailModel: ObservableObject {
     /// so nothing extra runs between checks.
     func stop() {
         poll?.cancel(); poll = nil; readTimer?.cancel()
+        statusWork?.cancel(); statusWork = nil
+        openWork?.cancel(); openWork = nil; pendingOpen = nil
         guard startedMail else { return }
         startedMail = false
         let pending = actionChain
@@ -210,17 +219,37 @@ final class MailModel: ObservableObject {
     }
 
     func refreshStatus() {
-        status = MailStore.status()
-        guard let root else { mailboxes = []; messages = []; return }
-        fingerprint = MailStore.fingerprint(root: root)
-        // The mailbox list and the messages load together off the main thread.
-        reload()
+        statusWork?.cancel()
+        let provider = statusProvider
+        statusWork = Task { @MainActor [weak self] in
+            let status = await Task.detached(priority: .userInitiated) { provider() }.value
+            guard !Task.isCancelled, let self else { return }
+            self.statusWork = nil
+            if self.status != status {
+                self.listStop.stop(); self.generation += 1
+                self.bodies.removeAll(); self.bodyOrder.removeAll()
+                self.select(nil, byUser: false)
+            }
+            self.status = status
+            guard let root = self.root else {
+                self.mailboxes = []; self.messages = []; self.hasMore = false
+                self.pendingOpen = nil
+                self.loadingMore = false; self.refreshing = false; self.reloading = false
+                return
+            }
+            self.fingerprint = MailStore.fingerprint(root: root)
+            self.reload()
+            if let rowID = self.pendingOpen { self.pendingOpen = nil; self.open(rowID) }
+            if self.poll != nil { self.fetchNewMail() }
+        }
     }
 
     private func reloadSoon() {
         searchWork?.cancel()
         // A newer search stops the older one's query at once, then waits for typing to pause.
         listStop.stop()
+        generation += 1
+        loadingMore = false; refreshing = false; reloading = false
         searchWork = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 150_000_000)
             guard !Task.isCancelled else { return }
@@ -232,43 +261,55 @@ final class MailModel: ObservableObject {
     func reload(keepSelection: Bool = false) {
         guard let root else { return }
         let place = self.place, search = self.search
-        let previous = selectedID
+        let keptIDs = keepSelection ? messages.map(\.rowID) : []
         loadWork?.cancel()
         listStop.stop()
         let stop = StopFlag()
         listStop = stop
         generation += 1
+        loadingMore = false; refreshing = false; reloading = true
         let generation = self.generation
         updateMailRunning()
         loadWork = Task { @MainActor [weak self] in
-            let result = await Task.detached(priority: .userInitiated) { () -> (MailStore.Page, [MailMailbox])? in
-                let boxes = (try? MailStore.mailboxes(root: root)) ?? []
+            let result = await Task.detached(priority: .userInitiated) { () -> (MailStore.Page, [MailMailbox], MailStore.FileIdentity?, [Int64: MailStore.RowState])? in
+                let identity = MailStore.FileIdentity(path: MailStore.indexPath(root))
+                guard let boxes = try? MailStore.mailboxes(root: root) else { return nil }
                 guard let page = try? MailStore.page(root: root, Self.query(place, search, boxes), stop: stop.check) else { return nil }
-                return (page, boxes)
+                guard let states = try? MailStore.states(root: root, rowIDs: keptIDs, stop: stop.check) else { return nil }
+                return (page, boxes, identity, states)
             }.value
-            guard !Task.isCancelled, let self, self.generation == generation else { return }
-            guard let (page, boxes) = result else { self.banner = "Mail's index could not be read. Try again in a moment."; return }
+            guard !Task.isCancelled, !stop.isStopped, let self, self.generation == generation else { return }
+            self.reloading = false
+            let previous = self.selectedID
+            guard let (page, boxes, identity, states) = result else {
+                self.fingerprint = ""
+                self.banner = "Mail's index could not be read. Try again in a moment."; return
+            }
+            if self.indexIdentity != identity {
+                self.bodies.removeAll(); self.bodyOrder.removeAll()
+                self.detail = nil; self.detailHTML = nil; self.detailMissing = false; self.loadingID = nil
+            }
+            self.indexIdentity = identity
             // Removals older than two minutes are Mail's business again.
             self.removing = self.removing.filter { Date().timeIntervalSince($0.value) < 120 }
-            if !boxes.isEmpty { self.mailboxes = boxes }
+            self.mailboxes = boxes
             let messages = page.messages.filter { self.removing[$0.rowID] == nil }
             self.top = page.first; self.bottom = page.last; self.hasMore = page.hasMore
-            self.shownKeys = Set(page.messages.map(\.messageKey))
             // A selected message on a later page stays listed, in date order, so the selection holds.
             var merged = messages
             if keepSelection, let previous, !merged.contains(where: { $0.rowID == previous }),
-               let kept = self.messages.first(where: { $0.rowID == previous }), let last = page.last,
+               let kept = Self.refreshed(self.messages, states: states, requested: Set(keptIDs), query: Self.query(place, search, boxes), selectedID: previous)
+                    .first(where: { $0.rowID == previous }), let last = page.last,
                Self.isNewer(kept, than: last) == false, page.hasMore {
                 merged.append(kept)
             }
-            self.messages = merged
+            self.install(Self.merge([], merged, query: Self.query(place, search, boxes)))
             if let pending = self.pending {
                 self.pending = nil
-                if !self.messages.contains(where: { $0.rowID == pending }),
-                   let found = try? MailStore.messages(root: root, .init(mailboxes: [], rowIDs: [pending])).first {
-                    self.messages.insert(found, at: self.messages.firstIndex { !Self.isNewer($0, than: .init(found)) } ?? self.messages.count)
+                if !self.messages.contains(where: { $0.rowID == pending.rowID }) {
+                    self.messages = Self.merge(self.messages, [pending], query: Self.query(place, search, boxes))
                 }
-                self.select(pending, byUser: true)
+                self.select(pending.rowID, byUser: true)
                 return
             }
             if keepSelection, let previous, self.messages.contains(where: { $0.rowID == previous }) { return }
@@ -285,62 +326,114 @@ final class MailModel: ObservableObject {
 
     /// Reads the next older page and adds it below the list. Called as the list nears its end.
     func loadNextPage() {
-        guard let root, hasMore, !loadingMore, let bottom else { return }
+        guard let root, hasMore, !loadingMore, !reloading, !listStop.isStopped, let bottom else { return }
         loadingMore = true
         var query = Self.query(place, search, mailboxes)
         query.before = bottom
         let stop = listStop, generation = self.generation
         Task { @MainActor [weak self] in
             let page = await Task.detached(priority: .userInitiated) { try? MailStore.page(root: root, query, stop: stop.check) }.value
-            guard let self, self.generation == generation else { return }
+            guard let self, !stop.isStopped, self.generation == generation else { return }
             self.loadingMore = false
             guard let page else { return }
             self.bottom = page.last ?? self.bottom
             self.hasMore = page.hasMore
-            let known = Set(self.messages.map(\.rowID))
-            let added = page.messages.filter { !known.contains($0.rowID) && self.removing[$0.rowID] == nil && !(query.dedupe && self.shownKeys.contains($0.messageKey)) }
-            self.shownKeys.formUnion(added.map(\.messageKey))
-            if !added.isEmpty { self.messages += added }
+            let oldIDs = Set(self.messages.map(\.rowID))
+            let added = page.messages.filter { self.removing[$0.rowID] == nil }
+            self.install(Self.merge(self.messages, added, query: query))
+            // A page can contain only rows already pinned by a launcher selection or reload.
+            if Set(self.messages.map(\.rowID)) == oldIDs, page.hasMore {
+                self.loadNextPage()
+            }
         }
     }
 
-    /// After Mail changes its index: reads only rows newer than the top of the list, adds them
-    /// above, and updates the flags of rows already shown. A large gap reads the list again.
-    private func refresh() {
-        guard let root, let top, !messages.isEmpty else { reload(keepSelection: true); return }
+    /// Reads every row above the top cursor, without discarding loaded older pages.
+    @discardableResult
+    func refresh() -> Bool {
+        guard !reloading, !refreshing, !listStop.isStopped else { return false }
+        guard let root, let top, !messages.isEmpty else { reload(keepSelection: true); return true }
+        refreshing = true
         let place = self.place, search = self.search, generation = self.generation
         let ids = messages.map(\.rowID), stop = listStop
+        let identity = indexIdentity
         Task { @MainActor [weak self] in
-            let result = await Task.detached(priority: .userInitiated) { () -> (MailStore.Page, [Int64: MailStore.RowState], [MailMailbox])? in
-                let boxes = (try? MailStore.mailboxes(root: root)) ?? []
-                var query = Self.query(place, search, boxes)
-                query.after = top
-                guard let page = try? MailStore.page(root: root, query, stop: stop.check),
-                      let states = try? MailStore.states(root: root, rowIDs: ids) else { return nil }
-                return (page, states, boxes)
+            let result = await Task.detached(priority: .userInitiated) { () -> ([MailSummary], MailStore.Cursor?, [Int64: MailStore.RowState], [MailMailbox])? in
+                do {
+                    guard MailStore.FileIdentity(path: MailStore.indexPath(root)) == identity else { return nil }
+                    let boxes = try MailStore.mailboxes(root: root)
+                    var query = Self.query(place, search, boxes)
+                    query.after = top
+                    var newer: [MailSummary] = []
+                    var first: MailStore.Cursor?
+                    while true {
+                        let page = try MailStore.page(root: root, query, stop: stop.check)
+                        if first == nil { first = page.first }
+                        newer += page.messages
+                        guard page.hasMore, let last = page.last else { break }
+                        query.before = last
+                    }
+                    let states = try MailStore.states(root: root, rowIDs: ids, stop: stop.check)
+                    return (newer, first, states, boxes)
+                } catch { return nil }
             }.value
-            guard let self, self.generation == generation, let (page, states, boxes) = result else { return }
-            if page.hasMore { self.reload(keepSelection: true); return }
-            if !boxes.isEmpty { self.mailboxes = boxes }
-            self.removing = self.removing.filter { Date().timeIntervalSince($0.value) < 120 }
-            let query = Self.query(place, search, self.mailboxes)
-            let allowed = Set(query.mailboxes)
-            var kept: [MailSummary] = []
-            for var message in self.messages {
-                guard let state = states[message.rowID] else { continue }
-                message.read = state.read; message.flagged = state.flagged
-                // A row that left this list goes, except the one you are reading.
-                let fits = (allowed.isEmpty || allowed.contains(state.mailbox)) && (!query.unreadOnly || !state.read) && (!query.flaggedOnly || state.flagged)
-                if fits || message.rowID == self.selectedID { kept.append(message) }
+            guard let self, !stop.isStopped, self.generation == generation else { return }
+            self.refreshing = false
+            guard let (newer, first, states, boxes) = result else {
+                if MailStore.FileIdentity(path: MailStore.indexPath(root)) != identity { self.reload(); return }
+                self.fingerprint = "" // Retry at the next poll after a transient read failure.
+                return
             }
-            let known = Set(kept.map(\.rowID))
-            let newer = page.messages.filter { !known.contains($0.rowID) && self.removing[$0.rowID] == nil && !(query.dedupe && self.shownKeys.contains($0.messageKey)) }
-            self.shownKeys.formUnion(newer.map(\.messageKey))
-            if let first = page.first { self.top = first }
-            let merged = newer + kept
-            if merged != self.messages { self.messages = merged }
-            if self.selectedID == nil || !merged.contains(where: { $0.rowID == self.selectedID }) { self.select(merged.first?.rowID, byUser: false) }
+            self.mailboxes = boxes
+            self.removing = self.removing.filter { Date().timeIntervalSince($0.value) < 120 }
+            let query = Self.query(place, search, boxes)
+            let kept = Self.refreshed(self.messages, states: states, requested: Set(ids), query: query, selectedID: self.selectedID)
+            let added = newer.filter { self.removing[$0.rowID] == nil }
+            if let first { self.top = first }
+            self.install(Self.merge(kept, added, query: query))
         }
+        return true
+    }
+
+    nonisolated static func refreshed(_ messages: [MailSummary], states: [Int64: MailStore.RowState], requested: Set<Int64>,
+                                      query: MailStore.Query, selectedID: Int64?) -> [MailSummary] {
+        let allowed = Set(query.mailboxes)
+        return messages.compactMap { original in
+            // A page loaded during this refresh was not part of the state query.
+            guard requested.contains(original.rowID) else { return original }
+            guard let state = states[original.rowID] else { return nil }
+            var message = original
+            message.mailbox = state.mailbox; message.read = state.read; message.flagged = state.flagged
+            let fits = allowed.contains(state.mailbox) && (!query.unreadOnly || !state.read) && (!query.flaggedOnly || state.flagged)
+            return fits || message.rowID == selectedID ? message : nil
+        }
+    }
+
+    nonisolated static func merge(_ existing: [MailSummary], _ incoming: [MailSummary], query: MailStore.Query) -> [MailSummary] {
+        var rows: [Int64: MailSummary] = [:]
+        for message in existing + incoming { rows[message.rowID] = message }
+        var sorted = rows.values.sorted { isNewer($0, than: .init($1)) }
+        if query.dedupe {
+            var chosen: [String: MailSummary] = [:]
+            for message in sorted {
+                if let old = chosen[message.messageKey] {
+                    if query.preferred.contains(message.mailbox), !query.preferred.contains(old.mailbox) { chosen[message.messageKey] = message }
+                } else { chosen[message.messageKey] = message }
+            }
+            sorted = chosen.values.sorted { isNewer($0, than: .init($1)) }
+        }
+        return sorted
+    }
+
+    private func install(_ rows: [MailSummary]) {
+        let old = selected
+        if messages != rows { messages = rows }
+        if let selectedID, let current = rows.first(where: { $0.rowID == selectedID }) {
+            if old?.mailbox != current.mailbox || (detail == nil && !detailMissing && loadingID != selectedID) { loadSelected(markRead: false) }
+            return
+        }
+        let replacement = old.flatMap { old in rows.first { $0.messageKey == old.messageKey } }
+        select(replacement?.rowID ?? rows.first?.rowID, byUser: false)
     }
 
     nonisolated static func query(_ place: Place, _ search: String, _ boxes: [MailMailbox]) -> MailStore.Query {
@@ -364,14 +457,23 @@ final class MailModel: ObservableObject {
         if unchanged, detail == nil, !detailMissing { loadSelected(markRead: byUser) }
     }
 
-    /// Opens one message from the launcher: its own mailbox, selected once the list loads.
-    /// False when Mail's index does not have it.
+    /// Queues a launcher selection. The lookup runs off the main thread, including when access
+    /// is still being checked on the first opening of the mail window.
     @discardableResult
     func open(_ rowID: Int64) -> Bool {
-        guard let root, let found = try? MailStore.messages(root: root, .init(mailboxes: [], rowIDs: [rowID])).first else { return false }
-        pending = rowID
-        let target = Place.mailbox(found.mailbox)
-        if place == target { reload() } else { place = target }
+        if statusWork != nil { pendingOpen = rowID; return true }
+        guard let root else { return false }
+        openWork?.cancel()
+        openWork = Task { @MainActor [weak self] in
+            let found = await Task.detached(priority: .userInitiated) {
+                try? MailStore.messages(root: root, .init(mailboxes: [], rowIDs: [rowID])).first
+            }.value
+            guard !Task.isCancelled, let self, self.root == root else { return }
+            guard let found else { self.banner = "This message is no longer in Mail's index."; return }
+            self.pending = found
+            let target = Place.mailbox(found.mailbox)
+            if self.place == target { self.reload() } else { self.place = target }
+        }
         return true
     }
 
@@ -379,8 +481,12 @@ final class MailModel: ObservableObject {
 
     private func loadSelected(markRead: Bool) {
         summary = nil
-        guard let root, let message = selected, let box = mailbox(message.mailbox) else { detail = nil; detailHTML = nil; detailMissing = false; return }
+        guard let root, let message = selected, let box = mailbox(message.mailbox) else {
+            readTimer?.cancel(); loadingID = nil
+            detail = nil; detailHTML = nil; detailMissing = false; return
+        }
         let rowID = message.rowID
+        let identity = indexIdentity
         loadingID = rowID
         // A selection the model made, such as after a delete or a reload, never marks mail read.
         if markRead { markReadSoon(message, in: box) } else { readTimer?.cancel() }
@@ -393,7 +499,7 @@ final class MailModel: ObservableObject {
         detail = nil; detailHTML = nil; detailMissing = false
         Task { @MainActor [weak self] in
             let loaded = await Task.detached(priority: .userInitiated) { Self.loadBody(root: root, box: box, rowID: rowID) }.value
-            guard let self else { return }
+            guard let self, self.root == root, self.indexIdentity == identity else { return }
             if let loaded { self.remember(loaded, for: rowID) }
             guard self.selectedID == rowID, self.loadingID == rowID else { return }
             self.detail = loaded?.message
@@ -437,10 +543,12 @@ final class MailModel: ObservableObject {
             .filter { bodies[$0.rowID] == nil }
             .compactMap { message in mailbox(message.mailbox).map { (message.rowID, $0) } }
         guard !wanted.isEmpty else { return }
+        let identity = indexIdentity
         Task { @MainActor [weak self] in
             for (id, box) in wanted {
                 if let loaded = await Task.detached(priority: .utility, operation: { Self.loadBody(root: root, box: box, rowID: id) }).value {
-                    self?.remember(loaded, for: id)
+                    guard let self, self.root == root, self.indexIdentity == identity else { return }
+                    self.remember(loaded, for: id)
                 }
             }
         }

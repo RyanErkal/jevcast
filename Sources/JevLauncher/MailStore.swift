@@ -18,7 +18,7 @@ enum MailStore {
         guard let version = MailFiles.versionFolder(names) else { return .noMail }
         let root = base + "/" + version
         guard FileManager.default.isReadableFile(atPath: root + "/MailData/Envelope Index"),
-              (try? open(root))?.columns("messages").isEmpty == false else { return .needsFullDiskAccess }
+              (try? withIndex(root) { _, columns in !columns.isEmpty }) == true else { return .needsFullDiskAccess }
         return .ready(root: root)
     }
 
@@ -33,12 +33,14 @@ enum MailStore {
         let root: String
         let identity: FileIdentity?
         let db: SQLiteReader
-        let columns: Set<String>
+        var columns: Set<String>
+        var schemaVersion: Int64?
         init(root: String) throws {
             self.root = root
             identity = FileIdentity(path: MailStore.indexPath(root))
             db = try MailStore.open(root)
             columns = db.columns("messages")
+            schemaVersion = try db.rows("PRAGMA schema_version").first?.first?.int
         }
     }
     struct FileIdentity: Equatable {
@@ -64,6 +66,11 @@ enum MailStore {
             if let current = shared, current.root != root || current.identity != FileIdentity(path: indexPath(root)) { shared = nil }
             let connection = try shared ?? Connection(root: root)
             shared = connection
+            let schemaVersion = try connection.db.rows("PRAGMA schema_version").first?.first?.int
+            if connection.schemaVersion != schemaVersion {
+                connection.columns = connection.db.columns("messages")
+                connection.schemaVersion = schemaVersion
+            }
             do { return try connection.db.withStop(stop) { try body(connection.db, connection.columns) } }
             catch {
                 if stop?() == true { throw CancellationError() }
@@ -120,7 +127,7 @@ enum MailStore {
 
     struct Page: Equatable {
         var messages: [MailSummary]
-        /// The newest and oldest rows the query read, before copies were dropped.
+        /// The newest and oldest canonical rows the query read.
         var first: Cursor?
         var last: Cursor?
         /// True when the query filled its limit, so an older page may exist.
@@ -154,9 +161,9 @@ enum MailStore {
             // A copy of one email in two mailboxes shares its global ID; older indexes have a
             // Message-ID hash. A row without either is its own email.
             var keys: [String] = []
-            if cols.contains("global_message_id") { keys.append("NULLIF(m.global_message_id, 0)") }
-            if cols.contains("message_id") { keys.append("NULLIF(m.message_id, 0)") }
-            key = keys.isEmpty ? "-m.ROWID" : "COALESCE(" + (keys + ["-m.ROWID"]).joined(separator: ", ") + ")"
+            if cols.contains("global_message_id") { keys.append("CASE WHEN m.global_message_id != 0 THEN 'global:' || m.global_message_id END") }
+            if cols.contains("message_id") { keys.append("CASE WHEN m.message_id != 0 THEN 'message:' || m.message_id END") }
+            key = keys.isEmpty ? "'row:' || m.ROWID" : "COALESCE(" + (keys + ["'row:' || m.ROWID"]).joined(separator: ", ") + ")"
         }
     }
 
@@ -200,14 +207,14 @@ enum MailStore {
                 if c.summary { match += " OR m.summary IN w\(index)b" }
                 sql += " AND (" + match + ")"
             }
+            if query.dedupe { sql += canonicalCopy(cols, query, searchWords: searchWords) }
             return "SELECT * FROM (" + sql + " ORDER BY m.date_received DESC, m.ROWID DESC LIMIT \(limit))"
         }
         var arms: [String] = []
         if !query.rowIDs.isEmpty {
             arms.append(arm("m.ROWID IN (" + query.rowIDs.map { _ in "?" }.joined(separator: ",") + ")", query.rowIDs.map { .int($0) }))
         } else if query.mailboxes.isEmpty {
-            guard query.flaggedOnly || query.unreadOnly else { return (nil, []) }
-            arms.append(arm("1", []))
+            return (nil, [])
         } else if query.mailboxes.count > maxArms {
             arms.append(arm("m.mailbox IN (" + query.mailboxes.map { _ in "?" }.joined(separator: ",") + ")", query.mailboxes.map { .int($0) }))
         } else {
@@ -228,13 +235,42 @@ enum MailStore {
         return (sql, arguments)
     }
 
+    /// Choose a representative before applying the cursor. Otherwise an inbox copy on an older
+    /// page loses to an archive copy, and duplicate-only pages can stop automatic paging.
+    private static func canonicalCopy(_ cols: Set<String>, _ query: Query, searchWords: [String]) -> String {
+        let c = Columns(cols)
+        let scope = query.rowIDs.isEmpty
+            ? "d.mailbox IN (" + query.mailboxes.map(String.init).joined(separator: ",") + ")"
+            : "d.ROWID IN (" + query.rowIDs.map(String.init).joined(separator: ",") + ")"
+        var eligible = scope + " AND " + c.deleted.replacingOccurrences(of: "m.", with: "d.") + " = 0"
+        if query.unreadOnly { eligible += " AND " + c.read.replacingOccurrences(of: "m.", with: "d.") + " = 0" }
+        if query.flaggedOnly { eligible += " AND " + c.flagged.replacingOccurrences(of: "m.", with: "d.") + " = 1" }
+        for index in searchWords.indices {
+            var match = "d.subject IN w\(index)s OR d.sender IN w\(index)a"
+            if c.summary { match += " OR d.summary IN w\(index)b" }
+            eligible += " AND (" + match + ")"
+        }
+        let preferred = query.preferred.sorted().map(String.init).joined(separator: ",")
+        let mp = preferred.isEmpty ? "0" : "(m.mailbox IN (\(preferred)))"
+        let dp = preferred.isEmpty ? "0" : "(d.mailbox IN (\(preferred)))"
+        eligible += " AND (\(dp) > \(mp) OR (\(dp) = \(mp) AND (d.date_received > m.date_received OR (d.date_received = m.date_received AND d.ROWID > m.ROWID))))"
+        var cases: [String] = []
+        if cols.contains("global_message_id") {
+            cases.append("WHEN m.global_message_id != 0 THEN NOT EXISTS (SELECT 1 FROM messages d WHERE d.global_message_id = m.global_message_id AND \(eligible))")
+        }
+        if cols.contains("message_id") {
+            let noGlobal = cols.contains("global_message_id") ? "COALESCE(d.global_message_id, 0) = 0 AND " : ""
+            cases.append("WHEN m.message_id != 0 THEN NOT EXISTS (SELECT 1 FROM messages d WHERE d.message_id = m.message_id AND \(noGlobal)\(eligible))")
+        }
+        return cases.isEmpty ? "" : " AND (CASE " + cases.joined(separator: " ") + " ELSE 1 END)"
+    }
+
     static func words(_ text: String) -> [String] {
         Array(text.split(whereSeparator: \.isWhitespace).map(String.init).prefix(6))
     }
 
     private static func makePage(_ rows: [[SQLiteReader.Value]], _ query: Query) -> Page {
         var messages: [MailSummary] = []
-        var slot: [Int64: Int] = [:]
         var first: Cursor?, last: Cursor?
         for row in rows {
             guard row.count == 11, let id = row[0].int else { continue }
@@ -242,17 +278,10 @@ enum MailStore {
                                       senderAddress: row[4].text ?? "", snippet: row[5].text ?? "",
                                       date: Date(timeIntervalSince1970: row[6].double ?? 0),
                                       read: (row[7].int ?? 0) != 0, flagged: (row[8].int ?? 0) != 0,
-                                      conversation: row[9].int ?? id, messageKey: row[10].int ?? -id)
+                                      conversation: row[9].int ?? id, messageKey: row[10].text ?? "row:\(id)")
             let cursor = Cursor(date: row[6].double ?? 0, rowID: id)
             if first == nil { first = cursor }
             last = cursor
-            guard query.dedupe else { messages.append(message); continue }
-            if let index = slot[message.messageKey] {
-                // The inbox copy wins, so actions work on the mailbox you know.
-                if query.preferred.contains(message.mailbox), !query.preferred.contains(messages[index].mailbox) { messages[index] = message }
-                continue
-            }
-            slot[message.messageKey] = messages.count
             messages.append(message)
         }
         return Page(messages: messages, first: first, last: last, hasMore: rows.count >= max(1, min(query.limit, 2000)))
@@ -261,9 +290,9 @@ enum MailStore {
     /// The current mailbox and flags of rows already on screen, for a refresh that does not
     /// read the whole list again. Rows Mail removed are missing from the result.
     struct RowState: Equatable { let mailbox: Int64; let read: Bool; let flagged: Bool }
-    static func states(root: String, rowIDs: [Int64]) throws -> [Int64: RowState] {
+    static func states(root: String, rowIDs: [Int64], stop: (() -> Bool)? = nil) throws -> [Int64: RowState] {
         guard !rowIDs.isEmpty else { return [:] }
-        return try withIndex(root) { db, cols in
+        return try withIndex(root, stop: stop) { db, cols in
             let c = Columns(cols)
             var result: [Int64: RowState] = [:]
             // Fixed-size chunks keep one cached statement for every chunk but the last.
@@ -308,7 +337,7 @@ enum MailStore {
         let path = indexPath(root)
         let attributes = { (p: String) in (try? FileManager.default.attributesOfItem(atPath: p)) ?? [:] }
         let main = attributes(path), wal = attributes(path + "-wal")
-        return "\((main[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)-\((wal[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)-\(wal[.size] as? Int ?? 0)"
+        return "\(FileIdentity(path: path)?.inode ?? 0)-\((main[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)-\((wal[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)-\(wal[.size] as? Int ?? 0)"
     }
 
     /// The message's `.emlx` file, or nil when Mail has not downloaded it.

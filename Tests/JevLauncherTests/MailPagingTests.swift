@@ -2,7 +2,7 @@ import XCTest
 import LauncherCore
 @testable import JevLauncher
 
-/// Paging, All Mail, search, query plans, and timings against a 100k-message synthetic index.
+/// Paging, All Mail, search, query plans, and timings against a synthetic index shaped like a real 40k-message one.
 final class MailPagingTests: XCTestCase {
     nonisolated(unsafe) private static var root: String!
 
@@ -21,10 +21,11 @@ final class MailPagingTests: XCTestCase {
     private var inboxes: [Int64] { boxes.filter { $0.role == .inbox }.map(\.rowID) }
     private var allMail: [Int64] { boxes.filter(\.inAllMail).map(\.rowID) }
 
-    func testFixtureHasOneHundredThousandMessages() throws {
+    func testFixtureHasTheRealisticLayout() throws {
         XCTAssertEqual(try MailStore.count(root: root, mailboxes: boxes.map(\.rowID)), MailFixture.Layout().total)
         XCTAssertEqual(Set(inboxes), [1, 5], "Gmail INBOX and Exchange Inbox are both inboxes.")
         XCTAssertTrue(MailStore.hasMailboxDateIndex(root: root))
+        XCTAssertGreaterThanOrEqual(boxes.count, 30)
     }
 
     func testPagesCoverEveryInboxMessageOnce() throws {
@@ -68,14 +69,41 @@ final class MailPagingTests: XCTestCase {
         for message in gmail where inboxKeys.contains(message.messageKey) { XCTAssertEqual(message.mailbox, 1) }
         let expected = MailFixture.Layout()
         XCTAssertEqual(try MailStore.count(root: root, mailboxes: allMail, distinct: true),
-                       expected.gmailInbox + expected.allMailOnly + expected.exchangeInbox + expected.projects)
+                       expected.gmailInbox + expected.allMailOnly + expected.exchangeInbox + expected.projects + expected.perFolder * MailFixture.folders.count)
     }
 
     func testSearchMatchesBodyText() throws {
-        let hits = try MailStore.page(root: root, .init(mailboxes: allMail, text: "body1234.")).messages
+        let query = MailStore.Query(mailboxes: allMail, text: "body1234.", dedupe: true, preferred: Set(inboxes))
+        XCTAssertEqual(try MailStore.page(root: root, query).messages, [], "The first phase reads subjects and senders only.")
+        let result = try MailStore.searchBodies(root: root, query, budget: 60)
+        XCTAssertTrue(result.done)
+        let hits = result.messages
         XCTAssertFalse(hits.isEmpty, "A word only in Mail's body summary matches.")
+        XCTAssertEqual(Set(hits.map(\.messageKey)).count, hits.count, "One email shows once.")
         let preview = try MailStore.page(root: root, .init(mailboxes: [], rowIDs: hits.map(\.rowID), includePreview: true)).messages
         XCTAssertTrue(preview.allSatisfy { $0.snippet.contains("body1234.") })
+    }
+
+    /// Body steps continue where the last stopped, so steps together read every row once.
+    func testBodyStepsCoverTheScope() throws {
+        let query = MailStore.Query(mailboxes: inboxes, text: "body12")
+        var cursor: MailStore.Cursor?
+        var found: [Int64] = []
+        var steps = 0
+        while true {
+            let step = try MailStore.bodyStep(root: root, query, before: cursor)
+            found += step.messages.map(\.rowID)
+            steps += 1
+            if step.done { break }
+            cursor = step.cursor
+        }
+        XCTAssertEqual(steps, try MailStore.count(root: root, mailboxes: inboxes) / MailStore.bodyWindow + 1)
+        XCTAssertEqual(Set(found).count, found.count)
+        let all = try MailStore.searchBodies(root: root, query, budget: 60, maxMatches: .max)
+        XCTAssertEqual(all.messages.map(\.rowID), found)
+        let short = try MailStore.searchBodies(root: root, .init(mailboxes: inboxes, text: "the"), maxMatches: 50)
+        XCTAssertFalse(short.done, "A common word stops once enough matches are found.")
+        XCTAssertGreaterThanOrEqual(short.messages.count, 50)
     }
 
     func testStopCancelsAQuery() {
@@ -110,17 +138,19 @@ final class MailPagingTests: XCTestCase {
             throw XCTSkip("Timings mean nothing under a sanitizer.")
         }
         let t = try Self.measure(root: root)
-        print("Mail timings on \(MailFixture.Layout().total) messages: first page \(t.first) ms, next page \(t.next) ms, search \(t.search) ms, rare-word search \(t.rareSearch) ms, All Mail \(t.allMail) ms")
+        print("Mail timings on \(MailFixture.Layout().total) messages: first page \(t.first) ms, next page \(t.next) ms, search \(t.search) ms, rare-word search \(t.rareSearch) ms, body phase \(t.body) ms, rare-word body phase \(t.rareBody) ms, All Mail \(t.allMail) ms")
         // Targets are 30, 20, and 50 ms. The limits leave headroom for a busy test machine.
         XCTAssertLessThan(t.first, 60)
         XCTAssertLessThan(t.next, 40)
         XCTAssertLessThan(t.search, 100)
         XCTAssertLessThan(t.rareSearch, 100, "A word in almost no message still returns quickly.")
+        XCTAssertLessThan(t.body, 250, "The body phase stops at its 150 ms budget or 200 matches.")
+        XCTAssertLessThan(t.rareBody, 250)
         XCTAssertLessThan(t.allMail, 60)
     }
 
     /// Median milliseconds of several runs, with the connection already open.
-    static func measure(root: String) throws -> (first: Double, next: Double, search: Double, rareSearch: Double, allMail: Double) {
+    static func measure(root: String) throws -> (first: Double, next: Double, search: Double, rareSearch: Double, body: Double, rareBody: Double, allMail: Double) {
         let boxes = try MailStore.mailboxes(root: root)
         let inboxes = boxes.filter { $0.role == .inbox }.map(\.rowID)
         let all = boxes.filter(\.inAllMail).map(\.rowID)
@@ -136,11 +166,15 @@ final class MailPagingTests: XCTestCase {
         let first = try MailStore.page(root: root, .init(mailboxes: inboxes))
         let firstTime = try median { _ = try MailStore.page(root: root, .init(mailboxes: inboxes)) }
         let nextTime = try median { _ = try MailStore.page(root: root, .init(mailboxes: inboxes, before: first.last)) }
-        let searchTime = try median { _ = try MailStore.page(root: root, .init(mailboxes: all, text: "reference invoice")) }
+        let common = MailStore.Query(mailboxes: all, text: "the", dedupe: true, preferred: Set(inboxes))
+        let rare = MailStore.Query(mailboxes: all, text: "body1234.", dedupe: true, preferred: Set(inboxes))
+        let searchTime = try median { _ = try MailStore.page(root: root, common) }
         // A word in only a few messages reads every row: the worst case.
-        let rareTime = try median { _ = try MailStore.page(root: root, .init(mailboxes: all, text: "body1234.")) }
+        let rareTime = try median { _ = try MailStore.page(root: root, rare) }
+        let bodyTime = try median { _ = try MailStore.searchBodies(root: root, common) }
+        let rareBodyTime = try median { _ = try MailStore.searchBodies(root: root, rare) }
         let allTime = try median { _ = try MailStore.page(root: root, .init(mailboxes: all, dedupe: true, preferred: Set(inboxes))) }
-        return (firstTime, nextTime, searchTime, rareTime, allTime)
+        return (firstTime, nextTime, searchTime, rareTime, bodyTime, rareBodyTime, allTime)
     }
 }
 
@@ -149,7 +183,7 @@ final class MailPlaceTests: XCTestCase {
         let boxes = MailFixture.mailboxes.map { MailMailbox(rowID: $0.0, url: $0.1, unread: 0, total: 0) }
         XCTAssertEqual(MailModel.query(.inbox, "", boxes).mailboxes, [1, 5])
         let all = MailModel.query(.allMail, "x", boxes)
-        XCTAssertEqual(all.mailboxes, [1, 2, 5, 6], "All Mail leaves out Sent and Trash.")
+        XCTAssertEqual(all.mailboxes, [1, 2, 5, 6] + MailFixture.folders.map(\.0), "All Mail leaves out Sent and Trash.")
         XCTAssertTrue(all.dedupe)
         XCTAssertEqual(all.preferred, [1, 5])
         XCTAssertEqual(all.text, "x")

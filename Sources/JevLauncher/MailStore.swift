@@ -140,11 +140,41 @@ enum MailStore {
     }
 
     static func page(root: String, _ query: Query, stop: (() -> Bool)? = nil) throws -> Page {
-        try withIndex(root, stop: stop) { db, cols in
-            let (sql, arguments) = pageSQL(cols, query)
-            guard let sql else { return Page(messages: [], first: nil, last: nil, hasMore: false) }
-            return makePage(try db.rows(sql, arguments), query)
+        try withIndex(root, stop: stop) { db, cols in try page(db, cols, query) }
+    }
+
+    /// Without `dedupe` one read makes the page. With it, reads go on past dropped copies until the
+    /// page is full, so a stretch of archive copies never shows as an empty page.
+    static func page(_ db: SQLiteReader, _ cols: Set<String>, _ query: Query) throws -> Page {
+        let limit = max(1, min(query.limit, 2000))
+        var batch = query
+        var result = Page(messages: [], first: nil, last: nil, hasMore: false)
+        for _ in 0..<20 {
+            let (sql, arguments) = pageSQL(cols, batch)
+            guard let sql else { return result }
+            let rows = try db.rows(sql, arguments)
+            let kept = query.dedupe ? try canonicalRows(db, cols, query, rows) : rows
+            let messages = summaries(kept)
+            if result.first == nil { result.first = cursor(rows.first) }
+            if result.messages.count + messages.count >= limit, rows.count >= limit || result.messages.count + messages.count > limit {
+                // The page ends at its last shown row; rows after it are read again next time.
+                result.messages += messages.prefix(limit - result.messages.count)
+                result.last = result.messages.last.map(Cursor.init)
+                result.hasMore = true
+                return result
+            }
+            result.messages += messages
+            result.last = cursor(rows.last) ?? result.last
+            result.hasMore = rows.count >= limit
+            guard result.hasMore, let last = result.last else { return result }
+            batch.before = last
         }
+        return result
+    }
+
+    private static func cursor(_ row: [SQLiteReader.Value]?) -> Cursor? {
+        guard let row, row.count == 11, let id = row[0].int else { return nil }
+        return Cursor(date: row[6].double ?? 0, rowID: id)
     }
 
     /// Mail's read, flagged, and deleted flags: separate columns in newer indexes, bits before.
@@ -171,14 +201,14 @@ enum MailStore {
     /// whole table. More than this many fall back to one `IN` list.
     static let maxArms = 300
 
-    /// The page query: one arm per mailbox, each walking Mail's (mailbox, date) order and stopping
-    /// at the page size, merged newest first. Details join only for the rows that make the page.
-    static func pageSQL(_ cols: Set<String>, _ query: Query) -> (String?, [SQLiteReader.Value]) {
+    /// The rows a list reads, newest first: one arm per mailbox, each walking Mail's (mailbox, date)
+    /// order and stopping at `limit`, merged. With `match`, every typed word must appear in the
+    /// subject or the sender; the small subject and address tables are searched once, as
+    /// materialized lists the arms probe. Returns nil when the query has no scope.
+    struct Scope { var ctes: [String]; var rows: String; var arguments: [SQLiteReader.Value]; var words: [String] }
+    static func scope(_ cols: Set<String>, _ query: Query, limit: Int, match: Bool) -> Scope? {
         let c = Columns(cols)
-        let limit = max(1, min(query.limit, 2000))
         var arguments: [SQLiteReader.Value] = []
-        // Each small table is searched once per query, as a materialized list shared by every
-        // mailbox arm; the arms then only probe the IDs found.
         let searchWords = words(query.text)
         var ctes: [String] = []
         for (index, word) in searchWords.enumerated() {
@@ -186,7 +216,6 @@ enum MailStore {
             let n = "?\(arguments.count)"
             ctes.append("w\(index)s AS MATERIALIZED (SELECT ROWID FROM subjects WHERE subject LIKE \(n) ESCAPE '\\')")
             ctes.append("w\(index)a AS MATERIALIZED (SELECT ROWID FROM addresses WHERE address LIKE \(n) ESCAPE '\\' OR comment LIKE \(n) ESCAPE '\\')")
-            if c.summary { ctes.append("w\(index)b AS MATERIALIZED (SELECT ROWID FROM summaries WHERE summary LIKE \(n) ESCAPE '\\')") }
         }
         func arm(_ scope: String, _ scopeArguments: [SQLiteReader.Value]) -> String {
             var sql = "SELECT m.ROWID AS id, m.date_received AS d FROM messages m WHERE \(scope) AND \(c.deleted) = 0"
@@ -201,77 +230,108 @@ enum MailStore {
                 sql += " AND m.date_received >= ? AND (m.date_received > ? OR m.ROWID > ?)"
                 arguments += [.double(after.date), .double(after.date), .int(after.rowID)]
             }
-            for index in searchWords.indices {
-                // Every word must appear in the subject, the sender, or the text Mail keeps for the body.
-                var match = "m.subject IN w\(index)s OR m.sender IN w\(index)a"
-                if c.summary { match += " OR m.summary IN w\(index)b" }
-                sql += " AND (" + match + ")"
-            }
-            if query.dedupe { sql += canonicalCopy(cols, query, searchWords: searchWords) }
+            if match { for index in searchWords.indices { sql += " AND (m.subject IN w\(index)s OR m.sender IN w\(index)a)" } }
             return "SELECT * FROM (" + sql + " ORDER BY m.date_received DESC, m.ROWID DESC LIMIT \(limit))"
         }
         var arms: [String] = []
         if !query.rowIDs.isEmpty {
             arms.append(arm("m.ROWID IN (" + query.rowIDs.map { _ in "?" }.joined(separator: ",") + ")", query.rowIDs.map { .int($0) }))
         } else if query.mailboxes.isEmpty {
-            return (nil, [])
+            return nil
         } else if query.mailboxes.count > maxArms {
             arms.append(arm("m.mailbox IN (" + query.mailboxes.map { _ in "?" }.joined(separator: ",") + ")", query.mailboxes.map { .int($0) }))
         } else {
             for box in query.mailboxes { arms.append(arm("m.mailbox = ?", [.int(box)])) }
         }
-        let summary = c.summary && query.includePreview ? "COALESCE((SELECT summary FROM summaries WHERE ROWID = m.summary), '')" : "''"
+        let rows = arms.joined(separator: " UNION ALL ") + " ORDER BY d DESC, id DESC LIMIT \(limit)"
+        return Scope(ctes: ctes, rows: rows, arguments: arguments, words: searchWords)
+    }
+
+    /// The columns `makePage` reads, for rows `m` joined to their subject `s` and sender `a`.
+    static func listColumns(_ cols: Set<String>, preview: Bool) -> String {
+        let c = Columns(cols)
+        let summary = c.summary && preview ? "COALESCE((SELECT summary FROM summaries WHERE ROWID = m.summary), '')" : "''"
         let conversation = cols.contains("conversation_id") ? "COALESCE(m.conversation_id, m.ROWID)" : "m.ROWID"
-        let with = ctes.isEmpty ? "" : "WITH " + ctes.joined(separator: ", ") + "\n"
-        let sql = with + """
-        SELECT m.ROWID, m.mailbox, \(c.prefix)COALESCE(s.subject, ''), COALESCE(a.comment, ''), COALESCE(a.address, ''),
+        return """
+        m.ROWID, m.mailbox, \(c.prefix)COALESCE(s.subject, ''), COALESCE(a.comment, ''), COALESCE(a.address, ''),
                \(summary), m.date_received, \(c.read), \(c.flagged), \(conversation), \(c.key)
-        FROM (\(arms.joined(separator: " UNION ALL ")) ORDER BY d DESC, id DESC LIMIT \(limit)) p
+        """
+    }
+
+    /// The page query. A search matches subjects and senders here; bodies are searched in
+    /// bounded steps by `bodyStep`, because Mail's summaries are too large to scan per keystroke.
+    /// Details join only for the rows that make the page.
+    static func pageSQL(_ cols: Set<String>, _ query: Query) -> (String?, [SQLiteReader.Value]) {
+        let limit = max(1, min(query.limit, 2000))
+        guard let scope = scope(cols, query, limit: limit, match: true) else { return (nil, []) }
+        let with = scope.ctes.isEmpty ? "" : "WITH " + scope.ctes.joined(separator: ", ") + "\n"
+        let sql = with + """
+        SELECT \(listColumns(cols, preview: query.includePreview))
+        FROM (\(scope.rows)) p
         JOIN messages m ON m.ROWID = p.id
         LEFT JOIN subjects s ON s.ROWID = m.subject
         LEFT JOIN addresses a ON a.ROWID = m.sender
         ORDER BY p.d DESC, p.id DESC
         """
-        return (sql, arguments)
+        return (sql, scope.arguments)
     }
 
-    /// Choose a representative before applying the cursor. Otherwise an inbox copy on an older
-    /// page loses to an archive copy, and duplicate-only pages can stop automatic paging.
-    private static func canonicalCopy(_ cols: Set<String>, _ query: Query, searchWords: [String]) -> String {
+    /// Drops rows that are not their email's chosen copy. The copy in a preferred mailbox (the
+    /// inbox) wins, then the newest. The choice looks at every copy in scope, also copies on other
+    /// pages, so an archive copy never shows when the inbox copy is further down. One query per
+    /// key kind reads the copies of this page's emails, instead of a correlated lookup per row,
+    /// which scanned the whole table per row when Mail has no index on the key.
+    static func canonicalRows(_ db: SQLiteReader, _ cols: Set<String>, _ query: Query, _ rows: [[SQLiteReader.Value]]) throws -> [[SQLiteReader.Value]] {
         let c = Columns(cols)
-        let scope = query.rowIDs.isEmpty
-            ? "d.mailbox IN (" + query.mailboxes.map(String.init).joined(separator: ",") + ")"
-            : "d.ROWID IN (" + query.rowIDs.map(String.init).joined(separator: ",") + ")"
-        var eligible = scope + " AND " + c.deleted.replacingOccurrences(of: "m.", with: "d.") + " = 0"
-        if query.unreadOnly { eligible += " AND " + c.read.replacingOccurrences(of: "m.", with: "d.") + " = 0" }
-        if query.flaggedOnly { eligible += " AND " + c.flagged.replacingOccurrences(of: "m.", with: "d.") + " = 1" }
-        for index in searchWords.indices {
-            var match = "d.subject IN w\(index)s OR d.sender IN w\(index)a"
-            if c.summary { match += " OR d.summary IN w\(index)b" }
-            eligible += " AND (" + match + ")"
+        var globals: [Int64] = [], messageIDs: [Int64] = []
+        for row in rows where row.count == 11 {
+            guard let key = row[10].text else { continue }
+            if key.hasPrefix("global:"), let id = Int64(key.dropFirst(7)) { globals.append(id) }
+            if key.hasPrefix("message:"), let id = Int64(key.dropFirst(8)) { messageIDs.append(id) }
         }
-        let preferred = query.preferred.sorted().map(String.init).joined(separator: ",")
-        let mp = preferred.isEmpty ? "0" : "(m.mailbox IN (\(preferred)))"
-        let dp = preferred.isEmpty ? "0" : "(d.mailbox IN (\(preferred)))"
-        eligible += " AND (\(dp) > \(mp) OR (\(dp) = \(mp) AND (d.date_received > m.date_received OR (d.date_received = m.date_received AND d.ROWID > m.ROWID))))"
-        var cases: [String] = []
-        if cols.contains("global_message_id") {
-            cases.append("WHEN m.global_message_id != 0 THEN NOT EXISTS (SELECT 1 FROM messages d WHERE d.global_message_id = m.global_message_id AND \(eligible))")
+        var eligible = "\(c.deleted) = 0"
+        var scopeArguments: [SQLiteReader.Value]
+        if query.rowIDs.isEmpty {
+            eligible += " AND m.mailbox IN (" + query.mailboxes.map { _ in "?" }.joined(separator: ",") + ")"
+            scopeArguments = query.mailboxes.map { .int($0) }
+        } else {
+            eligible += " AND m.ROWID IN (" + query.rowIDs.map { _ in "?" }.joined(separator: ",") + ")"
+            scopeArguments = query.rowIDs.map { .int($0) }
         }
-        if cols.contains("message_id") {
-            let noGlobal = cols.contains("global_message_id") ? "COALESCE(d.global_message_id, 0) = 0 AND " : ""
-            cases.append("WHEN m.message_id != 0 THEN NOT EXISTS (SELECT 1 FROM messages d WHERE d.message_id = m.message_id AND \(noGlobal)\(eligible))")
+        if query.unreadOnly { eligible += " AND \(c.read) = 0" }
+        if query.flaggedOnly { eligible += " AND \(c.flagged) = 1" }
+        var best: [String: (preferred: Bool, date: Double, rowID: Int64)] = [:]
+        func read(_ column: String, _ ids: [Int64], extra: String) throws {
+            guard !ids.isEmpty else { return }
+            let sql = "SELECT m.ROWID, m.mailbox, m.date_received, \(c.key) FROM messages m WHERE m.\(column) IN ("
+                + ids.map { _ in "?" }.joined(separator: ",") + ") AND " + extra + eligible
+            for row in try db.rows(sql, ids.map { .int($0) } + scopeArguments) where row.count == 4 {
+                guard let id = row[0].int, let key = row[3].text else { continue }
+                let candidate = (preferred: query.preferred.contains(row[1].int ?? 0), date: row[2].double ?? 0, rowID: id)
+                if let old = best[key], beats(old, candidate) { continue }
+                best[key] = candidate
+            }
         }
-        return cases.isEmpty ? "" : " AND (CASE " + cases.joined(separator: " ") + " ELSE 1 END)"
+        try read("global_message_id", Array(Set(globals)), extra: "")
+        try read("message_id", Array(Set(messageIDs)), extra: cols.contains("global_message_id") ? "COALESCE(m.global_message_id, 0) = 0 AND " : "")
+        return rows.filter { row in
+            guard row.count == 11, let id = row[0].int, let key = row[10].text, let chosen = best[key] else { return true }
+            return chosen.rowID == id
+        }
+    }
+
+    /// True when copy `a` wins over copy `b`: preferred first, then newer.
+    static func beats(_ a: (preferred: Bool, date: Double, rowID: Int64), _ b: (preferred: Bool, date: Double, rowID: Int64)) -> Bool {
+        if a.preferred != b.preferred { return a.preferred }
+        return a.date > b.date || (a.date == b.date && a.rowID > b.rowID)
     }
 
     static func words(_ text: String) -> [String] {
         Array(text.split(whereSeparator: \.isWhitespace).map(String.init).prefix(6))
     }
 
-    private static func makePage(_ rows: [[SQLiteReader.Value]], _ query: Query) -> Page {
+    static func summaries(_ rows: [[SQLiteReader.Value]]) -> [MailSummary] {
         var messages: [MailSummary] = []
-        var first: Cursor?, last: Cursor?
         for row in rows {
             guard row.count == 11, let id = row[0].int else { continue }
             let message = MailSummary(rowID: id, mailbox: row[1].int ?? 0, subject: row[2].text ?? "", senderName: row[3].text ?? "",
@@ -279,12 +339,9 @@ enum MailStore {
                                       date: Date(timeIntervalSince1970: row[6].double ?? 0),
                                       read: (row[7].int ?? 0) != 0, flagged: (row[8].int ?? 0) != 0,
                                       conversation: row[9].int ?? id, messageKey: row[10].text ?? "row:\(id)")
-            let cursor = Cursor(date: row[6].double ?? 0, rowID: id)
-            if first == nil { first = cursor }
-            last = cursor
             messages.append(message)
         }
-        return Page(messages: messages, first: first, last: last, hasMore: rows.count >= max(1, min(query.limit, 2000)))
+        return messages
     }
 
     /// The current mailbox and flags of rows already on screen, for a refresh that does not

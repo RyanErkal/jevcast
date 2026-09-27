@@ -77,7 +77,12 @@ final class MailModel: ObservableObject {
     private var top: MailStore.Cursor?
     @Published private(set) var bottom: MailStore.Cursor?
     private var loadingMore = false
-    var isLoading: Bool { reloading || loadingMore || refreshing }
+    var isLoading: Bool { reloading || loadingMore || refreshing || bodySearch == .running }
+    /// The body phase of a search: off without a search, `more` when rows remain unread.
+    enum BodySearch: Equatable { case off, running, more, done }
+    @Published private(set) var bodySearch = BodySearch.off
+    /// Where the body phase goes on: the oldest row it read.
+    private var bodyCursor: MailStore.Cursor?
     private var reloading = false
     private var refreshing = false
     private let statusProvider: @Sendable () -> MailStore.Status
@@ -250,6 +255,7 @@ final class MailModel: ObservableObject {
         listStop.stop()
         generation += 1
         loadingMore = false; refreshing = false; reloading = false
+        bodySearch = .off; bodyCursor = nil
         searchWork = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 150_000_000)
             guard !Task.isCancelled else { return }
@@ -268,6 +274,7 @@ final class MailModel: ObservableObject {
         listStop = stop
         generation += 1
         loadingMore = false; refreshing = false; reloading = true
+        bodySearch = .off; bodyCursor = nil
         let generation = self.generation
         updateMailRunning()
         loadWork = Task { @MainActor [weak self] in
@@ -304,6 +311,8 @@ final class MailModel: ObservableObject {
                 merged.append(kept)
             }
             self.install(Self.merge([], merged, query: Self.query(place, search, boxes)))
+            // Subject and sender matches show now; body matches follow in a short, bounded step.
+            if !search.isEmpty { self.searchBodies(budget: 0.15) }
             if let pending = self.pending {
                 self.pending = nil
                 if !self.messages.contains(where: { $0.rowID == pending.rowID }) {
@@ -345,6 +354,24 @@ final class MailModel: ObservableObject {
             if Set(self.messages.map(\.rowID)) == oldIDs, page.hasMore {
                 self.loadNextPage()
             }
+        }
+    }
+
+    /// Reads older rows for body matches, for about `budget` seconds or 200 matches.
+    func searchBodies(budget: TimeInterval = 2) {
+        guard let root, !search.isEmpty, bodySearch != .running, bodySearch != .done, !listStop.isStopped else { return }
+        let query = Self.query(place, search, mailboxes), cursor = bodyCursor, stop = listStop, generation = self.generation
+        bodySearch = .running
+        Task { @MainActor [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                try? MailStore.searchBodies(root: root, query, from: cursor, budget: budget, stop: stop.check)
+            }.value
+            guard let self, !stop.isStopped, self.generation == generation else { return }
+            guard let result else { self.bodySearch = .more; return }
+            self.bodyCursor = result.cursor
+            self.bodySearch = result.done ? .done : .more
+            let added = result.messages.filter { self.removing[$0.rowID] == nil }
+            if !added.isEmpty { self.install(Self.merge(self.messages, added, query: query)) }
         }
     }
 

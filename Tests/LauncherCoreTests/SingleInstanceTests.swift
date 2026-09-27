@@ -27,7 +27,7 @@ final class SingleInstanceTests: XCTestCase {
     }
 
     func testDiagnosticFlagsAlwaysRun() {
-        for flag in ["--snapshot-ui", "--diagnose", "--diagnose-mail", "--diagnose-jev", "--capture-automations",
+        for flag in ["--snapshot-ui", "--diagnose", "--diagnose-mail", "--diagnose-jev",
                      "--hyper-led-test", "--notch-demo"] {
             XCTAssertEqual(SingleInstance.decide(arguments: [app, flag, "/tmp/x"], otherProcesses: 2, lockAcquired: false), .diagnostic, flag)
         }

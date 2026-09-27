@@ -39,6 +39,10 @@ extension Diagnostics {
         do {
             let db = try MailStore.open(root)
             print("messages columns: " + db.columns("messages").sorted().joined(separator: ", "))
+            // Names only, to see which search-friendly tables and indexes this Mail version has.
+            let names = { (type: String) in try db.rows("SELECT name FROM sqlite_master WHERE type = ? ORDER BY name", [.text(type)]).compactMap { $0.first?.text } }
+            print("Tables: " + (try names("table")).joined(separator: ", "))
+            print("messages indexes: " + (try db.rows("SELECT name FROM pragma_index_list('messages') ORDER BY name").compactMap { $0.first?.text }).joined(separator: ", "))
             print("Mailbox and date index: " + (MailStore.hasMailboxDateIndex(root: root) ? "yes" : "no (each mailbox is sorted in full)"))
             let boxes = try MailStore.mailboxes(root: root)
             print("Mailboxes: \(boxes.count)")
@@ -60,8 +64,14 @@ extension Diagnostics {
             print("Messages in inboxes: \(inboxTotal); first page shows \(first.messages.count), next page \(next.messages.count), more pages: \(next.hasMore ? "yes" : "no")")
             let (allCount, allMs) = try timed { try MailStore.count(root: root, mailboxes: allMail, distinct: true) }
             print("All Mail: \(allCount) emails in \(allMail.count) mailboxes (counted in \(allMs) ms)")
-            let (_, searchMs) = try timed { try MailStore.page(root: root, MailModel.query(.allMail, "the", boxes)) }
-            print("Timings: first page \(firstMs) ms, next page \(nextMs) ms, search \(searchMs) ms")
+            let (_, warmMs) = try timed { try MailStore.page(root: root, MailModel.query(.inbox, "", boxes)) }
+            let search = MailModel.query(.allMail, "the", boxes)
+            let (_, searchMs) = try timed { try MailStore.page(root: root, search) }
+            let (body, bodyMs) = try timed { try MailStore.searchBodies(root: root, search) }
+            // A text in no message reads every summary in All Mail: the cost of a full body search.
+            let (full, fullMs) = try timed { try MailStore.searchBodies(root: root, MailModel.query(.allMail, "zqxjv-none-7731", boxes), budget: 30) }
+            print("Timings: first page \(firstMs) ms (again \(warmMs) ms), next page \(nextMs) ms")
+            print("Search timings: subject and sender phase \(searchMs) ms; body phase \(bodyMs) ms (\(body.messages.count) matches, \(body.done ? "all read" : "more to read")); full body read \(fullMs) ms (\(full.done ? "complete" : "stopped at 30 s"))")
             let recent = first.messages
             print("Unread in first page: \(recent.filter { !$0.read }.count)")
             var found = 0

@@ -8,7 +8,7 @@ final class MailRegressionTests: XCTestCase {
 
     override func setUpWithError() throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("mail-regression-" + UUID().uuidString).path
-        try MailFixture.build(root: root, layout: .init(gmailInbox: 260, allMailOnly: 0, sent: 0, trash: 0, exchangeInbox: 0, projects: 0))
+        try MailFixture.build(root: root, layout: .init(gmailInbox: 260, allMailOnly: 0, sent: 0, trash: 0, exchangeInbox: 0, projects: 0, perFolder: 0))
     }
 
     override func tearDownWithError() throws {
@@ -61,7 +61,7 @@ final class MailRegressionTests: XCTestCase {
     func testIndexReplacementReopensConnection() throws {
         XCTAssertEqual(try MailStore.count(root: root, mailboxes: [1]), 260)
         let replacement = root + "/replacement"
-        try MailFixture.build(root: replacement, layout: .init(gmailInbox: 1, allMailOnly: 0, sent: 0, trash: 0, exchangeInbox: 0, projects: 0))
+        try MailFixture.build(root: replacement, layout: .init(gmailInbox: 1, allMailOnly: 0, sent: 0, trash: 0, exchangeInbox: 0, projects: 0, perFolder: 0))
         // Both fixtures have checkpointed WALs. Retain the old file for cleanup.
         try FileManager.default.moveItem(atPath: MailStore.indexPath(root), toPath: root + "/old-index")
         try FileManager.default.moveItem(atPath: MailStore.indexPath(replacement), toPath: MailStore.indexPath(root))
@@ -191,7 +191,7 @@ final class MailRegressionTests: XCTestCase {
         model.loadNextPage()
         model.search = "body123."
         try await wait { model.messages.count == 1 && !model.isLoading }
-        let matches = try MailStore.messages(root: root, .init(mailboxes: [1], text: "body123."))
+        let matches = try MailStore.searchBodies(root: root, .init(mailboxes: [1], text: "body123."), budget: 60).messages
         XCTAssertEqual(model.messages.map(\.rowID), matches.map(\.rowID))
     }
 

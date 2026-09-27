@@ -24,6 +24,15 @@ struct MailMessageList: View {
                         .task(id: model.bottom) { model.loadNextPage() }
                         .selectionDisabled()
                 }
+                switch model.bodySearch {
+                case .more:
+                    Button("Search more message text") { model.searchBodies() }
+                        .buttonStyle(.link).frame(maxWidth: .infinity).selectionDisabled()
+                case .running where !model.hasMore:
+                    ProgressView().controlSize(.small).frame(maxWidth: .infinity).selectionDisabled()
+                default:
+                    EmptyView()
+                }
             }
             .contextMenu(forSelectionType: Int64.self, menu: { _ in }) { ids in
                 guard let id = ids.first, let onDoubleClick else { return }
@@ -31,8 +40,9 @@ struct MailMessageList: View {
             }
             .listStyle(.inset)
             .overlay {
-                if model.messages.isEmpty {
-                    Text(model.search.isEmpty ? "\(model.placeTitle) is empty" : "No matches").foregroundStyle(.secondary)
+                if model.messages.isEmpty && model.bodySearch != .more {
+                    Text(model.search.isEmpty ? "\(model.placeTitle) is empty" : model.bodySearch == .running ? "Searching…" : "No matches")
+                        .foregroundStyle(.secondary)
                 }
             }
             .onChange(of: model.selectedID) { _, id in if scrollsToSelection, let id { proxy.scrollTo(id) } }

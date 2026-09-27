@@ -21,9 +21,12 @@ public enum SingleInstance {
 
     /// - Parameters:
     ///   - otherProcesses: running apps with the same bundle ID, excluding this process.
-    ///   - lockAcquired: false when another copy holds the lock file, such as a copy from another folder.
-    public static func decide(arguments: [String], otherProcesses: Int, lockAcquired: Bool) -> Decision {
+    ///   - lockAcquired: nil when locking is unavailable; false when another copy holds the lock.
+    public static func decide(arguments: [String], otherProcesses: Int, lockAcquired: Bool?) -> Decision {
         if isDiagnostic(arguments) { return .diagnostic }
-        return otherProcesses == 0 && lockAcquired ? .run : .handOff
+        // Diagnostic copies also appear in the process list. A held lock, not that list,
+        // identifies a normal copy and elects one winner during simultaneous launches.
+        if let lockAcquired { return lockAcquired ? .run : .handOff }
+        return otherProcesses == 0 ? .run : .handOff
     }
 }

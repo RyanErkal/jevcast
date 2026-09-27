@@ -151,7 +151,7 @@ public enum DashboardText {
 
     /// Seconds as "45s", "12m 5s", "3h 20m", or "2d 4h".
     public static func duration(_ seconds: Double) -> String {
-        let s = Int(abs(seconds).rounded())
+        guard seconds.isFinite, let s = Int(exactly: abs(seconds).rounded()) else { return "Out of range" }
         let sign = seconds < 0 ? "-" : ""
         switch s {
         case ..<60: return sign + "\(s)s"

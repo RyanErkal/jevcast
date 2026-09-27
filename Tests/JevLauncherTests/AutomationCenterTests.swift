@@ -27,6 +27,21 @@ final class AutomationCenterTests: XCTestCase {
                    kind: .agent(AgentTask(prompt: "tidy", workingDirectory: work, output: output)), schedule: Schedule(rule: .manual))
     }
 
+    func testConsecutiveDashboardEditsKeepEverySavedChange() throws {
+        let live = AutomationCenter(store: center.store)
+        let a = DashboardConfig(id: "a", name: "A", filePath: "/a.json")
+        let b = DashboardConfig(id: "b", name: "B", filePath: "/b.json")
+        live.saveDashboard(a)
+        live.saveDashboard(b)
+        XCTAssertEqual(live.dashboards.map(\.config), [a, b])
+        XCTAssertEqual(try center.store.loadDashboards(migrate: false), [a, b])
+        live.removeDashboard("a")
+        var edited = b
+        edited.name = "Changed"
+        live.saveDashboard(edited)
+        XCTAssertEqual(try center.store.loadDashboards(migrate: false), [edited])
+    }
+
     func testSaveRecordsApprovedProgramsEveryTime() throws {
         let script = workURL.appendingPathComponent("job.sh")
         try "#!/bin/sh\necho one\n".write(to: script, atomically: true, encoding: .utf8)

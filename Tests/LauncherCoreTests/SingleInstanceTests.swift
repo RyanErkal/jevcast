@@ -10,10 +10,20 @@ final class SingleInstanceTests: XCTestCase {
     }
 
     func testSecondCopyHandsOff() {
-        XCTAssertEqual(SingleInstance.decide(arguments: [app], otherProcesses: 1, lockAcquired: true), .handOff)
+        XCTAssertEqual(SingleInstance.decide(arguments: [app], otherProcesses: 1, lockAcquired: false), .handOff)
         // A copy from another folder can hold the lock under a different process list.
         XCTAssertEqual(SingleInstance.decide(arguments: [app], otherProcesses: 0, lockAcquired: false), .handOff)
         XCTAssertEqual(SingleInstance.decide(arguments: [app, "--automation-alerts"], otherProcesses: 1, lockAcquired: false), .handOff)
+    }
+
+    func testLockWinnerRunsDespiteOtherStartingOrDiagnosticProcesses() {
+        XCTAssertEqual(SingleInstance.decide(arguments: [app], otherProcesses: 2, lockAcquired: true), .run)
+        XCTAssertEqual(SingleInstance.decide(arguments: [app], otherProcesses: 2, lockAcquired: false), .handOff)
+    }
+
+    func testUnavailableLockUsesProcessCheck() {
+        XCTAssertEqual(SingleInstance.decide(arguments: [app], otherProcesses: 0, lockAcquired: nil), .run)
+        XCTAssertEqual(SingleInstance.decide(arguments: [app], otherProcesses: 1, lockAcquired: nil), .handOff)
     }
 
     func testDiagnosticFlagsAlwaysRun() {

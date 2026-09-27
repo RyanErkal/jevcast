@@ -33,13 +33,17 @@ enum InstanceGuard {
         return decision
     }
 
-    private static func acquireLock() -> Bool {
+    private static func acquireLock() -> Bool? {
         let url = lockURL
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let fd = open(url.path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
         // Without a lock file, the process check still applies.
-        guard fd >= 0 else { return true }
-        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { close(fd); return false }
+        guard fd >= 0 else { return nil }
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
+            let busy = errno == EWOULDBLOCK
+            close(fd)
+            return busy ? false : nil
+        }
         lockDescriptor = fd
         return true
     }

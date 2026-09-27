@@ -229,6 +229,24 @@ public final class AutomationStore: @unchecked Sendable {
         try locked { try encodeTop(value, name) }
     }
 
+    /// Read or migrate under one lock, so a concurrent refresh cannot replace a saved dashboard list.
+    /// Missing files are empty; unreadable files and incomplete migrations are errors.
+    public func loadDashboards(migrate: Bool) throws -> [DashboardConfig]? {
+        try locked {
+            try createParentsOfRoot(); try SecureFile.ensureDirectory(root)
+            if let data = try SecureFile.read(root.appendingPathComponent("dashboards.json"), maxBytes: SecureFile.maxJSON) {
+                return try AutomationJSON.decoder().decode([DashboardConfig].self, from: data)
+            }
+            guard migrate,
+                  let data = try SecureFile.read(root.appendingPathComponent("clients.json"), maxBytes: SecureFile.maxJSON) else { return nil }
+            guard let configs = DashboardMigration.migrate(legacy: data) else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+            try encodeTop(configs, "dashboards.json")
+            return configs
+        }
+    }
+
     /// The raw bytes of a small file directly in the root. Nil when missing or unreadable.
     public func readTopData(_ name: String) -> Data? {
         guard SecureFile.isSafeName(name) else { return nil }

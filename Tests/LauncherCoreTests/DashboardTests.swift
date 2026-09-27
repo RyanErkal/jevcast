@@ -70,7 +70,7 @@ final class DashboardTests: XCTestCase {
     }
 
     func testLegacyMigrationMapsKnownProfiles() throws {
-        let legacy = #"[{"id":"s","name":"S","profile":"stein","metricsPath":"/m.json"},{"id":"g","name":"G","profile":"generic","metricsPath":"/g.json"},{"bad":1}]"#
+        let legacy = #"[{"id":"s","name":"S","profile":"stein","metricsPath":"/m.json"},{"id":"g","name":"G","profile":"generic","metricsPath":"/g.json"}]"#
         let out = try XCTUnwrap(DashboardMigration.migrate(legacy: Data(legacy.utf8)))
         XCTAssertEqual(out.map(\.id), ["s", "g"])
         XCTAssertEqual(out[0].metrics.map(\.label), ["Spend", "Form qualified", "Cost per form qualified", "Meta form qualified"])
@@ -80,6 +80,53 @@ final class DashboardTests: XCTestCase {
         XCTAssertTrue(out[1].metrics.isEmpty)
         XCTAssertEqual(out[1].note, DashboardMigration.unknownNote)
         XCTAssertNil(DashboardMigration.migrate(legacy: Data("{}".utf8)))
+    }
+
+    func testMigrationRejectsIncompleteAndScalarEntriesWithoutCrashing() {
+        for suffix in [#"{"bad":1}"#, "null", "1", #""text""#] {
+            let raw = #"[{"id":"a","name":"A","metricsPath":"/a.json"},"# + suffix + "]"
+            XCTAssertNil(DashboardMigration.migrate(legacy: Data(raw.utf8)))
+        }
+    }
+
+    func testMigrationPersistsOnlyCompleteListsAndPreservesOriginal() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = AutomationStore(root: root)
+        try store.ensureRoot()
+        let legacyURL = root.appendingPathComponent("clients.json")
+        let legacy = Data(#"[{"id":"a","name":"A","metricsPath":"/a.json","automationID":"job","dashboardPath":"/a.html"}]"#.utf8)
+        try legacy.write(to: legacyURL)
+        let migrated = try XCTUnwrap(store.loadDashboards(migrate: true))
+        XCTAssertEqual(migrated.first?.automationID, "job")
+        XCTAssertEqual(migrated.first?.openPath, "/a.html")
+        XCTAssertEqual(try Data(contentsOf: legacyURL), legacy)
+        try store.writeTopFile([DashboardConfig](), name: "dashboards.json")
+        XCTAssertEqual(try store.loadDashboards(migrate: true), [], "Do not replace a saved list with legacy data")
+        let invalid = Data("invalid".utf8)
+        try invalid.write(to: root.appendingPathComponent("dashboards.json"))
+        XCTAssertThrowsError(try store.loadDashboards(migrate: true))
+        XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("dashboards.json")), invalid)
+    }
+
+    func testFailedMigrationDoesNotCreateCanonicalFile() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = AutomationStore(root: root)
+        try store.ensureRoot()
+        let legacy = Data(#"[{"id":"a","name":"A","metricsPath":"/a.json"},{"bad":1}]"#.utf8)
+        try legacy.write(to: root.appendingPathComponent("clients.json"))
+        XCTAssertThrowsError(try store.loadDashboards(migrate: true))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("dashboards.json").path))
+        XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("clients.json")), legacy)
+    }
+
+    func testDurationRejectsUnrepresentableNumbers() {
+        for value in [Double.greatestFiniteMagnitude, Double(Int.max), -Double.greatestFiniteMagnitude,
+                      Double.infinity, -Double.infinity, Double.nan] {
+            XCTAssertEqual(DashboardText.duration(value), "Out of range")
+        }
+        XCTAssertEqual(DashboardText.duration(-65), "-1m 5s")
     }
 
     func testConfigRoundTrips() throws {

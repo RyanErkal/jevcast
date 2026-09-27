@@ -30,7 +30,7 @@ struct AutomationsDemoData {
                                                      workingDirectory: home + "/Desktop", allowedRoots: [home + "/Desktop"], output: .proposal)),
                               schedule: Schedule(rule: .rrule("FREQ=WEEKLY;BYDAY=SU;BYHOUR=18;BYMINUTE=0"), anchor: week), enabled: true, created: week)
         tidy.notes = "Keeps the Desktop clear for screen sharing."
-        let stein = Automation(id: "sales-data-demo", name: "Sales data refresh", symbol: "chart.line.uptrend.xyaxis",
+        let sales = Automation(id: "sales-data-demo", name: "Sales data refresh", symbol: "chart.line.uptrend.xyaxis",
                                kind: .scriptWithDiagnosis(ScriptTask(executable: "/bin/zsh",
                                                                      arguments: ["scripts/refresh-sales.sh", "--out", "data/sales.json"],
                                                                      workingDirectory: home + "/Projects/reports"),
@@ -45,7 +45,7 @@ struct AutomationsDemoData {
         let backup = Automation(id: "docs-backup-demo", name: "Documents backup", symbol: "externaldrive",
                                 kind: .script(ScriptTask(executable: "/bin/zsh", arguments: ["scripts/backup.sh"], workingDirectory: home + "/Documents")),
                                 schedule: Schedule(rule: .manual, anchor: week), enabled: false, created: week)
-        d.automations = [tidy, stein, report, backup]
+        d.automations = [tidy, sales, report, backup]
 
         func run(_ a: Automation, _ id: String, _ state: RunState, ago: TimeInterval, length: TimeInterval, summary: String,
                  trigger: RunTrigger = .schedule, tokens: TokenUsage? = nil, error: String? = nil) -> RunRecord {
@@ -59,9 +59,9 @@ struct AutomationsDemoData {
                            tokens: TokenUsage(input: 18_400, cachedInput: 9_000, output: 1_250))
         d.runs[tidy.id] = [approval,
                            run(tidy, "20260919T180000Z-a1", .succeeded, ago: 7 * 86400, length: 81, summary: "Moved 6 files", tokens: TokenUsage(input: 16_000, output: 900))]
-        d.runs[stein.id] = [run(stein, failedRunID, .failed, ago: 3 * 3600, length: 41, summary: "The sales API returned an error",
+        d.runs[sales.id] = [run(sales, failedRunID, .failed, ago: 3 * 3600, length: 41, summary: "The sales API returned an error",
                                 error: "Sales API: request limit reached (429). Exit status 1."),
-                            run(stein, "20260926T080000Z-s2", .succeeded, ago: 7 * 3600, length: 38, summary: "Refreshed 3 sources")]
+                            run(sales, "20260926T080000Z-s2", .succeeded, ago: 7 * 3600, length: 38, summary: "Refreshed 3 sources")]
         d.runs[report.id] = [run(report, "20260926T140000Z-r1", .running, ago: 240, length: 0, summary: "", trigger: .manual)]
         d.outputs[failedRunID] = "[sales] fetching orders…\n[sales] retry 1/1 after 30s\nError: request limit reached (429)\n    at fetchOrders (scripts/refresh-sales.sh:41)"
         d.outputs["20260926T080000Z-s2"] = "## Refresh complete\n\n- **Orders**: 3 days closed through 2026-09-25\n- **Leads**: 42 new\n\nNo problems found."
@@ -92,7 +92,7 @@ struct AutomationsDemoData {
         d.codexIssues["weekly-summary"] = ["Still ACTIVE in Codex. Pause it there first.", "No working folder in the source. Choose one before turning it on."]
 
         d.dashboards = [
-            dashboard("sales", "Sales", now: now, updated: -3600, automationID: stein.id,
+            dashboard("sales", "Sales", now: now, updated: -3600, automationID: sales.id,
                       json: ["totals": ["revenue": 18420.5, "orders": 214, "conversion": 3.4], "generated_at": ""],
                       metrics: [("Revenue", "totals.revenue", .currency), ("Orders", "totals.orders", .number), ("Conversion", "totals.conversion", .percent)]),
             dashboard("support", "Support", now: now, updated: -30 * 3600, automationID: nil,

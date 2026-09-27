@@ -20,17 +20,23 @@ extension AutomationCenter {
         let store = self.store
         let previous = Dictionary(dashboards.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let isolated = self.isolated
-        let entries = await Task.detached(priority: .userInitiated) { () -> [DashboardEntry]? in
-            var configs = store.readTopFile([DashboardConfig].self, name: Self.dashboardsFile)
-            if configs == nil, migrate, !isolated, !store.hasTopFile(Self.dashboardsFile),
-               let migrated = Self.migratedLegacy(store) {
-                try? store.writeTopFile(migrated, name: Self.dashboardsFile)
-                configs = migrated
+        let result = await Task.detached(priority: .userInitiated) { () -> Result<[DashboardEntry]?, Error> in
+            Result {
+                let configs = try store.loadDashboards(migrate: migrate && !isolated)
+                if configs == nil, isolated { return nil }
+                return (configs ?? []).map { Self.read($0, previous: previous[$0.id]) }
             }
-            if configs == nil, isolated { return nil }
-            return (configs ?? []).map { Self.read($0, previous: previous[$0.id]) }
         }.value
-        guard generation == dashboardReadGeneration, let entries else { return }
+        guard generation == dashboardReadGeneration else { return }
+        let entries: [DashboardEntry]
+        switch result {
+        case .success(let loaded):
+            guard let loaded else { return }
+            entries = loaded
+        case .failure(let error):
+            message = "Could not load dashboards. Check dashboards.json or clients.json: \(error)"
+            return
+        }
         dashboards = entries
         if dashboardViewers > 0 { watchDashboardFolders() }
     }
@@ -68,14 +74,15 @@ extension AutomationCenter {
 
     private func writeDashboards(_ list: [DashboardConfig]) {
         dashboardReadGeneration += 1
-        guard !isolated else {
-            dashboards = list.map { c in
-                dashboards.first { $0.id == c.id }.map { var e = $0; e.config = c; return e } ?? DashboardEntry(config: c, snapshot: nil, readError: nil, readAt: nil)
-            }
-            return
+        if !isolated {
+            do { try store.writeTopFile(list, name: Self.dashboardsFile) } catch { message = "Could not save dashboards: \(error)"; return }
         }
-        do { try store.writeTopFile(list, name: Self.dashboardsFile) } catch { message = "Could not save dashboards: \(error)"; return }
-        loadDashboards(migrate: false)
+        // Publish the saved list before starting I/O, so the next edit uses the current configs.
+        dashboards = list.map { config in
+            let previous = dashboards.first { $0.id == config.id && $0.config == config }
+            return previous ?? DashboardEntry(config: config, snapshot: nil, readError: nil, readAt: nil)
+        }
+        if !isolated { loadDashboards(migrate: false) }
     }
 
     /// Queues the card's refresh automation, then reads the file again.

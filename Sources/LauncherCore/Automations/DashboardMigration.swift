@@ -22,14 +22,10 @@ public enum DashboardMigration {
                      ("costPerForm", "Cost per form", .currency), ("qualifiedMeetings", "Qualified meetings", .number)]
     ]
 
-    /// Nil when the data is not an old clients list. Entries that cannot be read are skipped.
+    /// Refuse the whole migration if any entry is unreadable. Never persist a partial list.
     public static func migrate(legacy data: Data) -> [DashboardConfig]? {
-        guard let raw = try? JSONSerialization.jsonObject(with: data) as? [Any] else { return nil }
-        return raw.compactMap { item -> DashboardConfig? in
-            guard let itemData = try? JSONSerialization.data(withJSONObject: item),
-                  let old = try? JSONDecoder().decode(LegacyClient.self, from: itemData) else { return nil }
-            return migrate(old)
-        }
+        guard let list = try? JSONDecoder().decode([LegacyClient].self, from: data) else { return nil }
+        return migrate(list)
     }
 
     public static func migrate(_ list: [LegacyClient]) -> [DashboardConfig] { list.map(migrate) }

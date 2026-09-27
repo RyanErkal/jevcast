@@ -312,7 +312,7 @@ struct SnippetSheet: View {
         SettingsSheet(confirmTitle: isNew ? "Add" : "Save", canConfirm: !name.trimmingCharacters(in: .whitespaces).isEmpty && !text.isEmpty, confirm: commit) {
             Section {
                 TextField("Name", text: $name, prompt: Text("Email sign-off"))
-                TextField("Text", text: $text, prompt: Text("Thanks,\nRyan"), axis: .vertical)
+                TextField("Text", text: $text, prompt: Text("Thanks,\nYour name"), axis: .vertical)
                     .lineLimit(3...8)
             } footer: {
                 Text("{date}, {time}, and {clipboard} are filled in on this Mac when you use the snippet.")

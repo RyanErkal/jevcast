@@ -23,7 +23,7 @@ final class AutomationsWindow: NSWindowController, NSWindowDelegate {
         self.init(model: AutomationsViewModel(center: center, quill: quill), autosaveName: Self.autosaveName)
     }
 
-    /// Also used by `--capture-automations` with a demo model, so the capture takes the same path as Hyper+A.
+    /// Takes a view model directly, for demo snapshots.
     init(model: AutomationsViewModel, autosaveName: String) {
         self.center = model.center; self.quill = model.quill
         self.model = model

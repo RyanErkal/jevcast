@@ -60,7 +60,6 @@ Run the executable inside the app bundle, for example `"dist/Jevcast.app/Content
 | `--hyper-led-test`                         | Turns the Caps Lock light on for two seconds, then off. Prints whether each step worked and quits. Changes no key mapping. |
 | `--open`                                   | Shows the launcher at launch.                                                                          |
 | `--turn-on-runner`                         | Registers the background runner at launch, as Settings › Automations › Turn On does. |
-| `--capture-automations <dir>`              | Opens the real Automations window with demo data and a too-small saved frame, as Hyper+A does, then each section, the empty states, and each template editor, and saves PNGs, for checking layout. With Screen Recording access it saves true screen images; without it, the app draws the window itself. Not for public images. |
 | `--automation-alerts`                      | Starts without the welcome window or the launcher and shows pending automation alerts. The runner uses it. |
 | `--notch-demo`                             | Shows two invented notch alerts, one to review and one failure, then quits after 20 seconds.           |
 | `--welcome`                                | Shows the welcome window at launch.                                                                    |

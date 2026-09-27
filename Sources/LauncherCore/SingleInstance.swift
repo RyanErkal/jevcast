@@ -12,7 +12,7 @@ public enum SingleInstance {
     }
 
     /// Flags that run a one-off tool or capture instead of the app.
-    public static let diagnosticFlags: Set<String> = ["--snapshot-ui", "--capture-automations", "--hyper-led-test",
+    public static let diagnosticFlags: Set<String> = ["--snapshot-ui", "--hyper-led-test",
                                                      "--notch-demo", "--store-jev-key", "--cleanup"]
 
     public static func isDiagnostic(_ arguments: [String]) -> Bool {

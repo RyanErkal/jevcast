@@ -190,9 +190,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         // A new install shows the welcome window once instead.
         if let directory = UISnapshots.directory { runSnapshots(to: directory); return }
         if notchDemo { runNotchDemo(); return }
-        if let flag = CommandLine.arguments.firstIndex(of: "--capture-automations"), flag + 1 < CommandLine.arguments.count {
-            AutomationsWindowCapture.run(to: CommandLine.arguments[flag + 1]); return
-        }
         automations.start()
         if CommandLine.arguments.contains("--turn-on-runner") { automations.turnOnRunner() }
         updates.start()

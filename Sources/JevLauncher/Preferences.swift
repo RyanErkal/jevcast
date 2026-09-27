@@ -73,7 +73,10 @@ final class Preferences: ObservableObject {
     @Published var automationQuietStart: Int { didSet { defaults.set(automationQuietStart, forKey: "automationQuietStart") } }
     @Published var automationQuietEnd: Int { didSet { defaults.set(automationQuietEnd, forKey: "automationQuietEnd") } }
     @Published var automationHideNames: Bool { didSet { defaults.set(automationHideNames, forKey: "automationHideNames") } }
-    @Published var automationAlertSeconds: Double { didSet { defaults.set(automationAlertSeconds, forKey: "automationAlertSeconds") } }
+    /// Seconds a failure alert stays up. The key replaced "automationAlertSeconds" when other kinds got their own timing.
+    @Published var automationFailureSeconds: Double { didSet { defaults.set(automationFailureSeconds, forKey: "automationFailureSeconds") } }
+    /// The live indicator for runs longer than 10 seconds. Off by default.
+    @Published var automationLiveIndicator: Bool { didSet { defaults.set(automationLiveIndicator, forKey: "automationLiveIndicator") } }
     @Published var automationRunner: AgentRunner { didSet { defaults.set(automationRunner.rawValue, forKey: "automationRunner") } }
     @Published var automationCodexModel: String { didSet { defaults.set(automationCodexModel, forKey: "automationCodexModel") } }
     @Published var automationClaudeModel: String { didSet { defaults.set(automationClaudeModel, forKey: "automationClaudeModel") } }
@@ -150,7 +153,8 @@ final class Preferences: ObservableObject {
         automationQuietStart = d.object(forKey: "automationQuietStart") as? Int ?? 22 * 60
         automationQuietEnd = d.object(forKey: "automationQuietEnd") as? Int ?? 7 * 60
         automationHideNames = d.bool(forKey: "automationHideNames")
-        automationAlertSeconds = min(max(d.object(forKey: "automationAlertSeconds") as? Double ?? 6, 4), 12)
+        automationFailureSeconds = min(max(d.object(forKey: "automationFailureSeconds") as? Double ?? 8, 4), 30)
+        automationLiveIndicator = d.bool(forKey: "automationLiveIndicator")
         automationRunner = d.string(forKey: "automationRunner").flatMap(AgentRunner.init(rawValue:)) ?? .codex
         automationCodexModel = d.string(forKey: "automationCodexModel") ?? ""
         automationClaudeModel = d.string(forKey: "automationClaudeModel") ?? ""
@@ -203,7 +207,8 @@ final class Preferences: ObservableObject {
     var automationAlertSettings: AlertSettings {
         AlertSettings(enabled: automationAlerts, failures: automationAlertFailures,
                       quietHours: automationQuietHours ? QuietHours(start: automationQuietStart, end: automationQuietEnd) : nil,
-                      hideNames: automationHideNames)
+                      hideNames: automationHideNames, liveRunning: automationLiveIndicator,
+                      failureSeconds: automationFailureSeconds)
     }
     /// A new agent task with the default runner, model, effort, and access. Fast applies to Codex only.
     func defaultAgentTask(prompt: String = "", workingDirectory: String = "") -> AgentTask {

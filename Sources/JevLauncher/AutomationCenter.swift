@@ -73,8 +73,6 @@ final class AutomationCenter: ObservableObject {
     let isolated: Bool
     /// App-level alert switches, set by the app from Preferences.
     var alertSettings: () -> AlertSettings = { AlertSettings() }
-    /// Seconds an alert stays up, set by the app.
-    var alertSeconds: () -> Double = { 6 }
     /// Windows that show automations tell the center, so it rescans more often while they are open.
     var windowOpen = false { didSet { if windowOpen != oldValue { scheduleRescan() } } }
 
@@ -92,6 +90,8 @@ final class AutomationCenter: ObservableObject {
     var proposals: [String: Result<ProposalManifest, ProposalError>] = [:]
     var outputs: [String: String] = [:]
     var shownAlerts: Set<String> = []
+    /// Runs that show the live running indicator.
+    var runningAlerts: Set<String> = []
 
     init(store: AutomationStore = AutomationStore()) {
         self.store = store

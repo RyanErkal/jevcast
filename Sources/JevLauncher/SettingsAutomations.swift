@@ -236,22 +236,29 @@ private struct AlertSettingsSection: View {
 
     var body: some View {
         Section {
-            Toggle("Show alerts from the notch", isOn: $preferences.automationAlerts)
+            Toggle("Show notch alerts", isOn: $preferences.automationAlerts)
             Group {
+                Toggle("Show a live indicator while an automation runs", isOn: $preferences.automationLiveIndicator)
                 Toggle("Alert when a run fails", isOn: $preferences.automationAlertFailures)
                 Toggle("Hide automation names in alerts", isOn: $preferences.automationHideNames)
-                LabeledContent("Keep alerts up for") {
+                LabeledContent("Keep failures up for") {
                     HStack {
-                        Slider(value: $preferences.automationAlertSeconds, in: 4...12, step: 1).frame(width: 160)
-                            .accessibilityValue("\(Int(preferences.automationAlertSeconds)) seconds")
-                        Text("\(Int(preferences.automationAlertSeconds)) s").monospacedDigit().frame(width: 34, alignment: .trailing)
+                        Slider(value: $preferences.automationFailureSeconds, in: 4...30, step: 1).frame(width: 160)
+                            .accessibilityValue("\(Int(preferences.automationFailureSeconds)) seconds")
+                        Text("\(Int(preferences.automationFailureSeconds)) s").monospacedDigit().frame(width: 34, alignment: .trailing)
                     }
                 }
             }
             .disabled(!preferences.automationAlerts)
-            HStack { Spacer(); Button("Show Test Alert") { center.showTestAlert() }.controlSize(.small) }
+            LabeledContent("Test alerts") {
+                HStack(spacing: 6) {
+                    ForEach(NotchAlert.Kind.allCases, id: \.self) { kind in
+                        Button(kind.testTitle) { center.showTestAlert(kind) }.controlSize(.small)
+                    }
+                }
+            }
         } header: { Text("Alerts") } footer: {
-            Text("When alerts are on, questions and changes to approve can alert. Quiet hours delay them.")
+            Text("Questions and changes to approve stay until you answer or choose Later. The live indicator shows after 10 seconds and makes no sound. Hyper-N shows the last alert again.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         Section("Quiet hours") {
@@ -273,6 +280,15 @@ private struct AlertSettingsSection: View {
             let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
             value.wrappedValue = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
         })
+    }
+}
+
+private extension NotchAlert.Kind {
+    var testTitle: String {
+        switch self {
+        case .running: return "Running"; case .question: return "Question"; case .approval: return "Approval"
+        case .success: return "Result"; case .failure: return "Failure"; case .info: return "Info"
+        }
     }
 }
 

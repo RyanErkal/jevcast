@@ -134,14 +134,26 @@ final class HyperDefaultsMergeTests: XCTestCase {
     func testNewDefaultIsAddedOnceWhenVIsFree() {
         let user = [HyperBinding(keyCode: 46, action: .builtIn("mail"))]
         let merged = HyperLayer.addingNewDefaults(to: user, seenVersion: 0)
-        XCTAssertEqual(merged.count, 2)
+        XCTAssertEqual(merged.count, 3)
         XCTAssertEqual(HyperLayer.table(merged)[9], .builtIn("clipboard"))
+        XCTAssertEqual(HyperLayer.table(merged)[45], .builtIn("notifications"))
         // Already seen: a user who removed V does not get it back.
         XCTAssertEqual(HyperLayer.addingNewDefaults(to: user, seenVersion: HyperLayer.addedDefaultsVersion), user)
     }
 
     func testUserBindingOnVIsKept() {
         let user = [HyperBinding(keyCode: 9, action: .openApp("com.apple.Terminal"))]
-        XCTAssertEqual(HyperLayer.addingNewDefaults(to: user, seenVersion: 0), user)
+        let merged = HyperLayer.addingNewDefaults(to: user, seenVersion: 0)
+        XCTAssertEqual(merged.filter { $0.keyCode == 9 }, user)
+        XCTAssertEqual(HyperLayer.addingNewDefaults(to: user, seenVersion: HyperLayer.addedDefaultsVersion), user)
+    }
+
+    func testNotificationsKeyIsAddedOnlyWhenNIsFree() {
+        let free = [HyperBinding(keyCode: 46, action: .builtIn("mail"))]
+        let merged = HyperLayer.addingNewDefaults(to: free, seenVersion: 1)
+        XCTAssertEqual(HyperLayer.table(merged)[45], .builtIn(HyperBuiltIn.notifications.rawValue))
+        let taken = [HyperBinding(keyCode: 45, action: .openApp("com.apple.Notes"))]
+        XCTAssertEqual(HyperLayer.addingNewDefaults(to: taken, seenVersion: 1), taken)
+        XCTAssertEqual(HyperLayer.addingNewDefaults(to: free, seenVersion: 2), free)
     }
 }

@@ -40,8 +40,14 @@ public struct AlertSettings: Equatable, Sendable {
     public var failures: Bool
     public var quietHours: QuietHours?
     public var hideNames: Bool
-    public init(enabled: Bool = true, failures: Bool = true, quietHours: QuietHours? = nil, hideNames: Bool = false) {
+    /// The live indicator for long runs. Off by default, because automations stay silent.
+    public var liveRunning: Bool
+    /// Seconds a failure alert stays up.
+    public var failureSeconds: Double
+    public init(enabled: Bool = true, failures: Bool = true, quietHours: QuietHours? = nil, hideNames: Bool = false,
+                liveRunning: Bool = false, failureSeconds: Double = 8) {
         self.enabled = enabled; self.failures = failures; self.quietHours = quietHours; self.hideNames = hideNames
+        self.liveRunning = liveRunning; self.failureSeconds = failureSeconds
     }
 }
 
@@ -68,6 +74,20 @@ public enum AlertDecision: Equatable, Sendable {
         guard now.timeIntervalSince(when) <= maxAge else { return .skip }
         if let quiet = settings.quietHours, let end = quiet.end(after: now, calendar: calendar) { return .wait(until: end) }
         return .show
+    }
+
+    /// A run shows the live indicator after it has run this long.
+    public static let runningDelay: TimeInterval = 10
+
+    /// Whether a run shows the live running indicator now. Never persisted: it is not a delivery.
+    public static func decideRunning(_ run: RunRecord, settings: AlertSettings, now: Date,
+                                     calendar: Calendar = .current) -> AlertDecision {
+        guard settings.enabled, settings.liveRunning, run.state == .running, let started = run.started else { return .skip }
+        // A run that claims to have run for over a day is stale, not live.
+        guard now.timeIntervalSince(started) <= maxAge else { return .skip }
+        if let quiet = settings.quietHours, let end = quiet.end(after: now, calendar: calendar) { return .wait(until: end) }
+        let due = started.addingTimeInterval(runningDelay)
+        return due > now ? .wait(until: due) : .show
     }
 }
 

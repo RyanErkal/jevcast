@@ -54,6 +54,22 @@ final class AutomationAlertTests: XCTestCase {
         XCTAssertEqual(AlertDecision.decide(run(.needsInput, finished: now), policy: Policy(), settings: quiet, now: now, calendar: calendar), .wait(until: date(26, 13)))
     }
 
+    func testRunningIndicatorIsOptInAndDelayed() {
+        let now = date(26, 12)
+        var r = run(.running, finished: now)
+        r.finished = nil; r.started = now.addingTimeInterval(-4)
+        XCTAssertEqual(AlertDecision.decideRunning(r, settings: AlertSettings(), now: now, calendar: calendar), .skip, "Off by default")
+        let live = AlertSettings(liveRunning: true)
+        XCTAssertEqual(AlertDecision.decideRunning(r, settings: live, now: now, calendar: calendar), .wait(until: now.addingTimeInterval(6)))
+        r.started = now.addingTimeInterval(-11)
+        XCTAssertEqual(AlertDecision.decideRunning(r, settings: live, now: now, calendar: calendar), .show)
+        XCTAssertEqual(AlertDecision.decideRunning(r, settings: AlertSettings(enabled: false, liveRunning: true), now: now, calendar: calendar), .skip)
+        let quiet = AlertSettings(quietHours: QuietHours(start: 11 * 60, end: 13 * 60), liveRunning: true)
+        XCTAssertEqual(AlertDecision.decideRunning(r, settings: quiet, now: now, calendar: calendar), .wait(until: date(26, 13)))
+        r.state = .needsInput
+        XCTAssertEqual(AlertDecision.decideRunning(r, settings: live, now: now, calendar: calendar), .skip)
+    }
+
     func testAlertTextHidesNames() {
         let r = run(.needsApproval, finished: Date())
         XCTAssertEqual(AlertText.make(r, name: "Desktop tidy", hideNames: false), AlertText(title: "Desktop tidy", message: "Moved 3 files"))

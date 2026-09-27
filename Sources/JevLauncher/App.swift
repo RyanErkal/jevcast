@@ -390,6 +390,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             case .calendar: showView(.calendar, fromHyper: true)
             case .automations: showAutomations()
             case .clipboard: showView(.clipboard, fromHyper: true)
+            case .notifications: NotchAlertController.shared.showLast()
             default: break
             }
         case .openApp(let bundleID):
@@ -487,9 +488,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     private func configureAutomations() {
         model.automationCenter = automations
         automations.alertSettings = { [weak self] in self?.preferences.automationAlertSettings ?? AlertSettings() }
-        automations.alertSeconds = { [weak self] in self?.preferences.automationAlertSeconds ?? 6 }
         automations.openWindow = { [weak self] automationID, runID in self?.showAutomations(automationID: automationID, runID: runID) }
         automations.openSettings = { [weak self] in self?.showSettings(tab: .automations) }
+        NotchAlertController.shared.stillApplies = { [weak self] alert in self?.automations.alertStillApplies(alert) ?? false }
         NotchAlertController.shared.onAction = { [weak self] id, action in
             guard let self, !self.automations.handleAlertAction(id, action) else { return }
             guard id.hasPrefix("quill:"), action == "open" else { return }
@@ -500,7 +501,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         model.quillTasks.onFailure = { [weak self] run in
             guard let self, self.preferences.automationAlerts, UISnapshots.directory == nil else { return }
             let hide = self.preferences.automationHideNames
-            NotchAlertController.shared.visibleSeconds = self.preferences.automationAlertSeconds
+            NotchAlertController.shared.failureSeconds = self.preferences.automationFailureSeconds
             NotchAlertController.shared.show(NotchAlert(id: "quill:" + run.id, symbol: "sparkles",
                                                         title: hide ? "A Quill task" : run.taskName,
                                                         message: hide ? "It did not finish." : run.preview, tone: .failure,
@@ -529,18 +530,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
 
     @objc func showAutomationsWindow() { showAutomations() }
 
-    /// `--notch-demo`: two invented alerts, then quit after 20 seconds.
+    /// `--notch-demo`: invented alerts of each kind, then quit after 30 seconds.
+    /// A running pill, then a question and an approval that stack, then a failure.
     private func runNotchDemo() {
-        NotchAlertController.shared.onAction = { id, action in print("[Jev notch] \(id) \(action)"); fflush(stdout) }
-        NotchAlertController.shared.show(NotchAlert(id: "demo-approval", symbol: "folder.badge.gearshape", title: "Desktop tidy",
-                                                    message: "12 files to move. Review before anything changes.", tone: .attention,
-                                                    actions: [.init("Review", id: "review", primary: true), .init("Later", id: "later")]))
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
-            NotchAlertController.shared.show(NotchAlert(id: "demo-failure", symbol: "chart.bar.xaxis", title: "Sample metrics refresh",
-                                                        message: "Failed: the sample source did not answer.", tone: .failure,
-                                                        actions: [.init("Retry", id: "retry", primary: true), .init("Open", id: "open")]))
+        let notch = NotchAlertController.shared
+        notch.onAction = { id, action in print("[Jev notch] \(id) \(action)"); fflush(stdout) }
+        notch.show(NotchAlert(id: "demo-running", kind: .running, symbol: "gearshape.2", title: "Sample metrics refresh",
+                              message: "Running", detail: "Reading the sample source", started: Date().addingTimeInterval(-42),
+                              actions: [.init("Cancel", id: "cancel", role: .destructive), .init("Open", id: "open")]))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+            notch.show(NotchAlert(id: "demo-question", kind: .question, symbol: "questionmark.bubble", title: "Desktop tidy",
+                                  message: "Which folder should the screenshots go to?",
+                                  actions: [.init("Reply…", id: NotchAlert.replyAction), .init("Later", id: "later")],
+                                  choices: ["Archive", "Pictures"], allowsReply: true))
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 20) { NSApp.terminate(nil) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+            var counts = NotchAlert.ApprovalCounts(); counts.moves = 12; counts.trash = 3
+            notch.show(NotchAlert(id: "demo-approval", kind: .approval, symbol: "folder.badge.gearshape", title: "Downloads tidy",
+                                  message: counts.summary,
+                                  actions: [.init("Approve all", id: "approveAll", primary: true), .init("Review", id: "review"),
+                                            .init("Later", id: "later")], counts: counts))
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) {
+            notch.show(NotchAlert(id: "demo-failure", kind: .failure, symbol: "chart.bar.xaxis", title: "Sample report",
+                                  message: "Failed: the sample source did not answer.",
+                                  actions: [.init("Retry", id: "retry", primary: true), .init("Open", id: "open"),
+                                            .init("Dismiss", id: "dismiss")]))
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { NSApp.terminate(nil) }
     }
 
     /// A scheduled task's result.

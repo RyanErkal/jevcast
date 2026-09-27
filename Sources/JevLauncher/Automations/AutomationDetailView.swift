@@ -118,8 +118,10 @@ struct AutomationOverview: View {
         }
         if let agent = automation.agent {
             if automation.script != nil { Divider(); Text("If the script fails, an agent writes a diagnosis:").font(.caption).foregroundStyle(.secondary) }
-            FactRow(label: "Runner", value: agent.runner.title)
-            FactRow(label: "Model", value: AgentModels.displayName(agent.model, runner: agent.runner) + " · " + agent.effort.title + (agent.fast && agent.runner == .codex ? " · Fast" : ""))
+            FactRow(label: "Provider", value: agent.runner.title)
+            FactRow(label: "Model", value: AgentModels.displayName(agent.model, runner: agent.runner))
+            FactRow(label: "Reasoning effort", value: agent.effort.title)
+            FactRow(label: "Speed", value: AgentModelCatalog.supportsFast(agent.runner) && agent.fast ? "Fast" : "Normal")
             FactRow(label: "Access", value: agent.access.title)
             FactRow(label: "Output", value: agent.output.title)
             FactRow(label: "Folder", value: AutomationFormat.path(agent.workingDirectory))

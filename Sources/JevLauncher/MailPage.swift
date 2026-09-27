@@ -16,7 +16,9 @@ final class MailPage: ObservableObject, LauncherPage {
     /// A kept reply stays in the model but steps aside while a message picked in the search shows.
     @Published var draftHidden = false
     /// A reply with text needs a second Escape before it is discarded.
-var discardArmed = false
+    var discardArmed = false
+    /// The message fills the panel and the list hides. Escape returns to two panes first.
+    @Published var expanded = false
     /// An empty model for snapshot runs, which never read Mail.
     private lazy var empty = MailModel(quill: { _ in throw CancellationError() }, quillAllowed: { false })
 
@@ -32,6 +34,7 @@ var discardArmed = false
         mail.start()
         // A message picked in the search moves to its mailbox after this; otherwise the view starts on the inbox.
         mail.place = .inbox
+        expanded = MailReading.split == .messageOnly
         // The preview is always on screen, so a message you move to counts as read after a moment.
         mail.windowIsKey = true
     }
@@ -39,6 +42,7 @@ var discardArmed = false
         guard let mail else { return }
         mail.windowIsKey = false
         discardArmed = false
+        expanded = false
         // An open reply stays in the model, so the mail window or the next visit shows it.
         if !handingOff { mail.stop() }
     }
@@ -72,6 +76,19 @@ var discardArmed = false
         return true
     }
 
+    /// Space expands or restores the message while the filter is empty.
+    func handleEvent(_ event: NSEvent) -> Bool {
+        guard let mail, !isTyping else { return false }
+        let flags = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        if event.keyCode == 49, flags.isEmpty, mail.search.isEmpty, mail.selected != nil {
+            expanded.toggle()
+            return true
+        }
+        return false
+    }
+
+    var footerHints: [(title: String, key: String)] { mail?.selected == nil ? [] : [(expanded ? "List" : "Expand", "Space")] }
+
     func back() -> Bool {
         if let mail, let draft = mail.draft, !draftHidden {
             if !draft.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !discardArmed {
@@ -84,6 +101,7 @@ var discardArmed = false
             return true
         }
         if draftHidden { draftHidden = false; return true }
+        if expanded { expanded = false; return true }
         return false
     }
 
@@ -94,6 +112,8 @@ private struct MailPageView: View {
     @ObservedObject var page: MailPage
     @ObservedObject var mail: MailModel
     let snapshot: Bool
+    @AppStorage(MailReading.splitKey) private var splitRaw = MailReading.Split.balanced.rawValue
+    private var split: MailReading.Split { MailReading.Split(rawValue: splitRaw) ?? .balanced }
 
     var body: some View {
         Group {
@@ -102,11 +122,14 @@ private struct MailPageView: View {
             } else if mail.draft != nil && !page.draftHidden {
                 ScrollView { ComposeView(model: mail).frame(maxWidth: .infinity) }
             } else {
-                HStack(spacing: 0) {
-                    // Half and half: a narrower message shows more of its length.
-                    list.frame(maxWidth: .infinity)
-                    Divider()
-                    MailReader(model: mail).frame(maxWidth: .infinity, maxHeight: .infinity)
+                GeometryReader { geo in
+                    HStack(spacing: 0) {
+                        if !(page.expanded && mail.selected != nil) {
+                            list.frame(width: geo.size.width * split.listFraction)
+                            Divider()
+                        }
+                        MailReader(model: mail, expanded: $page.expanded).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
             }
         }

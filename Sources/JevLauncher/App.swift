@@ -25,6 +25,8 @@ struct JevLauncherApp {
         if let index = CommandLine.arguments.firstIndex(of: "--diagnose-files"), CommandLine.arguments.indices.contains(index + 1) {
             Diagnostics.searchFiles(CommandLine.arguments[index + 1]); return
         }
+        // One copy at a time. A second copy shows the running one's launcher and exits.
+        if InstanceGuard.check() == .handOff { return }
         let app = NSApplication.shared
         let delegate = AppDelegate()
         app.delegate = delegate
@@ -86,6 +88,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     /// `--automation-alerts`: the runner opened the app to show alerts. No welcome, no launcher.
     private let alertLaunch = CommandLine.arguments.contains("--automation-alerts")
     private let notchDemo = CommandLine.arguments.contains("--notch-demo")
+    /// Snapshot, capture, and demo runs: no global shortcuts, watchers, runner, or Hyper remap.
+    private let diagnostic = SingleInstance.isDiagnostic(CommandLine.arguments)
+    private var showObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         panel = LauncherPanel()
@@ -123,12 +128,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
                                 isOpen: { [weak self] in self?.wasVisible ?? false }, toggle: { [weak self] in self?.toggle() },
                                 openSettings: { [weak self] tab in self?.showSettings(tab: tab) })
         // Snapshot runs leave global shortcuts to the running copy of the app.
-        if UISnapshots.directory == nil, !notchDemo {
+        if UISnapshots.directory == nil, !notchDemo, !diagnostic {
             configureHotkeys()
             dictation.canStart = { [weak self] in !(self?.wasVisible ?? false) }
             dictation.start()
             hyper.perform = { [weak self] action, flags in self?.performHyper(action, flags: flags) }
             hyper.launch()
+        }
+        if !diagnostic {
+            // A second copy asks this one to show the launcher, then exits.
+            showObserver = DistributedNotificationCenter.default().addObserver(forName: InstanceGuard.showNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.show() }
+            }
         }
         Task { await JevKeyCache.shared.load() }
         observeAppSwitches()

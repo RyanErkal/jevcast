@@ -271,9 +271,10 @@ final class MailModel: ObservableObject {
     /// Moving past it quickly with ↓ leaves it unread.
     private func markReadSoon(_ message: MailSummary, in box: MailMailbox) {
         readTimer?.cancel()
-        guard !message.read else { return }
+        let delay = MailReading.markRead.rawValue
+        guard !message.read, delay >= 0 else { return }
         readTimer = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 900_000_000)
+            if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
             guard !Task.isCancelled, let self, self.windowIsKey, self.selectedID == message.rowID,
                   self.selected?.read == false else { return }
             self.perform("mark read") { try await MailActions.setRead(true, message, in: box) } update: { $0.read = true }

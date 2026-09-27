@@ -39,7 +39,7 @@ struct AutomationsDemoData {
                                policy: Policy(retries: 1, sharedLock: "reports-data"), enabled: true, created: week,
                                source: .init(app: .codex, sourceID: "sales-data-refresh", path: home + "/.codex/automations/sales-data-refresh/automation.toml", hash: "demo"))
         let report = Automation(id: "weekly-report-demo", name: "Weekly report", symbol: "doc.text.magnifyingglass",
-                                kind: .agent(AgentTask(runner: .claude, prompt: "Write this week's report from the data files.", model: "opus", effort: .high,
+                                kind: .agent(AgentTask(runner: .claude, prompt: "Write this week's report from the data files.", model: "claude-opus-5-5", effort: .high,
                                                        workingDirectory: home + "/Projects/reports", access: .workspaceWriteNetwork, output: .report)),
                                 schedule: Schedule(rule: .rrule("FREQ=WEEKLY;BYDAY=MO;BYHOUR=8;BYMINUTE=0"), anchor: week), enabled: true, created: week)
         let backup = Automation(id: "docs-backup-demo", name: "Documents backup", symbol: "externaldrive",

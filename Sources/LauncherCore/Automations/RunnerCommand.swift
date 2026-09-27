@@ -101,9 +101,9 @@ public enum RunnerCommand {
             a += ["-c", "sandbox_mode=\"\(sandbox)\""]
             if task.access.canWrite { a += ["-c", "sandbox_workspace_write.writable_roots=\(tomlArray(task.allowedRoots))"] }
         }
-        if !task.model.isEmpty { a += ["-m", task.model] }
+        a += ["-m", AgentModelCatalog.resolved(task.model, runner: .codex)]
         if let e = effortValue(task.effort) { a += ["-c", "model_reasoning_effort=\"\(e)\""] }
-        if task.fast { a += ["-c", "service_tier=\"fast\""] }
+        if task.fast && AgentModelCatalog.supportsFast(.codex) { a += ["-c", "service_tier=\"fast\""] }
         if task.access.usesNetwork { a += ["-c", "sandbox_workspace_write.network_access=true"] }
         if resume == nil {
             a += ["-C", task.workingDirectory]
@@ -119,7 +119,8 @@ public enum RunnerCommand {
         let tools = claudeTools(task.access).joined(separator: ",")
         var a = ["-p", "--output-format", "stream-json", "--verbose", "--restricted", "--safe-mode", "--strict-mcp-config",
                  "--permission-prompts", "none", "--tools", tools, "--allowedTools", tools, "--json-schema", schema]
-        if !task.model.isEmpty { a += ["--model", task.model] }
+        // Claude has no fast tier; `task.fast` is never sent.
+        a += ["--model", AgentModelCatalog.resolved(task.model, runner: .claude)]
         if let e = effortValue(task.effort) { a += ["--effort", e] }
         for root in task.allowedRoots { a += ["--add-dir", root] }
         if let settingsFile { a += ["--settings", settingsFile.path] }

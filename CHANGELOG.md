@@ -7,12 +7,17 @@ All notable changes to this project are listed here. The format follows [Keep a 
 ### Added
 
 - **Dashboards.** A dashboard card shows numbers from any JSON file on this Mac. Pick the file, then pick values from a list of what it holds. Give each value a label and a format: number, currency, percent, duration, or text. An optional "updated at" value shows how old the data is. A card can also run an automation with Refresh Now and open a file you choose.
-- **Model menu.** The automation editor and Settings › Automations › Agents have a model menu. Codex offers GPT-6 Astra, GPT-6 Sol, and GPT-6 Luna. Claude offers Opus, Sonnet, Fable, and Haiku. Both have CLI default and Other. Rows and details show the model name.
+- **Provider and model.** The automation editor and Settings › Automations › Agents show Provider (ChatGPT (Codex) or Claude), Model, Reasoning effort, and Speed. ChatGPT offers GPT-6 Luna, GPT-6 Sol, and GPT-6 Astra, with Normal or Fast speed. Claude offers Opus 5.5 at normal speed only. New automations start on GPT-6 Luna, High, Normal. Rows and details show "Provider · Model · Effort · Speed".
+- **Read mail in full.** Wide HTML mail fits the message pane, and the pane scrolls both ways when needed. A text size control sets 75% to 150%. Space or the Expand button shows the message across the full panel. Escape shows the list again. ⌘O still opens the Mail window.
+- Settings › Mail › Reading sets the list and message split, text size, fit to width, when a message counts as read, and a plain text preference.
 - The Automations sidebar shows counts for each section.
 - Settings has Advanced sections for rarely used options in Clipboard, AI › Jev, and Automations › Runner.
 
 ### Changed
 
+- CLI default and Other are gone from the model menu. An empty model uses the provider default. An unknown stored model shows as "Custom: <id>" and does not change until you pick another.
+- Claude runs always get `--model claude-opus-5-5` and never a fast setting.
+- Jevcast runs only once. A second copy shows the launcher of the running copy and quits. A lock file in Application Support also stops a copy from another folder. Snapshot and diagnostic runs are exempt and start no watchers, runner, or Hyper key.
 - Clients is now Dashboards in the Automations window, in Settings, and in the launcher. Type "dashboards". "clients" and "metrics" still work.
 - Saved clients move to dashboards once, with their numbers kept. The old `clients.json` stays in place. A client of an unknown kind becomes a card with no values and a note.
 - The "Meta metrics refresh" template is now "Refresh a data file", with placeholder paths. "Weekly client report" is now "Weekly report". Templates hold no personal folders or scripts.

@@ -42,16 +42,7 @@ struct EditorAgent: View {
     var body: some View {
         let diagnosis = draft.kind == .scriptWithDiagnosis
         Section(diagnosis ? "Diagnosis when the script fails" : "Agent") {
-            Picker("Runner", selection: $draft.runner) { ForEach(AgentRunner.allCases, id: \.self) { Text($0.title).tag($0) } }
-                .onChange(of: draft.runner) { _, runner in
-                    // A model from the other runner would not work; fall back to the CLI default.
-                    if AgentModels.isKnown(draft.model, runner: runner == .codex ? .claude : .codex) { draft.model = "" }
-                }
-            AgentModelPicker(runner: draft.runner, model: $draft.model)
-            Picker("Reasoning", selection: $draft.effort) {
-                ForEach(ReasoningEffort.allCases, id: \.self) { Text($0.title).tag($0) }
-            }
-            if draft.runner == .codex { Toggle("Fast", isOn: $draft.fast) }
+            AgentProviderFields(runner: $draft.runner, model: $draft.model, effort: $draft.effort, fast: $draft.fast)
             VStack(alignment: .leading, spacing: 6) {
                 Text(diagnosis ? "Diagnosis prompt (optional)" : "Prompt")
                 TextEditor(text: $draft.prompt)

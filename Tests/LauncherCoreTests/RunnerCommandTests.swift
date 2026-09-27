@@ -56,7 +56,7 @@ final class RunnerCommandTests: XCTestCase {
     func testCodexWriteNetworkFastNoEffort() throws {
         let a = try launch(task(.codex, .workspaceWriteNetwork, effort: .none, fast: true, model: "")).arguments
         XCTAssertTrue(a.contains("workspace-write"))
-        XCTAssertFalse(a.contains("-m"))
+        XCTAssertEqual(a[a.firstIndex(of: "-m")! + 1], "gpt-6-luna")
         XCTAssertFalse(a.contains { $0.contains("model_reasoning_effort") })
         XCTAssertTrue(a.contains("service_tier=\"fast\""))
         XCTAssertTrue(a.contains("sandbox_workspace_write.network_access=true"))
@@ -86,6 +86,25 @@ final class RunnerCommandTests: XCTestCase {
         XCTAssertFalse(try launch(task(.claude, .readOnly, effort: .none)).arguments.contains("--effort"))
         XCTAssertTrue(try launch(task(.claude, .workspaceWriteNetwork)).arguments.contains("Read,Glob,Grep,Edit,Write,WebFetch,WebSearch"))
         XCTAssertEqual(Array(try launch(task(.claude, .readOnly), resume: session).arguments.suffix(2)), ["--resume", session])
+    }
+
+    func testClaudeOpusNeverFast() throws {
+        let a = try launch(task(.claude, .readOnly, fast: true, model: "")).arguments
+        XCTAssertEqual(a[a.firstIndex(of: "--model")! + 1], "claude-opus-5-5")
+        XCTAssertFalse(a.contains { $0.contains("fast") })
+        let b = try launch(task(.claude, .readOnly, fast: true, model: "claude-opus-5-5")).arguments
+        XCTAssertEqual(b[b.firstIndex(of: "--model")! + 1], "claude-opus-5-5")
+    }
+
+    func testModelCatalog() {
+        XCTAssertEqual(AgentModelCatalog.choices(.codex).map(\.id), ["gpt-6-luna", "gpt-6-sol", "gpt-6-astra"])
+        XCTAssertEqual(AgentModelCatalog.choices(.claude).map(\.id), ["claude-opus-5-5"])
+        XCTAssertEqual(AgentModelCatalog.displayName("", runner: .claude), "Opus 5.5")
+        XCTAssertEqual(AgentModelCatalog.displayName("opus", runner: .claude), "Custom: opus")
+        let t = AgentTask(runner: .codex, prompt: "", model: "gpt-6-sol", effort: .xhigh, fast: true, workingDirectory: "/")
+        XCTAssertEqual(AgentModelCatalog.summary(t), "ChatGPT (Codex) · GPT-6 Sol · Extra high · Fast")
+        var c = t; c.runner = .claude; c.model = ""
+        XCTAssertEqual(AgentModelCatalog.summary(c), "Claude · Opus 5.5 · Extra high · Normal")
     }
 
     func testMissingCLI() {

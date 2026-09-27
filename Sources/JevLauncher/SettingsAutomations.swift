@@ -163,22 +163,17 @@ private struct AgentSettingsSection: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var center: AutomationCenter
 
+    /// Each provider keeps its own default model.
+    private var defaultModel: Binding<String> {
+        preferences.automationRunner == .codex ? $preferences.automationCodexModel : $preferences.automationClaudeModel
+    }
+
     var body: some View {
         Section {
-            Picker("Default runner", selection: $preferences.automationRunner) {
-                ForEach(AgentRunner.allCases, id: \.self) { Text($0.title).tag($0) }
-            }
-            if preferences.automationRunner == .codex {
-                AgentModelPicker(runner: .codex, model: $preferences.automationCodexModel)
-            } else {
-                AgentModelPicker(runner: .claude, model: $preferences.automationClaudeModel)
-            }
-            Picker("Reasoning effort", selection: $preferences.automationEffort) {
-                ForEach(ReasoningEffort.allCases, id: \.self) { Text($0.title).tag($0) }
-            }
-            if preferences.automationRunner == .codex {
-                Toggle("Fast", isOn: $preferences.automationFast)
-                Text("Uses more of your ChatGPT quota.").font(.caption).foregroundStyle(.secondary)
+            AgentProviderFields(runner: $preferences.automationRunner, model: defaultModel, effort: $preferences.automationEffort,
+                                fast: $preferences.automationFast, onProviderChange: { _ in })
+            if preferences.automationRunner == .codex && preferences.automationFast {
+                Text("Fast uses more of your ChatGPT quota.").font(.caption).foregroundStyle(.secondary)
             }
             Picker("Access", selection: $preferences.automationAccess) {
                 ForEach(AgentAccess.allCases, id: \.self) { Text($0.title).tag($0) }

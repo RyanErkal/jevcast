@@ -29,8 +29,8 @@ struct AutomationDraft: Equatable {
 
     // Agent
     var runner: AgentRunner = .codex
-    var model = ""
-    var effort: ReasoningEffort = .medium
+    var model = AgentModelCatalog.defaultModel(.codex)
+    var effort: ReasoningEffort = .high
     var fast = false
     var prompt = ""
     var output: OutputMode = .report
@@ -67,7 +67,8 @@ struct AutomationDraft: Equatable {
     }
 
     private mutating func fill(_ agent: AgentTask) {
-        runner = agent.runner; model = agent.model; effort = agent.effort; fast = agent.fast
+        runner = agent.runner; model = AgentModelCatalog.resolved(agent.model, runner: agent.runner); effort = agent.effort
+        fast = AgentModelCatalog.supportsFast(agent.runner) && agent.fast
         prompt = agent.prompt; output = agent.output; access = agent.access
         agentFolder = Paths.display(agent.workingDirectory); allowedRoots = agent.allowedRoots.map(Paths.display)
     }

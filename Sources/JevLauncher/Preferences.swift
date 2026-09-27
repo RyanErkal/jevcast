@@ -154,7 +154,7 @@ final class Preferences: ObservableObject {
         automationRunner = d.string(forKey: "automationRunner").flatMap(AgentRunner.init(rawValue:)) ?? .codex
         automationCodexModel = d.string(forKey: "automationCodexModel") ?? ""
         automationClaudeModel = d.string(forKey: "automationClaudeModel") ?? ""
-        automationEffort = d.string(forKey: "automationEffort").flatMap(ReasoningEffort.init(rawValue:)) ?? .medium
+        automationEffort = d.string(forKey: "automationEffort").flatMap(ReasoningEffort.init(rawValue:)) ?? .high
         automationFast = d.bool(forKey: "automationFast")
         automationAccess = d.string(forKey: "automationAccess").flatMap(AgentAccess.init(rawValue:)) ?? .readOnly
         showCodexAutomations = d.object(forKey: "showCodexAutomations") as? Bool ?? true
@@ -208,7 +208,7 @@ final class Preferences: ObservableObject {
     /// A new agent task with the default runner, model, effort, and access. Fast applies to Codex only.
     func defaultAgentTask(prompt: String = "", workingDirectory: String = "") -> AgentTask {
         AgentTask(runner: automationRunner, prompt: prompt,
-                  model: automationRunner == .codex ? automationCodexModel : automationClaudeModel,
+                  model: AgentModelCatalog.resolved(automationRunner == .codex ? automationCodexModel : automationClaudeModel, runner: automationRunner),
                   effort: automationEffort, fast: automationRunner == .codex && automationFast,
                   workingDirectory: workingDirectory, access: automationAccess)
     }

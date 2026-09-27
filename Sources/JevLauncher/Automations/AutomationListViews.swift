@@ -79,7 +79,7 @@ struct AutomationRow: View {
 
     private var subtitle: String {
         var parts = [automation.scheduleSummary]
-        if automation.script == nil, let agent = automation.agent { parts.append(AgentModels.displayName(agent.model, runner: agent.runner)) }
+        if automation.script == nil, let agent = automation.agent { parts.append(AgentModelCatalog.summary(agent)) }
         if !automation.enabled { parts.append("Paused") }
         else if let next = model.nextRun(automation.id) { parts.append("next " + AutomationFormat.relative(next)) }
         return parts.joined(separator: " · ")

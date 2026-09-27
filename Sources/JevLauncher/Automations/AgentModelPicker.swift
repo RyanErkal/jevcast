@@ -1,63 +1,64 @@
 import SwiftUI
 import LauncherCore
 
-/// The models offered for each runner. Stored values are the IDs; an empty string means the CLI's default.
+/// UI names for the model catalogue in LauncherCore.
 enum AgentModels {
-    struct Choice: Hashable { let id: String; let name: String }
-
-    static func choices(_ runner: AgentRunner) -> [Choice] {
-        switch runner {
-        case .codex:
-            return [.init(id: "gpt-6-astra", name: "GPT-6 Astra"), .init(id: "gpt-6-sol", name: "GPT-6 Sol"),
-                    .init(id: "gpt-6-luna", name: "GPT-6 Luna")]
-        case .claude:
-            return [.init(id: "opus", name: "Opus"), .init(id: "sonnet", name: "Sonnet"),
-                    .init(id: "fable", name: "Fable"), .init(id: "haiku", name: "Haiku")]
-        }
-    }
-
-    /// A name to show for a stored ID: the display name when known, "CLI default" when empty, else the ID.
-    static func displayName(_ id: String, runner: AgentRunner) -> String {
-        let trimmed = id.trimmingCharacters(in: .whitespaces)
-        if trimmed.isEmpty { return "CLI default" }
-        return choices(runner).first { $0.id.caseInsensitiveCompare(trimmed) == .orderedSame }?.name ?? trimmed
-    }
-
-    static func isKnown(_ id: String, runner: AgentRunner) -> Bool {
-        choices(runner).contains { $0.id == id }
-    }
+    static func displayName(_ id: String, runner: AgentRunner) -> String { AgentModelCatalog.displayName(id, runner: runner) }
+    static func isKnown(_ id: String, runner: AgentRunner) -> Bool { AgentModelCatalog.isKnown(id, runner: runner) }
 }
 
-/// A model menu with "CLI default", the runner's models, and "Other…", which shows a text field for any ID.
-struct AgentModelPicker: View {
-    var title = "Model"
-    let runner: AgentRunner
+/// Provider, model, reasoning effort, and speed, shown the same way in the editor and in Settings.
+/// An unknown stored model stays selected as "Custom: <id>" until the user picks another.
+struct AgentProviderFields: View {
+    @Binding var runner: AgentRunner
     @Binding var model: String
-    @State private var other = false
-
-    private static let otherTag = "\u{0}other"
+    @Binding var effort: ReasoningEffort
+    @Binding var fast: Bool
+    /// Called after the provider changes, so the caller can pick that provider's model.
+    var onProviderChange: ((AgentRunner) -> Void)? = nil
 
     var body: some View {
-        Picker(title, selection: selection) {
-            Text("CLI default").tag("")
-            Divider()
-            ForEach(AgentModels.choices(runner), id: \.self) { Text($0.name).tag($0.id) }
-            Divider()
-            Text("Other…").tag(Self.otherTag)
+        Picker("Provider", selection: providerBinding) {
+            Text("ChatGPT (Codex)").tag(AgentRunner.codex)
+            Text("Claude").tag(AgentRunner.claude)
         }
-        if showsField {
-            TextField("Model ID", text: $model, prompt: Text(runner == .codex ? "gpt-6-astra" : "opus"))
-                .accessibilityLabel("Model ID")
+        .pickerStyle(.segmented)
+        Picker("Model", selection: modelBinding) {
+            ForEach(AgentModelCatalog.choices(runner), id: \.self) { Text($0.name).tag($0.id) }
+            if let custom = customID { Text("Custom: " + custom).tag(custom) }
+        }
+        Picker("Reasoning effort", selection: $effort) {
+            ForEach(effortChoices, id: \.self) { Text($0.title).tag($0) }
+        }
+        if AgentModelCatalog.supportsFast(runner) {
+            Picker("Speed", selection: $fast) { Text("Normal").tag(false); Text("Fast").tag(true) }
+                .pickerStyle(.segmented)
+        } else {
+            Picker("Speed", selection: .constant(false)) { Text("Normal").tag(false) }
+                .pickerStyle(.segmented).disabled(true)
+            Text("Only normal speed for now.").font(.caption).foregroundStyle(.secondary)
         }
     }
 
-    private var showsField: Bool { other || (!model.isEmpty && !AgentModels.isKnown(model, runner: runner)) }
+    private var customID: String? {
+        let id = AgentModelCatalog.resolved(model, runner: runner)
+        return AgentModelCatalog.isKnown(id, runner: runner) ? nil : id
+    }
 
-    private var selection: Binding<String> {
-        Binding(get: { showsField ? Self.otherTag : model },
-                set: { value in
-                    if value == Self.otherTag { other = true; if AgentModels.isKnown(model, runner: runner) { model = "" } }
-                    else { other = false; model = value }
-                })
+    private var effortChoices: [ReasoningEffort] {
+        AgentModelCatalog.efforts.contains(effort) ? AgentModelCatalog.efforts : [effort] + AgentModelCatalog.efforts
+    }
+
+    private var modelBinding: Binding<String> {
+        Binding(get: { AgentModelCatalog.resolved(model, runner: runner) }, set: { model = $0 })
+    }
+
+    private var providerBinding: Binding<AgentRunner> {
+        Binding(get: { runner }, set: { new in
+            guard new != runner else { return }
+            runner = new
+            if let onProviderChange { onProviderChange(new) } else { model = AgentModelCatalog.defaultModel(new) }
+            if !AgentModelCatalog.supportsFast(new) { fast = false }
+        })
     }
 }

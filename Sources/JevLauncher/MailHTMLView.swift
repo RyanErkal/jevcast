@@ -10,6 +10,10 @@ struct MailHTMLView: NSViewRepresentable {
     var inlineImages: [String: MIMEMessage.InlineImage] = [:]
     /// Web images, fonts, and style sheets load when true. Scripts never run either way.
     var loadsRemote = true
+    /// Page zoom, 0.75 to 1.5.
+    var zoom: Double = 1
+    /// Fits wide mail to the pane with a fixed style sheet. No script measures or changes the page.
+    var fitsWidth = true
 
     static func policy(remote: Bool) -> String {
         remote ? "default-src 'none'; img-src data: http: https:; style-src 'unsafe-inline' http: https:; font-src data: http: https:"
@@ -18,14 +22,25 @@ struct MailHTMLView: NSViewRepresentable {
 
     /// The message with its own images inlined, a content policy first, and only a light default
     /// style that the sender's styling overrides.
-    static func document(_ html: String, inlineImages: [String: MIMEMessage.InlineImage] = [:], remote: Bool = true) -> String {
+    /// A fixed style that makes fixed-width layouts shrink to the pane. It wins over the sender's widths.
+    static let fitStyle = "<style>html,body{max-width:100%!important;overflow-x:auto!important}"
+        + "table,td,th,div,center,p,img,video{max-width:100%!important;box-sizing:border-box}"
+        + "table{width:auto!important;table-layout:auto!important}td,th{width:auto!important}"
+        + "img{height:auto!important}pre{white-space:pre-wrap!important}"
+        + "*{word-wrap:break-word;overflow-wrap:anywhere}</style>"
+    /// Without fitting, the page still scrolls both ways when it is wider than the pane.
+    static let scrollStyle = "<style>html,body{overflow:auto!important}</style>"
+
+    static func document(_ html: String, inlineImages: [String: MIMEMessage.InlineImage] = [:], remote: Bool = true,
+                         fitsWidth: Bool = false) -> String {
         var body = html
         for (cid, image) in inlineImages {
             body = body.replacingOccurrences(of: "cid:" + cid, with: "data:\(image.mimeType);base64," + image.data.base64EncodedString())
         }
         let meta = "<meta http-equiv=\"Content-Security-Policy\" content=\"\(policy(remote: remote))\"><meta charset=\"utf-8\">"
         let style = "<style>:where(body){font:14px -apple-system,sans-serif;margin:12px;word-wrap:break-word}:where(img){max-width:100%;height:auto}</style>"
-        return meta + style + body
+        // Appended after the body so these rules come last and override the sender's own style sheets.
+        return meta + style + body + (fitsWidth ? fitStyle : scrollStyle)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -42,10 +57,11 @@ struct MailHTMLView: NSViewRepresentable {
     }
 
     func updateNSView(_ view: WKWebView, context: Context) {
-        let key = html + (loadsRemote ? "#remote" : "#local")
+        if abs(view.pageZoom - zoom) > 0.001 { view.pageZoom = zoom }
+        let key = html + (loadsRemote ? "#remote" : "#local") + (fitsWidth ? "#fit" : "#wide")
         guard context.coordinator.shown != key else { return }
         context.coordinator.shown = key
-        view.loadHTMLString(Self.document(html, inlineImages: inlineImages, remote: loadsRemote), baseURL: nil)
+        view.loadHTMLString(Self.document(html, inlineImages: inlineImages, remote: loadsRemote, fitsWidth: fitsWidth), baseURL: nil)
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate {

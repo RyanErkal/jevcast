@@ -105,7 +105,7 @@ public struct ScriptTask: Codable, Equatable, Sendable {
 
 public enum AgentRunner: String, Codable, CaseIterable, Sendable {
     case codex, claude
-    public var title: String { self == .codex ? "Codex (ChatGPT)" : "Claude" }
+    public var title: String { self == .codex ? "ChatGPT (Codex)" : "Claude" }
     public var executableName: String { rawValue }
 }
 
@@ -154,7 +154,7 @@ public enum OutputMode: String, Codable, CaseIterable, Sendable {
 public struct AgentTask: Codable, Equatable, Sendable {
     public var runner: AgentRunner
     public var prompt: String
-    /// Model ID passed to the CLI. Empty uses the CLI's own default.
+    /// Model ID passed to the CLI. Empty uses the provider default from `AgentModelCatalog`.
     public var model: String
     public var effort: ReasoningEffort
     /// The faster service tier. Only sent when the runner supports it.

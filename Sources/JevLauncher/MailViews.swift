@@ -153,6 +153,11 @@ struct MailRow: View {
 
 struct MailReader: View {
     @ObservedObject var model: MailModel
+    /// Set in the launcher panel: shows an Expand button that hides the list.
+    var expanded: Binding<Bool>? = nil
+    @AppStorage(MailReading.zoomKey) private var zoom = 1.0
+    @AppStorage(MailReading.fitKey) private var fitsWidth = true
+    @AppStorage(MailReading.plainKey) private var prefersPlain = false
     var body: some View {
         if let message = model.selected {
             VStack(alignment: .leading, spacing: 0) {
@@ -198,11 +203,13 @@ struct MailReader: View {
     @ViewBuilder private func body(_ message: MailSummary) -> some View {
         if let detail = model.detail {
             // The message as the sender styled it, with its images. Plain text only when there is no HTML.
-            if let html = detail.html {
-                MailHTMLView(html: html, inlineImages: detail.inlineImages, loadsRemote: model.loadsImages)
+            if let html = detail.html, !(prefersPlain && hasPlain(detail)) {
+                MailHTMLView(html: html, inlineImages: detail.inlineImages, loadsRemote: model.loadsImages,
+                             zoom: MailReading.clampZoom(zoom), fitsWidth: fitsWidth)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView {
-                    Text(MailText.linked(detail.readableText)).font(.system(size: 13)).textSelection(.enabled)
+                ScrollView([.vertical, .horizontal]) {
+                    Text(MailText.linked(detail.readableText)).font(.system(size: 13 * MailReading.clampZoom(zoom))).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading).padding(14)
                 }
             }
@@ -218,6 +225,21 @@ struct MailReader: View {
         }
     }
 
+    private func hasPlain(_ detail: MIMEMessage) -> Bool {
+        !(detail.plainText ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var zoomControl: some View {
+        HStack(spacing: 6) {
+            Button { zoom = MailReading.clampZoom(zoom - 0.25) } label: { Image(systemName: "textformat.size.smaller") }
+                .help("Smaller text").disabled(zoom <= MailReading.zoomRange.lowerBound)
+            Text("\(Int((MailReading.clampZoom(zoom) * 100).rounded()))%").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                .frame(minWidth: 34)
+            Button { zoom = MailReading.clampZoom(zoom + 0.25) } label: { Image(systemName: "textformat.size.larger") }
+                .help("Larger text").disabled(zoom >= MailReading.zoomRange.upperBound)
+        }
+    }
+
     /// The few actions checking mail needs, as icons with their keys in the tooltips.
     private var actionBar: some View {
         HStack(spacing: 16) {
@@ -230,10 +252,19 @@ struct MailReader: View {
                 Button("Delete All from \(model.selected?.sender ?? "Sender")", role: .destructive) { model.deleteAllFromSender() }
                 if model.canUseQuill { Button("Summarise with Quill") { model.summarise() }.disabled(model.detail == nil || model.quillBusy) }
                 Toggle("Load Images from the Web", isOn: $model.loadsImages)
+                Toggle("Fit Wide Mail to Width", isOn: $fitsWidth)
+                Toggle("Prefer Plain Text", isOn: $prefersPlain)
                 Button("Open in Mail (Return)") { model.openInMail() }
             } label: { Image(systemName: "ellipsis.circle") }
             .menuIndicator(.hidden).fixedSize()
             Spacer()
+            zoomControl
+            if let expanded {
+                Button { expanded.wrappedValue.toggle() } label: {
+                    Image(systemName: expanded.wrappedValue ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                }
+                .help(expanded.wrappedValue ? "Show the list (Escape)" : "Expand (Space)")
+            }
             if let date = model.selected?.date { Text(date.formatted(date: .abbreviated, time: .shortened)).foregroundStyle(.secondary) }
         }
         .buttonStyle(.borderless).font(.system(size: 14))

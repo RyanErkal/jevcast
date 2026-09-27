@@ -550,18 +550,16 @@ final class LauncherFlowTests: XCTestCase {
         XCTAssertEqual(model.selected?.id.hasPrefix("workflow:"), true)
         XCTAssertEqual(Snippet(name: "s", text: "a {clipboard}").expanded(clipboard: "b"), "a b")
     }
-    @MainActor func testClipboardPinsAndKinds() async {
+    @MainActor func testClipboardNewestFirstAndKinds() async {
         let board = FakePasteboard()
         let (model, _, defaults, suite) = makeModel(jev: HeldJev(), board: board)
         defer { defaults.removePersistentDomain(forName: suite) }
         for text in ["https://example.com/page", "#ff8800", "plain words"] {
             board.copy(text); model.clipboard.poll(); await model.clipboard.settle()
         }
-        let link = model.clipboard.entries.first { $0.text?.hasPrefix("https") == true }!
-        model.clipboard.togglePin(link.id)
         model.begin(); defer { model.end() }
         model.updateQuery("clip", typed: true)
-        XCTAssertEqual(model.results.first?.title, "https://example.com/page", "Pinned items come first.")
+        XCTAssertEqual(model.results.first?.title, "plain words", "Newest items come first.")
         model.updateQuery("clip colours", typed: true)
         XCTAssertEqual(model.results.map(\.title), ["#ff8800"])
         model.updateQuery("clip links", typed: true)

@@ -79,7 +79,6 @@ final class ResultActions {
         case .clipboard(let item):
             add("Paste", key: "\r") { model.execute(paste: true) }
             menu.item(at: menu.numberOfItems - 1)?.keyEquivalentModifierMask = [.shift]
-            add(item.pinned ? "Unpin" : "Pin") { model.clipboard.togglePin(item.id); model.rebuild() }
         case .copy, .snippet:
             add("Paste", key: "\r") { model.execute(paste: true) }
             menu.item(at: menu.numberOfItems - 1)?.keyEquivalentModifierMask = [.shift]

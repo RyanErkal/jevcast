@@ -33,9 +33,6 @@ struct ClipPreview: View {
                 .font(.system(size: 11)).foregroundStyle(.secondary)
             }
             Spacer()
-            if entry.pinned {
-                Image(systemName: "pin.fill").font(.system(size: 11)).foregroundStyle(.orange).rotationEffect(.degrees(45)).help("Pinned")
-            }
         }
     }
 

@@ -53,7 +53,7 @@ public struct ClipboardSettings: Codable, Equatable, Sendable {
     }
 }
 
-/// How long entries stay. Pinned entries never expire.
+/// How long entries stay.
 public struct ClipRetention: Equatable, Sendable {
     public var keepDays: Int
     public var maxItems: Int
@@ -62,22 +62,22 @@ public struct ClipRetention: Equatable, Sendable {
         self.keepDays = keepDays; self.maxItems = maxItems; self.maxBytes = maxBytes
     }
 
-    /// IDs to remove: unpinned entries past the age, then the oldest unpinned beyond the count,
-    /// then the oldest unpinned until the total size fits.
+    /// IDs to remove: entries past the age, then the oldest beyond the count,
+    /// then the oldest until the total size fits.
     public func expired(_ entries: [ClipEntry], now: Date) -> Set<UUID> {
         var removed = Set<UUID>()
         let newestFirst = entries.sorted { $0.copiedAt > $1.copiedAt }
         if keepDays > 0 {
             let cutoff = now.addingTimeInterval(-Double(keepDays) * 86_400)
-            for entry in newestFirst where !entry.pinned && entry.copiedAt < cutoff { removed.insert(entry.id) }
+            for entry in newestFirst where entry.copiedAt < cutoff { removed.insert(entry.id) }
         }
-        var unpinned = 0
-        for entry in newestFirst where !entry.pinned && !removed.contains(entry.id) {
-            unpinned += 1
-            if unpinned > maxItems { removed.insert(entry.id) }
+        var kept = 0
+        for entry in newestFirst where !removed.contains(entry.id) {
+            kept += 1
+            if kept > maxItems { removed.insert(entry.id) }
         }
         var total = newestFirst.filter { !removed.contains($0.id) }.reduce(Int64(0)) { $0 + $1.byteSize }
-        for entry in newestFirst.reversed() where total > maxBytes && !entry.pinned && !removed.contains(entry.id) {
+        for entry in newestFirst.reversed() where total > maxBytes && !removed.contains(entry.id) {
             removed.insert(entry.id)
             total -= entry.byteSize
         }

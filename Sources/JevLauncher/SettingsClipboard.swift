@@ -20,7 +20,7 @@ struct ClipboardSettingsSections: View {
                     ForEach(ClipboardSettings.keepDayChoices, id: \.self) { days in Text(Self.daysTitle(days)).tag(days) }
                 }
                 .disabled(!on)
-                Picker("Maximum unpinned entries", selection: settings.maxItems) {
+                Picker("Maximum entries", selection: settings.maxItems) {
                     ForEach(ClipboardSettings.maxItemChoices, id: \.self) { Text($0.formatted()).tag($0) }
                 }
                 .disabled(!on)
@@ -32,7 +32,7 @@ struct ClipboardSettingsSections: View {
                     Text("\(history.entries.count.formatted()) entries · \(ClipStyle.bytes(history.storageBytes))").monospacedDigit()
                 }
             } header: { Text("History") } footer: {
-                Text("Type “clip” or press Hyper-V to open it. Pinned entries are kept even when limits are reached. Turning history off deletes it.")
+                Text("Type “clip” or press Hyper-V to open it. Turning history off deletes it.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("What to record") {
@@ -93,8 +93,7 @@ struct ClipboardSettingsSections: View {
                         .disabled(history.entries.isEmpty && !history.canUndoDelete)
                 }
                 .confirmationDialog("Clear clipboard history?", isPresented: $confirmingClear) {
-                    Button("Clear History, Keep Pins", role: .destructive) { history.clear(includingPins: false) }
-                    Button("Clear Everything, Including Pins", role: .destructive) { history.clear(includingPins: true) }
+                    Button("Clear History", role: .destructive) { history.clear() }
                     Button("Cancel", role: .cancel) {}
                 } message: {
                     Text("This cannot be undone.")

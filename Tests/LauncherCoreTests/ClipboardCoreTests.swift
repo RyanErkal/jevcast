@@ -78,27 +78,37 @@ final class ClipTransformTests: XCTestCase {
 
 final class ClipRetentionTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
-    private func entry(_ minutesAgo: Double, pinned: Bool = false, size: Int64 = 10) -> ClipEntry {
-        ClipEntry(hash: UUID().uuidString, kind: .text, copiedAt: now.addingTimeInterval(-minutesAgo * 60), pinned: pinned, text: "x", byteSize: size)
+    private func entry(_ minutesAgo: Double, size: Int64 = 10) -> ClipEntry {
+        ClipEntry(hash: UUID().uuidString, kind: .text, copiedAt: now.addingTimeInterval(-minutesAgo * 60), text: "x", byteSize: size)
     }
 
-    func testAgeRemovesOldUnpinnedOnly() {
-        let fresh = entry(10), old = entry(60 * 24 * 8), oldPinned = entry(60 * 24 * 8, pinned: true)
-        let removed = ClipRetention(keepDays: 7, maxItems: 100, maxBytes: 1_000).expired([fresh, old, oldPinned], now: now)
+    func testAgeRemovesOldEntries() {
+        let fresh = entry(10), old = entry(60 * 24 * 8)
+        let removed = ClipRetention(keepDays: 7, maxItems: 100, maxBytes: 1_000).expired([fresh, old], now: now)
         XCTAssertEqual(removed, [old.id])
         XCTAssertTrue(ClipRetention(keepDays: 0, maxItems: 100, maxBytes: 1_000).expired([old], now: now).isEmpty)
     }
 
-    func testCountKeepsNewestAndPins() {
-        let entries = (0..<5).map { entry(Double($0)) } + [entry(100, pinned: true)]
+    func testCountKeepsNewest() {
+        let entries = (0..<5).map { entry(Double($0)) }
         let removed = ClipRetention(keepDays: 0, maxItems: 3, maxBytes: 1_000).expired(entries, now: now)
         XCTAssertEqual(removed, Set(entries[3...4].map(\.id)))
     }
 
-    func testSizeRemovesOldestUnpinned() {
-        let entries = [entry(1, size: 40), entry(2, size: 40), entry(3, pinned: true, size: 40), entry(4, size: 40)]
+    func testSizeRemovesOldest() {
+        let entries = [entry(1, size: 40), entry(2, size: 40), entry(3, size: 40), entry(4, size: 40)]
         let removed = ClipRetention(keepDays: 0, maxItems: 100, maxBytes: 100).expired(entries, now: now)
-        XCTAssertEqual(removed, [entries[3].id, entries[1].id])
+        XCTAssertEqual(removed, [entries[3].id, entries[2].id])
+    }
+
+    /// Indexes from before pins were removed still decode, and a formerly pinned entry expires like any other.
+    func testOldPinnedEntryDecodesAndExpires() throws {
+        let old = entry(60 * 24 * 8)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode([old])) as? [[String: Any]])
+        json[0]["pinned"] = true
+        let decoded = try JSONDecoder().decode([ClipEntry].self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(decoded.map(\.id), [old.id])
+        XCTAssertEqual(ClipRetention(keepDays: 7, maxItems: 100, maxBytes: 1_000).expired(decoded, now: now), [old.id])
     }
 
     func testSettingsDecodeKeepsDefaultsForMissingKeys() throws {
@@ -112,9 +122,9 @@ final class ClipRetentionTests: XCTestCase {
 }
 
 final class ClipSearchTests: XCTestCase {
-    private func text(_ value: String, pinned: Bool = false, ocr: String? = nil, source: String? = nil) -> ClipEntry {
+    private func text(_ value: String, ocr: String? = nil, source: String? = nil) -> ClipEntry {
         let (kind, language) = ClipClassifier.classify(value)
-        return ClipEntry(hash: value, kind: kind, copiedAt: Date(), pinned: pinned, text: value, language: language, ocrText: ocr, sourceName: source)
+        return ClipEntry(hash: value, kind: kind, copiedAt: Date(), text: value, language: language, ocrText: ocr, sourceName: source)
     }
 
     func testQueryWordsMapToChips() {
@@ -130,7 +140,7 @@ final class ClipSearchTests: XCTestCase {
         image.ocrText = "Quarterly Revenue"
         let file = ClipEntry(hash: "f", kind: .files, copiedAt: Date(), text: "/tmp/Budget.numbers",
                              files: [ClipFile(path: "/tmp/Budget.numbers", name: "Budget.numbers", category: .document)])
-        let entries = [text("hello world", source: "Notes"), text("https://github.com/a"), image, file, text("#fff", pinned: true)]
+        let entries = [text("hello world", source: "Notes"), text("https://github.com/a"), image, file, text("#fff")]
         let keys = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, ClipSearch.key(for: $0)) })
         func find(_ query: String, chip: ClipFilter = .all) -> [ClipEntry] {
             ClipSearch.filter(entries, keys: keys, chip: chip, query: ClipQuery.parse(query))
@@ -139,11 +149,10 @@ final class ClipSearchTests: XCTestCase {
         XCTAssertEqual(find("budget").map(\.id), [file.id])
         XCTAssertEqual(find("notes").first?.text, "hello world")
         XCTAssertEqual(find("github.com").count, 1)
-        XCTAssertEqual(find("").first?.id, entries[4].id, "pinned first")
+        XCTAssertEqual(find("").map(\.id), entries.map(\.id), "keeps order")
         XCTAssertEqual(find("", chip: .images).map(\.id), [image.id])
         XCTAssertEqual(find("links").count, 1)
         XCTAssertEqual(find("", chip: .colors).count, 1)
-        XCTAssertEqual(find("", chip: .pinned).count, 1)
         XCTAssertTrue(find("zzz").isEmpty)
     }
 
@@ -158,7 +167,7 @@ final class ClipSearchTests: XCTestCase {
         let words = ["invoice", "meeting", "launch", "design", "budget", "travel", "report", "draft"]
         let entries = (0..<2000).map { index -> ClipEntry in
             let body = (0..<40).map { words[($0 * 7 + index) % words.count] }.joined(separator: " ")
-            return text("Entry \(index) \(body)\nline two \(index)", pinned: index % 50 == 0, ocr: index % 10 == 0 ? "scanned \(index)" : nil)
+            return text("Entry \(index) \(body)\nline two \(index)", ocr: index % 10 == 0 ? "scanned \(index)" : nil)
         }
         let keys = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, ClipSearch.key(for: $0)) })
         let start = CFAbsoluteTimeGetCurrent()

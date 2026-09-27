@@ -9,10 +9,9 @@ enum DemoClipboard {
 
     static func entries(now: Date = Date()) -> [(ClipEntry, [String: Data])] {
         func ago(_ minutes: Double) -> Date { now.addingTimeInterval(-minutes * 60) }
-        func text(_ value: String, _ minutes: Double, _ app: (String, String), id: UUID = UUID(), pinned: Bool = false) -> (ClipEntry, [String: Data]) {
+        func text(_ value: String, _ minutes: Double, _ app: (String, String), id: UUID = UUID()) -> (ClipEntry, [String: Data]) {
             var made = ClipboardCapture.text(value, source: ClipSource(bundleID: app.0, name: app.1), now: ago(minutes))
             made.entry.id = id
-            made.entry.pinned = pinned
             return (made.entry, made.blobs)
         }
         let notes = ("com.apple.Notes", "Notes"), safari = ("com.apple.Safari", "Safari"), xcode = ("com.apple.dt.Xcode", "Xcode")
@@ -32,7 +31,7 @@ enum DemoClipboard {
         var list: [(ClipEntry, [String: Data])] = [
             text("Meeting moved to Thursday at 10:00\nRoom 4B, bring the printed agenda", 2, notes),
             text(code, 6, xcode, id: codeID),
-            text("https://github.com/RyanErkal/jevcast", 11, safari, pinned: true),
+            text("https://github.com/RyanErkal/jevcast", 11, safari),
             text("#5B8CFF", 18, safari),
             text("hello@example.com", 64, mail),
             text("£1,240.00", 95, notes),

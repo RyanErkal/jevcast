@@ -2,11 +2,11 @@ import Foundation
 
 /// The chips at the top of the Clipboard view.
 public enum ClipFilter: String, CaseIterable, Sendable {
-    case all, pinned, text, images, links, files, media, colors, code
+    case all, text, images, links, files, media, colors, code
 
     public var title: String {
         switch self {
-        case .all: return "All"; case .pinned: return "Pinned"; case .text: return "Text"
+        case .all: return "All"; case .text: return "Text"
         case .images: return "Images"; case .links: return "Links"; case .files: return "Files"
         case .media: return "Media"; case .colors: return "Colors"; case .code: return "Code"
         }
@@ -15,7 +15,6 @@ public enum ClipFilter: String, CaseIterable, Sendable {
     public func includes(_ entry: ClipEntry) -> Bool {
         switch self {
         case .all: return true
-        case .pinned: return entry.pinned
         case .text: return [.text, .richText, .email, .phone, .number, .code].contains(entry.kind)
         case .images: return entry.isImage
         case .links: return entry.kind == .link
@@ -30,7 +29,6 @@ public enum ClipFilter: String, CaseIterable, Sendable {
     var words: [String] {
         switch self {
         case .all: return []
-        case .pinned: return ["pinned", "pins", "pin"]
         case .text: return ["text", "texts"]
         case .images: return ["image", "images", "picture", "pictures", "screenshot", "screenshots"]
         case .links: return ["link", "links", "url", "urls"]
@@ -80,11 +78,11 @@ public enum ClipSearch {
         return parts.joined(separator: "\n").lowercased()
     }
 
-    /// Pinned first, then newest, narrowed by the chip, the query's kind, and every word.
+    /// Newest first, narrowed by the chip, the query's kind, and every word.
     /// `keys` holds each entry's `key(for:)`, made once when the entry changes.
     public static func filter(_ entries: [ClipEntry], keys: [UUID: String], chip: ClipFilter, query: ClipQuery) -> [ClipEntry] {
         let chip = query.filter ?? chip
-        var pinned: [ClipEntry] = [], rest: [ClipEntry] = []
+        var result: [ClipEntry] = []
         for entry in entries {
             guard chip.includes(entry) else { continue }
             if let kind = query.kind, entry.kind != kind { continue }
@@ -92,9 +90,9 @@ public enum ClipSearch {
                 let key = keys[entry.id] ?? key(for: entry)
                 guard query.words.allSatisfy({ key.contains($0) }) else { continue }
             }
-            if entry.pinned { pinned.append(entry) } else { rest.append(entry) }
+            result.append(entry)
         }
-        return pinned + rest
+        return result
     }
 
     /// Text for several entries copied at once, in order, one per line. Images have no text and are left out.

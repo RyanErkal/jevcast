@@ -24,7 +24,6 @@ final class ClipboardActions: NSObject {
         let entries = page.selectedEntries
         let several = count > 1
         add(several ? "Copy \(count) Entries" : "Copy", "\r") { page.copy(entries) }
-        add(entries.contains { !$0.pinned } ? "Pin" : "Unpin", "p", [.command]) { page.togglePin() }
         add(several ? "Delete \(count) Entries" : "Delete", "\u{8}", []) { page.delete() }
         guard !several else { popUp(menu, in: view); return }
 

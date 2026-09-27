@@ -220,7 +220,7 @@ final class ClipboardHistory: ObservableObject {
             searchKeys[entry.id] = ClipSearch.key(for: entry)
             recognizeText(entry)
         case .duplicate(let id):
-            // A re-copy moves the entry to the top and keeps its pin, also one waiting in the undo trash.
+            // A re-copy moves the entry to the top, also one waiting in the undo trash.
             var entry: ClipEntry
             if let index = entries.firstIndex(where: { $0.id == id }) {
                 entry = entries.remove(at: index)
@@ -324,12 +324,6 @@ final class ClipboardHistory: ObservableObject {
 
     // MARK: Changes
 
-    func togglePin(_ id: UUID) {
-        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
-        entries[index].pinned.toggle()
-        prune()
-    }
-
     /// Removes entries. ⌘Z within a few seconds brings them back.
     func delete(_ ids: Set<UUID>) {
         let removed = entries.filter { ids.contains($0.id) }
@@ -367,23 +361,23 @@ final class ClipboardHistory: ObservableObject {
         enqueue { await worker.forget(ids) }
     }
 
-    /// Clears history. Pins stay unless `includingPins`.
-    func clear(includingPins: Bool) {
+    /// Clears all history.
+    func clear() {
         if started, !loaded {
-            enqueue { [weak self] in self?.clear(includingPins: includingPins) }
+            enqueue { [weak self] in self?.clear() }
             return
         }
         generation += 1
         thumbnails.removeAll()
         commitTrash()
-        let removed = entries.filter { includingPins || !$0.pinned }.map(\.id)
-        entries.removeAll { includingPins || !$0.pinned }
+        let removed = entries.map(\.id)
+        entries.removeAll()
         for id in removed { searchKeys[id] = nil; ocrTasks.removeValue(forKey: id)?.cancel() }
         let worker = worker
         saveTask?.cancel()
         let kept = entries
         enqueue {
-            if includingPins { await worker.deleteAll() } else { await worker.forget(removed) }
+            await worker.deleteAll()
             await worker.saveIndex(kept)
         }
     }
@@ -461,7 +455,7 @@ final class ClipboardHistory: ObservableObject {
 
     // MARK: Search
 
-    /// Pinned first, then newest, narrowed by the chip and the typed words.
+    /// Newest first, narrowed by the chip and the typed words.
     func matches(_ filter: String, chip: ClipFilter = .all) -> [ClipEntry] {
         ClipSearch.filter(entries, keys: searchKeys, chip: chip, query: ClipQuery.parse(filter))
     }

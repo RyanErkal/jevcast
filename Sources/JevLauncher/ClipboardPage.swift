@@ -4,7 +4,7 @@ import LauncherCore
 import SwiftUI
 
 /// The Clipboard view: chips and the list on the left, the selected entry large on the right.
-/// ↑↓ move, ⇧↑↓ select more, Return copies and closes the launcher, ⌘P pins,
+/// ↑↓ move, ⇧↑↓ select more, Return copies and closes the launcher,
 /// ⌫ deletes (⌘Z brings it back), Space is Quick Look, and ⌘K shows actions.
 /// ← and → change the chip while the filter is empty.
 @MainActor
@@ -56,7 +56,7 @@ final class ClipboardPage: ObservableObject, LauncherPage {
     /// Fixed, because the launcher footer does not redraw on each selection.
     var footerHints: [(title: String, key: String)] {
         guard isOn else { return [] }
-        return [("Actions", "⌘K"), ("Pin", "⌘P")]
+        return [("Actions", "⌘K")]
     }
 
     func opened() {
@@ -152,7 +152,6 @@ final class ClipboardPage: ObservableObject, LauncherPage {
         switch (event.keyCode, flags) {
         case (125, [.shift]): step(1, extend: true); return true
         case (126, [.shift]): step(-1, extend: true); return true
-        case (35, [.command]): togglePin(); return true
         case (40, [.command]): showActions(); return true
         case (6, [.command]):
             // ⌘Z brings back deleted rows while the filter is empty; otherwise the filter keeps its own undo.
@@ -178,13 +177,6 @@ final class ClipboardPage: ObservableObject, LauncherPage {
             guard await history.restore(entries) else { show("This entry could not be copied. Its file may have moved."); return }
             model?.onClose?(true)
         }
-    }
-
-    func togglePin() {
-        let entries = selectedEntries
-        guard !entries.isEmpty else { return }
-        let pin = entries.contains { !$0.pinned }
-        for entry in entries where entry.pinned != pin { history.togglePin(entry.id) }
     }
 
     func delete() {

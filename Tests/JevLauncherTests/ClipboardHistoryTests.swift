@@ -174,14 +174,14 @@ import XCTest
 
     // MARK: De-duplication
 
-    func testReCopyMovesToTopAndKeepsPin() async throws {
+    func testReCopyMovesToTop() async throws {
         let board = FakePasteboard(); let history = await make(board)
         await copy("one", board, history); history.poll(); await history.settle()
         await copy("two", board, history)
-        history.togglePin(try XCTUnwrap(history.entries.last).id)
+        let id = try XCTUnwrap(history.entries.last).id
         await copy("one", board, history)
         XCTAssertEqual(history.entries.map(\.text), ["one", "two"])
-        XCTAssertTrue(history.entries[0].pinned)
+        XCTAssertEqual(history.entries[0].id, id)
     }
 
     func testRecopyDuringRetentionRemovalKeepsNewCopy() async throws {
@@ -223,24 +223,20 @@ import XCTest
 
     // MARK: Retention and clearing
 
-    func testRetentionKeepsPinsAndCount() async throws {
+    func testRetentionKeepsCount() async throws {
         var settings = ClipboardSettings(); settings.maxItems = 100
         let board = FakePasteboard(); let history = await make(board, settings: settings)
-        await copy("pinned", board, history)
-        history.togglePin(try XCTUnwrap(history.entries.first).id)
+        await copy("oldest", board, history)
         for index in 0..<105 { await copy("item \(index)", board, history) }
-        XCTAssertEqual(history.entries.filter { !$0.pinned }.count, 100)
-        XCTAssertTrue(history.entries.contains { $0.pinned && $0.text == "pinned" })
+        XCTAssertEqual(history.entries.count, 100)
+        XCTAssertFalse(history.entries.contains { $0.text == "oldest" })
         XCTAssertEqual(history.entries.first?.text, "item 104")
     }
 
-    func testClearKeepsPinsUnlessAsked() async throws {
+    func testClearRemovesEverything() async throws {
         let board = FakePasteboard(); let history = await make(board)
         await copy("a", board, history); await copy("b", board, history)
-        history.togglePin(try XCTUnwrap(history.entries.first).id)
-        history.clear(includingPins: false)
-        XCTAssertEqual(history.entries.compactMap(\.text), ["b"])
-        history.clear(includingPins: true)
+        history.clear()
         XCTAssertTrue(history.entries.isEmpty)
     }
 
@@ -271,7 +267,6 @@ import XCTest
         let first = await make(board, folder: folder)
         await copy("kept after restart", board, first)
         board.copy(ClipRaw(types: ["public.png"], image: (Self.png(), "public.png"))); first.poll(); await first.settle()
-        first.togglePin(try XCTUnwrap(first.entries.last).id)
         await first.flush()
 
         let attributes = try FileManager.default.attributesOfItem(atPath: folder.path)
@@ -281,7 +276,6 @@ import XCTest
 
         let second = await make(FakePasteboard(), folder: folder)
         XCTAssertEqual(second.entries.map(\.kind), [.image, .text])
-        XCTAssertTrue(second.entries[1].pinned)
         let payload = await second.worker.payload(for: second.entries[0], plain: false)
         XCTAssertNotNil(payload?.data.first)
     }
@@ -312,7 +306,7 @@ import XCTest
         await copy("stored secret", board, history)
         await history.flush()
         board.copy("queued secret"); history.poll()
-        history.clear(includingPins: true)
+        history.clear()
         await history.settle()
         XCTAssertTrue(history.entries.isEmpty)
         let reopened = await make(folder: folder)
@@ -322,7 +316,7 @@ import XCTest
     func testClearDuringReadCannotRestorePrivateBlob() async throws {
         let folder = tempFolder(), board = FakePasteboard()
         let history = await make(board, folder: folder)
-        board.onRead = { history.clear(includingPins: true) }
+        board.onRead = { history.clear() }
         board.copy(String(repeating: "private", count: 1000))
         history.poll(); await history.settle()
         board.onRead = nil
@@ -367,20 +361,19 @@ import XCTest
         XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
     }
 
-    func testClearDuringLoadKeepsOnlyPins() async throws {
+    func testClearDuringLoadRemovesEverything() async throws {
         let folder = tempFolder(), board = FakePasteboard()
         let original = await make(board, folder: folder)
-        await copy("pin", board, original)
-        original.togglePin(try XCTUnwrap(original.entries.first).id)
-        await copy("remove", board, original); await original.flush()
+        await copy("one", board, original)
+        await copy("two", board, original); await original.flush()
         let loading = ClipboardHistory(pasteboard: FakePasteboard(), folder: folder)
         var settings = ClipboardSettings(); settings.ocr = false
         loading.apply(settings)
-        loading.clear(includingPins: false)
+        loading.clear()
         await loading.settle()
-        XCTAssertEqual(loading.entries.compactMap(\.text), ["pin"])
+        XCTAssertTrue(loading.entries.isEmpty)
         let reopened = await make(folder: folder)
-        XCTAssertEqual(reopened.entries.compactMap(\.text), ["pin"])
+        XCTAssertTrue(reopened.entries.isEmpty)
     }
 
     func testRichCopiesWithDifferentFormattingAreDistinct() async {
@@ -456,7 +449,7 @@ import XCTest
         var settings = ClipboardSettings(); settings.ocr = false
         history.apply(settings); await history.settle()
         await copy("secret", board, history); await history.flush()
-        history.clear(includingPins: true); await history.settle()
+        history.clear(); await history.settle()
         XCTAssertEqual(attempts, 2)
         XCTAssertEqual(history.failedDeletions, [folder])
         XCTAssertTrue(history.entries.isEmpty)

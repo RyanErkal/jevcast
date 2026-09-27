@@ -123,9 +123,6 @@ struct ClipRow: View {
                 .font(.system(size: 11)).foregroundStyle(.secondary)
             }
             Spacer(minLength: 4)
-            if entry.pinned {
-                Image(systemName: "pin.fill").font(.system(size: 10)).foregroundStyle(.orange).rotationEffect(.degrees(45))
-            }
         }
         .padding(.horizontal, 8).padding(.vertical, 6)
         .background(RoundedRectangle(cornerRadius: 8).fill(selected ? Color.accentColor.opacity(current ? 0.22 : 0.14) : .clear))

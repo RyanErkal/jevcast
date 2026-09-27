@@ -405,7 +405,7 @@ final class LauncherModel: ObservableObject {
             let query = ClipQuery.parse(filter)
             let opens = filter.isEmpty || (query.words.isEmpty && (query.filter != nil || query.kind != nil))
             let chip = query.filter
-            let view = opens ? viewRow(.clipboard, detail: "Filter, pin, preview, copy, and paste in a larger view", score: 1001,
+            let view = opens ? viewRow(.clipboard, detail: "Filter, preview, and copy in a larger view", score: 1001,
                                        configure: { page in if let chip { (page as? ClipboardPage)?.chip = chip } })
                 .map { row -> LauncherResult in var row = row; row.section = .clipboard; return row } : nil
             publish((view.map { [$0] } ?? []) + rows, start: start)

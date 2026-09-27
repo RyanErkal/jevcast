@@ -2,6 +2,14 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Removed
+
+- The Clipboard view has no pins. Command-P, the Pin and Unpin actions, the Pinned chip, the pin mark, and "clip pinned" are gone.
+- Settings has one Clear History button. Retention now applies to every entry.
+- Entries pinned in an earlier version become normal entries and follow retention.
+
 ## [1.8.1] - 2026-09-27
 
 ### Changed

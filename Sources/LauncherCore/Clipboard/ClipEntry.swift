@@ -42,6 +42,7 @@ public struct ClipImageInfo: Codable, Hashable, Sendable {
 }
 
 /// One clipboard history entry, as kept in the index. Large content lives in blob files beside it.
+/// Older indexes also stored a "pinned" flag. Decoding ignores it, so those entries are normal entries.
 public struct ClipEntry: Codable, Identifiable, Hashable, Sendable {
     /// Longer text keeps this much in the index, for titles and search, and the rest in a blob.
     public static let indexTextLimit = 4_000
@@ -52,7 +53,6 @@ public struct ClipEntry: Codable, Identifiable, Hashable, Sendable {
     public var kind: ClipKind
     public var firstCopied: Date
     public var copiedAt: Date
-    public var pinned: Bool
     /// Plain text, cut to `indexTextLimit` characters. The full text is in the "text" blob when `textInBlob`.
     public var text: String?
     public var textLength: Int
@@ -71,11 +71,11 @@ public struct ClipEntry: Codable, Identifiable, Hashable, Sendable {
     /// Bytes stored for this entry, including blobs.
     public var byteSize: Int64
 
-    public init(id: UUID = UUID(), hash: String, kind: ClipKind, copiedAt: Date, pinned: Bool = false, text: String? = nil,
+    public init(id: UUID = UUID(), hash: String, kind: ClipKind, copiedAt: Date, text: String? = nil,
                 textLength: Int? = nil, textInBlob: Bool = false, language: String? = nil, hasRTF: Bool = false, hasHTML: Bool = false,
                 image: ClipImageInfo? = nil, files: [ClipFile] = [], hasThumbnail: Bool = false, ocrText: String? = nil,
                 sourceBundleID: String? = nil, sourceName: String? = nil, byteSize: Int64 = 0) {
-        self.id = id; self.hash = hash; self.kind = kind; self.firstCopied = copiedAt; self.copiedAt = copiedAt; self.pinned = pinned
+        self.id = id; self.hash = hash; self.kind = kind; self.firstCopied = copiedAt; self.copiedAt = copiedAt
         self.text = text; self.textLength = textLength ?? text?.count ?? 0; self.textInBlob = textInBlob; self.language = language
         self.hasRTF = hasRTF; self.hasHTML = hasHTML; self.image = image; self.files = files; self.hasThumbnail = hasThumbnail
         self.ocrText = ocrText; self.sourceBundleID = sourceBundleID; self.sourceName = sourceName

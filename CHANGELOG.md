@@ -2,6 +2,13 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Changed
+
+- A view opened with a Hyper key now closes the launcher on Escape. If a message or menu is open, Escape closes it first. The footer shows "Close" in place of "Back".
+- The Clipboard view only copies. Return copies the selected entries and closes the launcher. Shift-Return, Option-Return, Command-1 to Command-9, and the Paste actions are removed.
+
 ## [1.8.0] - 2026-09-26
 
 ### Added

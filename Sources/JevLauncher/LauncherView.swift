@@ -28,7 +28,7 @@ struct LauncherView: View {
                 Spacer(minLength: 10)
                 ForEach(page.footerHints, id: \.key) { hint in KeyHint(hint.title, hint.key) }
                 KeyHint(page.openTitle, "↩")
-                KeyHint("Back", "esc")
+                KeyHint(model.escapeClosesLauncher ? "Close" : "Back", "esc")
                 if page.canPopOut { KeyHint("Open Window", "⌘O") }
             }
             .font(.system(size: 12))

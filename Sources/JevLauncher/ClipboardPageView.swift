@@ -52,9 +52,8 @@ struct ClipboardPageView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 2) {
-                    let shortcuts = Dictionary(page.rows.prefix(9).enumerated().map { ($1.id, $0 + 1) }, uniquingKeysWith: { a, _ in a })
                     ForEach(page.rows) { entry in
-                        ClipRow(entry: entry, thumbnails: history.thumbnails, shortcut: shortcuts[entry.id],
+                        ClipRow(entry: entry, thumbnails: history.thumbnails,
                                 selected: page.selection.contains(entry.id), current: entry.id == page.cursor)
                             .id(entry.id)
                             .onTapGesture(count: 2) { page.select(entry.id); page.copy(page.selectedEntries) }
@@ -105,7 +104,6 @@ private struct ClipChipBar: View {
 struct ClipRow: View {
     let entry: ClipEntry
     let thumbnails: ClipThumbnails
-    let shortcut: Int?
     var selected = false
     var current = false
 
@@ -125,11 +123,8 @@ struct ClipRow: View {
                 .font(.system(size: 11)).foregroundStyle(.secondary)
             }
             Spacer(minLength: 4)
-            VStack(alignment: .trailing, spacing: 3) {
-                if entry.pinned {
-                    Image(systemName: "pin.fill").font(.system(size: 10)).foregroundStyle(.orange).rotationEffect(.degrees(45))
-                }
-                if let shortcut { Text("⌘\(shortcut)").font(.system(size: 10)).foregroundStyle(.tertiary) }
+            if entry.pinned {
+                Image(systemName: "pin.fill").font(.system(size: 10)).foregroundStyle(.orange).rotationEffect(.degrees(45))
             }
         }
         .padding(.horizontal, 8).padding(.vertical, 6)

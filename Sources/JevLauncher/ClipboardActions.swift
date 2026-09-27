@@ -24,10 +24,6 @@ final class ClipboardActions: NSObject {
         let entries = page.selectedEntries
         let several = count > 1
         add(several ? "Copy \(count) Entries" : "Copy", "\r") { page.copy(entries) }
-        add(several ? "Paste \(count) Entries" : "Paste", "\r", [.shift]) { page.paste(entries, plain: false) }
-        if entries.contains(where: { $0.kind.isText || $0.ocrText != nil }) {
-            add("Paste as Plain Text", "\r", [.option]) { page.paste(entries, plain: true) }
-        }
         add(entries.contains { !$0.pinned } ? "Pin" : "Unpin", "p", [.command]) { page.togglePin() }
         add(several ? "Delete \(count) Entries" : "Delete", "\u{8}", []) { page.delete() }
         guard !several else { popUp(menu, in: view); return }
@@ -82,7 +78,7 @@ final class ClipboardActions: NSObject {
     @objc private func invoke(_ item: NSMenuItem) {
         guard callbacks.indices.contains(item.tag) else { return }
         let action = callbacks[item.tag]
-        // Runs after the menu closes, so a paste reaches the app in front.
+        // Runs after the menu closes.
         DispatchQueue.main.async { action() }
     }
 }

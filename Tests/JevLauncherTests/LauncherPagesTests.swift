@@ -74,6 +74,41 @@ final class LauncherPagesTests: XCTestCase {
         XCTAssertEqual(page.opens, 2)
     }
 
+    @MainActor func testHyperOpenedViewClosesTheLauncherOnEscapeAfterInnerLevels() {
+        let page = SpyPage()
+        let (model, done) = makeModel(page); defer { done() }
+        var closes = 0
+        model.onClose = { _ in closes += 1 }
+        model.updateQuery("hello", typed: true)
+        model.showView(.mail, fromHyper: true)
+        XCTAssertTrue(model.escapeClosesLauncher)
+        page.innerLevels = 1
+        XCTAssertTrue(model.handleViewKey(key(53)), "Escape closes the open message first.")
+        XCTAssertEqual(model.mode, .view(.mail))
+        XCTAssertEqual(closes, 0)
+        XCTAssertTrue(model.handleViewKey(key(53)))
+        XCTAssertEqual(closes, 1, "The next Escape closes the launcher.")
+        XCTAssertEqual(model.mode, .search)
+        XCTAssertFalse(model.escapeClosesLauncher)
+    }
+
+    @MainActor func testTypedViewGoesBackToSearchOnEscape() {
+        let page = SpyPage()
+        let (model, done) = makeModel(page); defer { done() }
+        var closes = 0
+        model.onClose = { _ in closes += 1 }
+        model.showView(.mail, fromHyper: true)
+        model.closeView()
+        XCTAssertFalse(model.escapeClosesLauncher, "Closing the view clears the Hyper flag.")
+        model.updateQuery("hello", typed: true)
+        model.showView(.mail)
+        XCTAssertFalse(model.escapeClosesLauncher)
+        XCTAssertTrue(model.handleViewKey(key(53)))
+        XCTAssertEqual(closes, 0)
+        XCTAssertEqual(model.mode, .search)
+        XCTAssertEqual(model.query, "hello")
+    }
+
     @MainActor func testSearchRowsIgnoreTheViewFilterAndComeBackAfter() {
         let page = SpyPage()
         let (model, done) = makeModel(page); defer { done() }
@@ -149,9 +184,14 @@ final class LauncherPagesTests: XCTestCase {
     let id = ViewID.mail
     var keys: [PageKey] = []
     var opens = 0
+    /// Inner levels open, such as an open message. Each Escape closes one.
+    var innerLevels = 0
     func handle(_ key: PageKey) -> Bool { keys.append(key); return true }
     func filter(_ text: String) {}
-    func back() -> Bool { false }
+    func back() -> Bool {
+        guard innerLevels > 0 else { return false }
+        innerLevels -= 1; return true
+    }
     func opened() { opens += 1 }
     func content() -> AnyView { AnyView(EmptyView()) }
 }

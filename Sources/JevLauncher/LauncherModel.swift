@@ -272,6 +272,8 @@ final class LauncherModel: ObservableObject {
     @Published var page: LauncherPage?
     /// Views and search text to go back to, one per Escape.
     var viewStack: [(page: LauncherPage?, query: String)] = []
+    /// True when a Hyper key opened the view: Escape then closes the launcher instead of going back to search.
+    @Published var escapeClosesLauncher = false
     /// Builds a view, set by the app.
     var makePage: ((ViewID) -> LauncherPage?)?
     /// The row that is waiting for a second Return.

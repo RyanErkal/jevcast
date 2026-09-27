@@ -4,9 +4,9 @@ import LauncherCore
 import SwiftUI
 
 /// The Clipboard view: chips and the list on the left, the selected entry large on the right.
-/// ↑↓ move, ⇧↑↓ select more, Return copies, ⇧Return pastes, ⌥Return pastes plain text,
-/// ⌘P pins, ⌫ deletes (⌘Z brings it back), Space is Quick Look, ⌘K shows actions, and ⌘1…⌘9
-/// paste that row. ← and → change the chip while the filter is empty.
+/// ↑↓ move, ⇧↑↓ select more, Return copies and closes the launcher, ⌘P pins,
+/// ⌫ deletes (⌘Z brings it back), Space is Quick Look, and ⌘K shows actions.
+/// ← and → change the chip while the filter is empty.
 @MainActor
 final class ClipboardPage: ObservableObject, LauncherPage {
     struct Toast: Equatable {
@@ -56,7 +56,7 @@ final class ClipboardPage: ObservableObject, LauncherPage {
     /// Fixed, because the launcher footer does not redraw on each selection.
     var footerHints: [(title: String, key: String)] {
         guard isOn else { return [] }
-        return [("Actions", "⌘K"), ("Pin", "⌘P"), ("Plain Text", "⌥↩"), ("Paste", "⇧↩")]
+        return [("Actions", "⌘K"), ("Pin", "⌘P")]
     }
 
     func opened() {
@@ -138,7 +138,7 @@ final class ClipboardPage: ObservableObject, LauncherPage {
         case .up: step(-1, extend: false)
         case .left: cycleChip(-1)
         case .right: cycleChip(1)
-        case .open(let shift): shift ? paste(selectedEntries, plain: false) : copy(selectedEntries)
+        case .open: copy(selectedEntries)
         case .delete: delete()
         }
         return true
@@ -152,7 +152,6 @@ final class ClipboardPage: ObservableObject, LauncherPage {
         switch (event.keyCode, flags) {
         case (125, [.shift]): step(1, extend: true); return true
         case (126, [.shift]): step(-1, extend: true); return true
-        case (36, [.option]), (76, [.option]): paste(selectedEntries, plain: true); return true
         case (35, [.command]): togglePin(); return true
         case (40, [.command]): showActions(); return true
         case (6, [.command]):
@@ -160,15 +159,9 @@ final class ClipboardPage: ObservableObject, LauncherPage {
             guard history.canUndoDelete, queryEmpty else { return false }
             undoDelete(); return true
         case (49, []) where queryEmpty: toggleQuickLook(); return true
-        case (let code, [.command]):
-            guard let number = Self.digitKeys.firstIndex(of: code) else { return false }
-            guard number < rows.count else { return true }
-            paste([rows[number]], plain: false)
-            return true
         default: return false
         }
     }
-    static let digitKeys: [UInt16] = [18, 19, 20, 21, 23, 22, 26, 28, 25]
 
     func back() -> Bool {
         if actions.isShowing { actions.dismiss(); return true }
@@ -184,28 +177,6 @@ final class ClipboardPage: ObservableObject, LauncherPage {
         Task {
             guard await history.restore(entries) else { show("This entry could not be copied. Its file may have moved."); return }
             model?.onClose?(true)
-        }
-    }
-
-    /// Pastes into the app that was in front. Several entries paste one after another, in list order.
-    func paste(_ entries: [ClipEntry], plain: Bool) {
-        guard !entries.isEmpty else { return }
-        let history = history
-        let target = model?.clipboardPasteTarget?() ?? NSWorkspace.shared.frontmostApplication?.processIdentifier
-        Task {
-            guard entries.count > 1, AXIsProcessTrusted() else {
-                guard await history.restore(entries, plain: plain) else { show(plain ? "This entry has no text." : "This entry could not be copied."); return }
-                model?.onClose?(true)
-                _ = await history.pasteRestored(to: target)
-                return
-            }
-            model?.onClose?(true)
-            try? await Task.sleep(nanoseconds: 200_000_000)
-            for entry in entries {
-                guard await history.restore([entry], plain: plain) else { continue }
-                guard await history.pasteRestored(to: target) else { return }
-                try? await Task.sleep(nanoseconds: 250_000_000)
-            }
         }
     }
 

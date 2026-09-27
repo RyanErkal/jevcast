@@ -73,7 +73,9 @@ extension LauncherModel {
 
     /// Turns the panel into a view. The typed search is kept and comes back with Escape.
     /// Voice and pending search work stop, so nothing types into the view's filter.
-    func showView(_ view: ViewID) {
+    /// `fromHyper` is true when a Hyper key opened it, so Escape closes the launcher.
+    func showView(_ view: ViewID, fromHyper: Bool = false) {
+        escapeClosesLauncher = fromHyper
         guard page?.id != view, let made = makePage?(view) else { return }
         dismissQuill()
         pauseListening()
@@ -90,6 +92,7 @@ extension LauncherModel {
     /// Goes back one level: to the previous view with its filter, or to search with the text you had typed.
     func closeView(handingOff: Bool = false) {
         guard let current = page else { return }
+        escapeClosesLauncher = false
         current.closed(handingOff: handingOff)
         let previous = viewStack.popLast()
         page = previous?.page ?? nil
@@ -102,6 +105,7 @@ extension LauncherModel {
     /// Closes every view at once, such as when the panel hides. Views below the top are not reopened.
     func closeAllViews(handingOff: Bool = false) {
         guard let current = page else { return }
+        escapeClosesLauncher = false
         current.closed(handingOff: handingOff)
         query = viewStack.first?.query ?? ""
         viewStack = []
@@ -127,6 +131,13 @@ extension LauncherModel {
                               action: .thing(Thing(verbs: [open], twoLine: false)), score: score)
     }
 
+    /// Escape at a view's top level: closes the launcher after a Hyper key opened the view, otherwise goes back.
+    private func leaveView() {
+        guard escapeClosesLauncher else { closeView(); return }
+        onClose?(true)
+        closeAllViews()
+    }
+
     /// Text typed in the search field while a view shows.
     func filterView(_ text: String) {
         query = text
@@ -143,13 +154,13 @@ extension LauncherModel {
         }
         if page.isTyping {
             guard event.keyCode == 53 else { return false }
-            if !page.back() { closeView() }
+            if !page.back() { leaveView() }
             return true
         }
         if event.keyCode != 53, page.handleEvent(event) { return true }
         switch event.keyCode {
         case 53:
-            if !page.back() { closeView() }
+            if !page.back() { leaveView() }
             return true
         case 125: return page.handle(.down)
         case 126: return page.handle(.up)

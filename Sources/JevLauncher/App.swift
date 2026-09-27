@@ -378,10 +378,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             if let window = item.windowAction { performWindowAction(window); return }
             switch item {
             case .launcher: show()
-            case .mail: showView(.mail)
-            case .calendar: showView(.calendar)
+            case .mail: showView(.mail, fromHyper: true)
+            case .calendar: showView(.calendar, fromHyper: true)
             case .automations: showAutomations()
-            case .clipboard: showView(.clipboard)
+            case .clipboard: showView(.clipboard, fromHyper: true)
             default: break
             }
         case .openApp(let bundleID):
@@ -559,9 +559,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         mail?.show(select: rowID, compose: address)
     }
     /// Shows the launcher as a view, such as Mail, in place of a separate window.
-    func showView(_ view: ViewID) {
+    /// `fromHyper` makes Escape close the launcher instead of going back to search.
+    func showView(_ view: ViewID, fromHyper: Bool = false) {
         if view == .mail, mail?.isOpen == true { showMail(); return }
-        show(); model.showView(view)
+        show(); model.showView(view, fromHyper: fromHyper)
     }
     private func showMailView(select rowID: Int64?) {
         if mail?.isOpen == true { showMail(select: rowID); return }

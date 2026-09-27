@@ -274,6 +274,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         }
         // Automations screens, demo only: they show invented runs and files, never this Mac's.
         if demo {
+            steps.append(("", 0.05, { nil }, { NotchSnapshots.writeAll(to: directory) }))
             let shots: [(String, AnyView, NSSize)] = [
                 ("automations-approval", AnyView(AutomationsWindow.snapshotApproval()), NSSize(width: 760, height: 640)),
                 ("automations-editor", AnyView(AutomationsWindow.snapshotEditor(.dataRefresh).frame(width: 720, height: 820)), NSSize(width: 720, height: 820))

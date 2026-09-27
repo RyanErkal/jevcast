@@ -3,6 +3,9 @@ import AppKit
 /// Finds an open menu at the top of the screen, from any app, so the notch never covers it.
 /// Reads only window layers and bounds, which need no permission.
 enum NotchMenuGuard {
+    /// True while the island's own overflow menu is open, so it does not hide the island.
+    nonisolated(unsafe) static var ownMenuOpen = false
+
     static func menuOpen(over frame: CGRect, screen: CGRect) -> Bool {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
             return false
@@ -16,7 +19,7 @@ enum NotchMenuGuard {
                   let dict = info[kCGWindowBounds as String] as? NSDictionary,
                   let bounds = CGRect(dictionaryRepresentation: dict) else { return false }
             // Our own panel is never at menu level, but skip it anyway.
-            if info[kCGWindowOwnerPID as String] as? Int32 == own, bounds == top { return false }
+            if info[kCGWindowOwnerPID as String] as? Int32 == own, bounds == top || ownMenuOpen { return false }
             return bounds.intersects(top)
         }
     }

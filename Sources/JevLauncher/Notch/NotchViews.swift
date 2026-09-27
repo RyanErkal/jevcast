@@ -66,12 +66,9 @@ struct NotchIsland: View {
     var liveField = true
     /// Text shown in the reply field when it opens. Snapshots use it.
     var draft = ""
-    @Namespace private var space
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     private var p: NotchPresentation { alert.presentation }
-    private var tint: Color { NotchStyle.tint(p.phase) }
     private var hasNotch: Bool { geometry.hasNotch }
     private var shape: NotchShape {
         let radius = NotchStyle.bottomRadius(mode, hasNotch: hasNotch)
@@ -81,7 +78,7 @@ struct NotchIsland: View {
     var body: some View {
         let size = NotchStyle.size(mode, alert, geometry)
         ZStack(alignment: .top) {
-            NotchSurface(shape: shape, tint: tint, mode: mode, reduceTransparency: reduceTransparency)
+            NotchSurface(shape: shape, mode: mode)
             content
                 .frame(width: size.width, height: size.height, alignment: .top)
                 .clipShape(shape)
@@ -96,43 +93,36 @@ struct NotchIsland: View {
     }
 
     @ViewBuilder private var content: some View {
+        let fade = NotchStyle.contentFade(reduceMotion: reduceMotion)
         switch mode {
         case .collapsed: Color.clear
-        case .compact: compact.transition(.opacity)
-        case .card: card.transition(opening)
+        case .compact: compact.transition(fade)
+        case .card: card.transition(fade)
         case .detail:
-            Group { if alert.isStack { list } else { runningDetail } }.transition(opening)
-        case .reply: reply.transition(opening)
+            Group { if alert.isStack { list } else { runningDetail } }.transition(fade)
+        case .reply: reply.transition(fade)
         }
-    }
-
-    private var opening: AnyTransition {
-        .asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.94, anchor: .top)), removal: .opacity)
     }
 
     private func perform(_ id: String, row: String? = nil) { handlers.perform(id, row) }
 
-    // MARK: Compact: icon left of the notch, status right of it. A click opens the detail.
+    // MARK: Compact: icon left of the notch, elapsed time and ring right of it. A click opens the detail.
 
     private var compact: some View {
-        HStack(spacing: 0) {
-            NotchIcon(p: p, diameter: 22, reduceMotion: reduceMotion)
-                .matchedGeometryEffect(id: "icon", in: space)
-                .padding(.leading, hasNotch ? 14 : 8)
+        HStack(spacing: 8) {
+            NotchIcon(p: p, diameter: 20, reduceMotion: reduceMotion)
             if hasNotch {
                 Spacer(minLength: geometry.notchWidth)
             } else {
                 Text(p.title)
-                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
+                    .font(.system(size: 12, weight: .medium)).foregroundStyle(.white)
                     .lineLimit(1).truncationMode(.tail)
-                    .matchedGeometryEffect(id: "title", in: space, properties: .position)
-                    .padding(.horizontal, 8)
                 Spacer(minLength: 0)
             }
             NotchStatus(p: p, reduceMotion: reduceMotion)
-                .matchedGeometryEffect(id: "status", in: space)
-                .padding(.trailing, hasNotch ? 14 : 12)
         }
+        .padding(.horizontal, hasNotch ? 12 : 8)
+        .padding(.trailing, hasNotch ? 0 : 4)
         .frame(height: hasNotch ? geometry.notchHeight : NotchGeometry.pillBody)
         .contentShape(Rectangle())
         .onTapGesture { if p.phase == .running { perform(NotchAlert.expandAction) } }
@@ -143,14 +133,15 @@ struct NotchIsland: View {
     // MARK: Card
 
     private var card: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 0) {
             if hasNotch { band(collapse: false) }
             header(p, trailing: headerTrailing)
             if !p.isBrief {
                 if !p.choices.isEmpty {
-                    HStack(spacing: 6) { ForEach(p.choices) { button($0, fill: true) } }
+                    HStack(spacing: 8) { ForEach(p.choices) { button($0, fill: true) } }
+                        .padding(.top, 12)
                 }
-                footer
+                footer.padding(.top, p.choices.isEmpty ? 12 : 8)
             }
         }
         .modifier(IslandPadding(hasNotch: hasNotch))
@@ -160,68 +151,50 @@ struct NotchIsland: View {
         if p.isBrief, let only = p.visibleActions.first {
             button(only)
         } else if !hasNotch {
-            NotchStatus(p: p, reduceMotion: reduceMotion, showsLabel: p.phase == .running)
+            NotchStatus(p: p, reduceMotion: reduceMotion)
         }
     }
 
-    /// The strip beside the notch: tone label left, live status right. In detail it also holds the collapse control.
+    /// The strip right of the notch: grey meta, and in detail the collapse control. Content starts 8 below it.
     private func band(collapse: Bool) -> some View {
-        HStack(spacing: 0) {
-            Text(bandLabel)
-                .font(.system(size: 10, weight: .bold, design: .rounded)).tracking(0.8)
-                .foregroundStyle(tint)
-                .lineLimit(1).fixedSize()
-            Spacer(minLength: geometry.notchWidth + 8)
-            HStack(spacing: 8) {
-                NotchStatus(p: p, reduceMotion: reduceMotion, showsLabel: false, showsBadge: !alert.isStack)
-                    .matchedGeometryEffect(id: "status", in: space)
-                if collapse { collapseButton }
-            }
+        HStack(spacing: 8) {
+            Spacer(minLength: 0)
+            NotchStatus(p: p, reduceMotion: reduceMotion, showsBadge: !alert.isStack)
+            if collapse { collapseButton(size: 22) }
         }
-        .padding(.horizontal, 6)
-        .frame(height: geometry.notchHeight)
-        .padding(.bottom, -2)
+        .frame(width: max(0, (geometry.width(.card) - geometry.notchWidth) / 2 - NotchStyle.padding), height: geometry.notchHeight)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .padding(.bottom, NotchGeometry.bandGap)
     }
 
-    private var bandLabel: String {
-        alert.isStack ? "\(alert.stackCount) ALERTS" : NotchStyle.statusText(p).uppercased()
-    }
-
-    private var collapseButton: some View {
-        Button { perform(NotchAlert.collapseAction) } label: {
-            Image(systemName: "chevron.up").font(.system(size: 9, weight: .bold))
-                .frame(width: 20, height: 20)
-                .background(Circle().fill(Color.white.opacity(0.12)))
-                .foregroundStyle(.white.opacity(0.85))
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Show less")
+    private func collapseButton(size: CGFloat = NotchStyle.buttonHeight) -> some View {
+        NotchIconButton(symbol: "chevron.up", label: "Show less") { perform(NotchAlert.collapseAction) }
+            .scaleEffect(size / NotchStyle.buttonHeight)
+            .frame(width: size, height: size)
     }
 
     private func header(_ p: NotchPresentation, lines: Int = 1, trailing: some View = EmptyView()) -> some View {
-        HStack(alignment: .center, spacing: 11) {
+        HStack(alignment: .center, spacing: 12) {
             NotchIcon(p: p, diameter: 32, reduceMotion: reduceMotion)
-                .matchedGeometryEffect(id: "icon", in: space)
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(p.title)
-                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                    .font(NotchStyle.Font.title).foregroundStyle(.white)
                     .lineLimit(1)
-                    .matchedGeometryEffect(id: "title", in: space, properties: .position)
                 Text(subtitle(p))
-                    .font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.62))
+                    .font(NotchStyle.Font.message).foregroundStyle(NotchStyle.secondaryText)
                     .lineLimit(lines)
             }
             .truncationMode(.tail)
             .frame(maxWidth: .infinity, alignment: .leading)
             trailing
         }
+        .frame(minHeight: 32)
     }
 
-    /// The capsule left of the buttons has room only beside two buttons or fewer.
-    private func detailInFooter(_ p: NotchPresentation) -> Bool { p.visibleActions.count <= 2 && p.phase != .running }
+    /// The footer shows the detail left of the buttons, except while running, where the bar goes there.
+    private func detailInFooter(_ p: NotchPresentation) -> Bool { p.phase != .running }
 
-    /// The message, with the detail after it when the footer has no room for the detail.
+    /// The message, with the detail after it when the footer does not show the detail.
     private func subtitle(_ p: NotchPresentation) -> String {
         guard let detail = p.detail, mode != .detail, !detailInFooter(p) || mode == .reply || p.isBrief else { return p.message }
         return p.message + " · " + detail
@@ -230,55 +203,52 @@ struct NotchIsland: View {
     private var footer: some View {
         HStack(spacing: 8) {
             leading
-            Spacer(minLength: 4)
+            Spacer(minLength: 8)
             ForEach(p.visibleActions) { button($0) }
+            if !p.overflowActions.isEmpty {
+                let more = p.overflowActions
+                NotchIconButton(symbol: "ellipsis", label: "More actions") {
+                    NotchOverflowMenu.show(more) { perform($0) }
+                }
+            }
         }
     }
 
-    /// Left of the buttons: counts or a reason, a progress bar, or nothing.
+    /// Left of the buttons: counts or a reason in grey, a progress bar, or nothing.
     @ViewBuilder private var leading: some View {
         if let detail = p.detail, detailInFooter(p) {
-            HStack(spacing: 5) {
-                Image(systemName: detailSymbol).font(.system(size: 10, weight: .semibold))
-                Text(detail).font(.system(size: 11, weight: .medium)).monospacedDigit().lineLimit(1)
-            }
-            .foregroundStyle(.white.opacity(0.78))
-            .padding(.horizontal, 9)
-            .frame(height: NotchStyle.buttonHeight)
-            .background(Capsule().fill(Color.white.opacity(0.07)))
-            .layoutPriority(-1)
+            Text(detail)
+                .font(NotchStyle.Font.meta).foregroundStyle(NotchStyle.metaText)
+                .lineLimit(1).truncationMode(.tail)
+                .padding(.leading, 44)
+                .layoutPriority(-1)
         } else if p.phase == .running, let value = p.progress {
-            NotchProgressBar(value: value, tint: tint).frame(maxWidth: 150)
+            HStack(spacing: 8) {
+                NotchProgressBar(value: value, tint: NotchStyle.tint(p.phase)).frame(maxWidth: 120)
+                Text(NotchStyle.statusText(p)).font(NotchStyle.Font.meta).foregroundStyle(NotchStyle.metaText)
+            }
+            .padding(.leading, 44)
         }
     }
 
-    private var detailSymbol: String {
-        switch p.phase {
-        case .approval: return "tray.full"
-        case .failure: return "exclamationmark.triangle"
-        case .running: return "clock"
-        default: return "info.circle"
-        }
-    }
-
-    private func button(_ item: NotchAlert.Action, fill: Bool = false, row: String? = nil, tint: Color? = nil) -> some View {
+    private func button(_ item: NotchAlert.Action, fill: Bool = false, row: String? = nil) -> some View {
         Button(item.title) { perform(item.id, row: row) }
-            .buttonStyle(NotchButtonStyle(item, tint: tint ?? self.tint, fill: fill))
+            .buttonStyle(NotchButtonStyle(item, fill: fill))
             .accessibilityHint(p.title)
     }
 
     // MARK: Detail: a running automation's latest activity
 
     private var runningDetail: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if hasNotch { band(collapse: true) }
-            header(p, trailing: Group { if !hasNotch { collapseButton } })
+        VStack(alignment: .leading, spacing: 12) {
+            if hasNotch { band(collapse: true).padding(.bottom, -12) }
+            header(p, trailing: Group { if !hasNotch { collapseButton() } })
             Text(p.detail ?? "No activity yet.")
-                .font(.system(size: 11.5)).foregroundStyle(.white.opacity(p.detail == nil ? 0.45 : 0.8))
+                .font(NotchStyle.Font.message)
+                .foregroundStyle(p.detail == nil ? NotchStyle.metaText : Color.white.opacity(0.8))
                 .lineLimit(2).truncationMode(.tail)
-                .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
-                .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.white.opacity(0.06)))
+                .frame(maxWidth: .infinity, minHeight: 32, maxHeight: 32, alignment: .topLeading)
+                .padding(.leading, 44)
             footer
         }
         .modifier(IslandPadding(hasNotch: hasNotch))
@@ -287,24 +257,26 @@ struct NotchIsland: View {
     // MARK: Detail: a stack as a list
 
     private var list: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
             if hasNotch { band(collapse: true) }
-            HStack(spacing: 10) {
-                Text(p.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
+            HStack(spacing: 8) {
+                Text(p.title).font(NotchStyle.Font.title).foregroundStyle(.white).lineLimit(1)
                 if alert.stackCount > NotchGeometry.maxRows {
                     Text("\(NotchGeometry.maxRows) of \(alert.stackCount)")
-                        .font(.system(size: 11, weight: .medium)).monospacedDigit().foregroundStyle(.white.opacity(0.5))
+                        .font(NotchStyle.Font.meta).foregroundStyle(NotchStyle.metaText)
                 }
-                Spacer(minLength: 4)
+                Spacer(minLength: 8)
                 if let later = p.actions.first(where: { $0.id == "later" }) {
                     Button("All later") { perform(later.id) }
-                        .buttonStyle(NotchButtonStyle(primary: false, tint: tint))
+                        .buttonStyle(NotchButtonStyle(primary: false))
                 }
-                if !hasNotch { collapseButton }
+                if !hasNotch { collapseButton() }
             }
-            .frame(height: 28)
-            VStack(spacing: 8) {
-                ForEach(alert.stack.prefix(NotchGeometry.maxRows)) { row($0) }
+            .frame(height: 32, alignment: .top)
+            ForEach(Array(alert.stack.prefix(NotchGeometry.maxRows).enumerated()), id: \.element.id) { index, member in
+                row(member).overlay(alignment: .top) {
+                    Rectangle().fill(NotchStyle.hairline).frame(height: 0.5).padding(.leading, 36)
+                }
             }
         }
         .modifier(IslandPadding(hasNotch: hasNotch, bottom: NotchGeometry.listBottom))
@@ -312,22 +284,26 @@ struct NotchIsland: View {
 
     private func row(_ member: NotchAlert) -> some View {
         let rp = member.presentation
-        let rowTint = NotchStyle.tint(rp.phase)
-        return HStack(spacing: 10) {
+        return HStack(spacing: 12) {
             NotchIcon(p: rp, diameter: 24, reduceMotion: reduceMotion)
-            VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(rp.title).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
                 Text(rp.phase == .running || rp.phase == .approval ? rp.detail ?? rp.message
                      : rp.detail.map { rp.message + " · " + $0 } ?? rp.message)
-                    .font(.system(size: 11)).foregroundStyle(.white.opacity(0.58))
+                    .font(.system(size: 11)).foregroundStyle(NotchStyle.secondaryText)
             }
             .lineLimit(1).truncationMode(.tail)
             .frame(maxWidth: .infinity, alignment: .leading)
-            ForEach(rp.rowActions) { button($0, row: member.id, tint: rowTint) }
+            HStack(spacing: 8) {
+                ForEach(rp.rowActions) { item in
+                    Button(item.title) { perform(item.id, row: member.id) }
+                        .buttonStyle(NotchButtonStyle(item))
+                        .accessibilityHint(rp.title)
+                }
+            }
+            .fixedSize()
         }
-        .padding(.leading, 7).padding(.trailing, 6)
-        .frame(height: NotchGeometry.rowHeight - 8)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.055)))
+        .frame(height: NotchGeometry.rowHeight)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(rp.title). \(rp.message)")
     }
@@ -342,24 +318,23 @@ struct NotchIsland: View {
 
     private var reply: some View {
         let target = replyAlert.presentation
-        return VStack(alignment: .leading, spacing: 10) {
-            if hasNotch { band(collapse: false) }
-            header(target, lines: 2)
-            NotchReplyRow(live: liveField, initial: draft, tint: NotchStyle.tint(target.phase),
-                          submit: handlers.submit, cancel: handlers.cancel)
+        return VStack(alignment: .leading, spacing: 12) {
+            if hasNotch { band(collapse: false).padding(.bottom, -12) }
+            header(target, lines: 2).frame(height: 48)
+            NotchReplyRow(live: liveField, initial: draft, submit: handlers.submit, cancel: handlers.cancel)
         }
         .modifier(IslandPadding(hasNotch: hasNotch))
     }
 }
 
-/// Inside the island: under the notch band, or 10 from the top without a notch.
+/// Inside the island: 16 on each side. With a notch the band sits at the top instead of padding.
 private struct IslandPadding: ViewModifier {
     let hasNotch: Bool
-    var bottom: CGFloat = 12
+    var bottom: CGFloat = NotchStyle.padding
     func body(content: Content) -> some View {
         content
-            .padding(.top, hasNotch ? 0 : 10)
-            .padding(.horizontal, 16)
+            .padding(.top, hasNotch ? 0 : NotchStyle.padding)
+            .padding(.horizontal, NotchStyle.padding)
             .padding(.bottom, bottom)
     }
 }
@@ -368,7 +343,6 @@ private struct IslandPadding: ViewModifier {
 private struct NotchReplyRow: View {
     let live: Bool
     let initial: String
-    let tint: Color
     let submit: (String) -> Void
     let cancel: () -> Void
     @State private var text = ""
@@ -376,7 +350,7 @@ private struct NotchReplyRow: View {
 
     var body: some View {
         let empty = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Group {
                 if live {
                     TextField("Type an answer", text: $text)
@@ -390,18 +364,17 @@ private struct NotchReplyRow: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .font(.system(size: 12.5))
+            .font(NotchStyle.Font.message)
             .lineLimit(1)
-            .padding(.horizontal, 11)
-            .frame(height: 30)
-            .background(RoundedRectangle(cornerRadius: 15, style: .continuous).fill(Color.white.opacity(0.09)))
-            .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(tint.opacity(0.55), lineWidth: 1))
+            .padding(.horizontal, 12)
+            .frame(height: NotchStyle.buttonHeight)
+            .background(Capsule().fill(Color.white.opacity(0.1)))
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5))
             Button("Cancel", action: cancel)
-                .buttonStyle(NotchButtonStyle(primary: false, tint: tint))
+                .buttonStyle(NotchButtonStyle(primary: false))
             Button("Send") { submit(text) }
-                .buttonStyle(NotchButtonStyle(primary: true, tint: tint))
+                .buttonStyle(NotchButtonStyle(primary: true))
                 .disabled(empty)
-                .opacity(empty ? 0.5 : 1)
         }
         .onAppear {
             text = initial

@@ -387,6 +387,6 @@ final class NotchAlertController {
 
     private func withMotion(_ change: () -> Void) {
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { change() }
-        else { withAnimation(.spring(response: 0.42, dampingFraction: 0.78), change) }
+        else { withAnimation(NotchStyle.morph(reduceMotion: false), change) }
     }
 }

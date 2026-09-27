@@ -2,6 +2,12 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Changed
+
+- Notch alerts have a quieter design: a plain black island, grey text, colour only on the icon and main button, at most two buttons with a More menu, and a calmer open motion.
+
 ## [1.11.0] - 2026-09-27
 
 ### Added

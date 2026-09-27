@@ -1,6 +1,7 @@
+import AppKit
 import SwiftUI
 
-/// The automation's symbol on a tinted disc. Bounces on arrival; pulses while it needs the user.
+/// The automation's symbol in a plain circle. Only the glyph carries the accent colour.
 struct NotchIcon: View {
     let p: NotchPresentation
     let diameter: CGFloat
@@ -8,41 +9,40 @@ struct NotchIcon: View {
     @State private var arrived = 0
 
     var body: some View {
-        let tint = NotchStyle.tint(p.phase)
         Image(systemName: p.symbol)
-            .font(.system(size: diameter * 0.46, weight: .semibold))
-            .foregroundStyle(tint)
-            .symbolRenderingMode(.hierarchical)
-            .symbolEffect(.bounce, value: reduceMotion ? 0 : arrived)
-            .symbolEffect(.pulse, options: .repeating, isActive: p.wantsAttention && !reduceMotion)
+            .font(.system(size: diameter * 0.44, weight: .medium))
+            .foregroundStyle(NotchStyle.tint(p.phase))
+            .symbolRenderingMode(.monochrome)
+            // One quiet cue on arrival for alerts that need the user. Nothing repeats.
+            .symbolEffect(.pulse, options: .nonRepeating, value: reduceMotion || !p.wantsAttention ? 0 : arrived)
             .frame(width: diameter, height: diameter)
-            .background(Circle().fill(tint.opacity(0.18)))
-            .overlay(Circle().strokeBorder(tint.opacity(0.28), lineWidth: 0.5))
+            .background(Circle().fill(Color.white.opacity(0.1)))
             .onAppear { arrived += 1 }
             .accessibilityHidden(true)
     }
 }
 
-/// A thin ring. With a value it fills; without one it spins a short arc.
+/// A thin ring. With a value it fills; without one it turns a short arc.
 struct NotchProgressRing: View {
     let progress: Double?
     let tint: Color
     let size: CGFloat
     let reduceMotion: Bool
+    private let line: CGFloat = 2
 
     var body: some View {
         ZStack {
-            Circle().stroke(tint.opacity(0.22), lineWidth: 2.5)
+            Circle().stroke(Color.white.opacity(0.16), lineWidth: line)
             if let progress {
                 Circle().trim(from: 0, to: max(0.02, min(1, progress)))
-                    .stroke(tint, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .stroke(tint, style: StrokeStyle(lineWidth: line, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                     .animation(.easeOut(duration: 0.3), value: progress)
             } else if reduceMotion {
                 arc(angle: 0)
             } else {
-                TimelineView(.animation(minimumInterval: 1.0 / 60)) { context in
-                    arc(angle: context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1) * 360)
+                TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
+                    arc(angle: context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4 * 360)
                 }
             }
         }
@@ -53,8 +53,8 @@ struct NotchProgressRing: View {
     }
 
     private func arc(angle: Double) -> some View {
-        Circle().trim(from: 0, to: 0.28)
-            .stroke(tint, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+        Circle().trim(from: 0, to: 0.25)
+            .stroke(tint, style: StrokeStyle(lineWidth: line, lineCap: .round))
             .rotationEffect(.degrees(angle - 90))
     }
 }
@@ -68,46 +68,37 @@ struct NotchProgressBar: View {
         Capsule().fill(Color.white.opacity(0.12))
             .overlay(alignment: .leading) {
                 GeometryReader { proxy in
-                    Capsule().fill(tint).frame(width: max(4, proxy.size.width * min(1, max(0, value))))
+                    Capsule().fill(Color.white.opacity(0.85)).frame(width: max(3, proxy.size.width * min(1, max(0, value))))
                         .animation(.easeOut(duration: 0.3), value: value)
                 }
             }
-            .frame(height: 4)
+            .frame(height: 3)
             .accessibilityElement()
             .accessibilityLabel("Progress")
             .accessibilityValue("\(Int((value * 100).rounded())) percent")
     }
 }
 
-/// Right-hand status: ring and elapsed time while running, a tone label otherwise, and a "+N" stack badge.
+/// Grey meta at the right: elapsed time and a thin ring while running, and the stack count.
 struct NotchStatus: View {
     let p: NotchPresentation
     let reduceMotion: Bool
-    /// Off where the tone label already shows elsewhere.
-    var showsLabel = true
     /// Off where the stack count already shows elsewhere.
     var showsBadge = true
 
     var body: some View {
-        let tint = NotchStyle.tint(p.phase)
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             if showsBadge && p.stackCount > 1 {
                 Text("+\(p.stackCount - 1)")
-                    .font(.system(size: 10, weight: .bold, design: .rounded)).monospacedDigit()
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 5).frame(height: 16)
-                    .background(Capsule().fill(tint))
                     .accessibilityLabel("\(p.stackCount) alerts")
             }
             if p.phase == .running {
-                elapsed.foregroundStyle(.white.opacity(0.85))
-                NotchProgressRing(progress: p.progress, tint: tint, size: 16, reduceMotion: reduceMotion)
-            } else if showsLabel {
-                Text(NotchStyle.statusText(p))
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(tint)
+                elapsed
+                NotchProgressRing(progress: p.progress, tint: NotchStyle.tint(p.phase), size: 14, reduceMotion: reduceMotion)
             }
         }
+        .font(NotchStyle.Font.meta)
+        .foregroundStyle(NotchStyle.secondaryText)
         .lineLimit(1)
         .fixedSize()
     }
@@ -116,13 +107,12 @@ struct NotchStatus: View {
         if let start = p.startedAt {
             TimelineView(.periodic(from: start, by: 1)) { context in
                 Text(Self.clock(context.date.timeIntervalSince(start)))
-                    .font(.system(size: 11, weight: .semibold, design: .rounded)).monospacedDigit()
                     .contentTransition(.numericText(countsDown: false))
-                    .animation(reduceMotion ? nil : .snappy, value: Int(context.date.timeIntervalSince(start)))
+                    .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: Int(context.date.timeIntervalSince(start)))
             }
             .accessibilityLabel("Elapsed")
         } else {
-            Text(NotchStyle.statusText(p)).font(.system(size: 11, weight: .semibold, design: .rounded)).monospacedDigit()
+            Text(NotchStyle.statusText(p))
         }
     }
 
@@ -132,22 +122,23 @@ struct NotchStatus: View {
     }
 }
 
+/// Capsule buttons. Primary is white with black text; a destructive primary uses the failure accent.
+/// Secondary is a quiet white fill; a destructive secondary has accent text.
 struct NotchButtonStyle: ButtonStyle {
     let primary: Bool
-    let tint: Color
     var fill = false
     var destructive = false
 
-    init(primary: Bool, tint: Color, fill: Bool = false, destructive: Bool = false) {
-        self.primary = primary; self.tint = tint; self.fill = fill; self.destructive = destructive
+    init(primary: Bool, fill: Bool = false, destructive: Bool = false) {
+        self.primary = primary; self.fill = fill; self.destructive = destructive
     }
 
-    init(_ action: NotchAlert.Action, tint: Color, fill: Bool = false) {
-        self.init(primary: action.primary, tint: tint, fill: fill, destructive: action.role == .destructive)
+    init(_ action: NotchAlert.Action, fill: Bool = false) {
+        self.init(primary: action.primary, fill: fill, destructive: action.role == .destructive)
     }
 
     func makeBody(configuration: Configuration) -> some View {
-        NotchButtonBody(label: configuration.label, pressed: configuration.isPressed, primary: primary, tint: tint, fill: fill,
+        NotchButtonBody(label: configuration.label, pressed: configuration.isPressed, primary: primary, fill: fill,
                         destructive: destructive)
     }
 }
@@ -156,25 +147,80 @@ private struct NotchButtonBody<Label: View>: View {
     let label: Label
     let pressed: Bool
     let primary: Bool
-    let tint: Color
     let fill: Bool
     let destructive: Bool
     @State private var hovering = false
+    @Environment(\.isEnabled) private var enabled
 
     var body: some View {
         label
-            .font(.system(size: 12, weight: .semibold))
+            .font(NotchStyle.Font.button)
             .lineLimit(1)
             .padding(.horizontal, 12)
-            .frame(maxWidth: fill ? .infinity : nil)
+            .frame(minWidth: NotchStyle.buttonMinWidth, maxWidth: fill ? .infinity : nil)
             .frame(height: NotchStyle.buttonHeight)
-            .background(Capsule().fill(primary ? tint : Color.white.opacity(hovering ? 0.20 : 0.13)))
-            .overlay(Capsule().strokeBorder(Color.white.opacity(primary ? 0.25 : 0.06), lineWidth: 0.5))
-            .foregroundStyle(primary ? Color.black.opacity(0.88) : destructive ? NotchStyle.tint(.failure) : Color.white)
-            .brightness(primary && hovering ? 0.06 : 0)
-            .scaleEffect(pressed ? 0.95 : 1)
-            .animation(.snappy(duration: 0.15), value: pressed)
+            .background(Capsule().fill(background))
+            .foregroundStyle(foreground)
+            .opacity(enabled ? 1 : 0.4)
+            .scaleEffect(pressed ? 0.97 : 1)
+            .animation(.easeOut(duration: 0.12), value: pressed)
+            .animation(.easeOut(duration: 0.12), value: hovering)
             .contentShape(Capsule())
             .onHover { hovering = $0 }
+    }
+
+    private var background: Color {
+        if primary { return destructive ? NotchStyle.destructive : Color.white.opacity(hovering ? 0.88 : 1) }
+        return Color.white.opacity(hovering ? 0.18 : 0.12)
+    }
+
+    private var foreground: Color {
+        if primary { return destructive ? .white : .black }
+        return destructive ? NotchStyle.destructive : .white
+    }
+}
+
+/// A circular icon button: the overflow menu and Show less.
+struct NotchIconButton: View {
+    let symbol: String
+    let label: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 11, weight: .semibold))
+                .frame(width: NotchStyle.buttonHeight, height: NotchStyle.buttonHeight)
+                .background(Circle().fill(Color.white.opacity(hovering ? 0.18 : 0.12)))
+                .foregroundStyle(.white.opacity(0.85))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .accessibilityLabel(label)
+    }
+}
+
+/// The actions past the first two, in a native menu at the pointer.
+@MainActor
+enum NotchOverflowMenu {
+    static func show(_ actions: [NotchAlert.Action], perform: @escaping (String) -> Void) {
+        let menu = NSMenu()
+        for item in actions {
+            let entry = NSMenuItem(title: item.title, action: #selector(Target.run(_:)), keyEquivalent: "")
+            let target = Target { perform(item.id) }
+            entry.target = target
+            entry.representedObject = target
+            menu.addItem(entry)
+        }
+        NotchMenuGuard.ownMenuOpen = true
+        defer { NotchMenuGuard.ownMenuOpen = false }
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    }
+
+    private final class Target: NSObject {
+        let action: () -> Void
+        init(_ action: @escaping () -> Void) { self.action = action }
+        @objc func run(_ sender: Any?) { action() }
     }
 }

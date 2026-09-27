@@ -29,17 +29,34 @@ enum NotchMode: Equatable {
 }
 
 /// Colours, sizes, and motion for the notch island. Sizes come from `NotchGeometry`, so the panel always fits the shape.
+/// Colour is an accent only: the icon glyph, the progress ring, and a destructive button.
 enum NotchStyle {
-    static let buttonHeight: CGFloat = 26
+    static let buttonHeight: CGFloat = 28
+    static let buttonMinWidth: CGFloat = 64
+    /// Inside padding of the open island.
+    static let padding: CGFloat = 16
+
+    enum Font {
+        static let title = SwiftUI.Font.system(size: 13, weight: .semibold)
+        static let message = SwiftUI.Font.system(size: 12)
+        static let meta = SwiftUI.Font.system(size: 11, weight: .medium).monospacedDigit()
+        static let button = SwiftUI.Font.system(size: 12, weight: .medium)
+    }
+
+    static let secondaryText = Color.white.opacity(0.6)
+    static let metaText = Color.white.opacity(0.45)
+    static let hairline = Color.white.opacity(0.08)
 
     static func tint(_ phase: NotchPresentation.Phase) -> Color {
         switch phase {
-        case .question, .approval: return Color(red: 1.0, green: 0.72, blue: 0.24)
-        case .failure: return Color(red: 1.0, green: 0.36, blue: 0.33)
-        case .success: return Color(red: 0.33, green: 0.87, blue: 0.48)
-        case .running, .info: return Color(red: 0.38, green: 0.64, blue: 1.0)
+        case .question, .approval: return Color(red: 1.0, green: 0.74, blue: 0.30)
+        case .failure: return Color(red: 1.0, green: 0.42, blue: 0.38)
+        case .success: return Color(red: 0.40, green: 0.86, blue: 0.52)
+        case .running, .info: return Color(red: 0.45, green: 0.68, blue: 1.0)
         }
     }
+
+    static let destructive = tint(.failure)
 
     static func statusText(_ p: NotchPresentation) -> String {
         switch p.phase {
@@ -62,42 +79,31 @@ enum NotchStyle {
     static func bottomRadius(_ mode: NotchMode, hasNotch: Bool) -> CGFloat {
         switch mode {
         case .collapsed: return hasNotch ? 10 : NotchGeometry.pillBody / 2
-        case .compact: return hasNotch ? 14 : NotchGeometry.pillBody / 2
-        case .card, .detail, .reply: return 28
+        case .compact: return hasNotch ? 12 : NotchGeometry.pillBody / 2
+        case .card, .detail, .reply: return 24
         }
     }
 
-    /// A spring close to the system island: quick, one small overshoot.
+    /// A critically damped spring: the shape grows out of the notch and settles without a bounce.
     static func morph(reduceMotion: Bool) -> Animation {
-        reduceMotion ? .easeInOut(duration: 0.18) : .spring(response: 0.44, dampingFraction: 0.76, blendDuration: 0.1)
+        reduceMotion ? .easeInOut(duration: 0.18) : .spring(response: 0.42, dampingFraction: 0.92, blendDuration: 0.1)
+    }
+
+    /// Content fades in once the shape has mostly grown, and fades out at once.
+    static func contentFade(reduceMotion: Bool) -> AnyTransition {
+        reduceMotion ? .opacity : .asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.22).delay(0.08)),
+                                              removal: .opacity.animation(.easeIn(duration: 0.1)))
     }
 }
 
-/// Tinted glow, inner highlight, and depth for the island's black shape.
-/// Reduce Transparency keeps plain black with a hairline edge.
+/// The island's solid black shape, a hairline edge for dark wallpapers, and a neutral shadow while open.
 struct NotchSurface: View {
     let shape: NotchShape
-    let tint: Color
     let mode: NotchMode
-    let reduceTransparency: Bool
 
     var body: some View {
-        let open = mode != .collapsed
         shape.fill(Color.black)
-            .overlay {
-                if !reduceTransparency && mode.isOpen {
-                    // Soft tone light from the icon corner. A gradient, not a blur, so it costs nothing per frame.
-                    RadialGradient(colors: [tint.opacity(0.20), .clear], center: UnitPoint(x: 0.1, y: 0.55), startRadius: 0, endRadius: 190)
-                        .clipShape(shape)
-                        .transition(.opacity)
-                }
-            }
-            .overlay {
-                shape.stroke(LinearGradient(colors: [.white.opacity(0), .white.opacity(reduceTransparency ? 0.18 : 0.12)],
-                                            startPoint: .top, endPoint: .bottom), lineWidth: 1)
-                    .opacity(open ? 1 : 0)
-            }
-            .shadow(color: reduceTransparency ? .clear : tint.opacity(open ? 0.30 : 0), radius: mode.isOpen ? 12 : 7, y: 2)
-            .shadow(color: .black.opacity(open ? 0.45 : 0), radius: 10, y: 5)
+            .overlay { shape.stroke(NotchStyle.hairline, lineWidth: 0.5).opacity(mode.isOpen ? 1 : 0) }
+            .shadow(color: .black.opacity(mode.isOpen ? 0.35 : 0), radius: 16, y: 6)
     }
 }

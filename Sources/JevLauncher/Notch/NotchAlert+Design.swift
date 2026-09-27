@@ -19,7 +19,7 @@ struct NotchPresentation: Equatable {
     var stackCount: Int = 1
     /// A question's answers. Each sends `NotchAlert.choiceAction(index)`.
     var choices: [NotchAlert.Action]
-    /// At most three are drawn.
+    /// Two are drawn as buttons; the rest go in an overflow menu.
     var actions: [NotchAlert.Action]
 
     init(phase: Phase, symbol: String, title: String, message: String, detail: String? = nil, progress: Double? = nil,
@@ -57,8 +57,9 @@ struct NotchPresentation: Equatable {
                   stackCount: max(1, alert.stackCount), choices: Array(choices), actions: actions)
     }
 
-    var visibleActions: [NotchAlert.Action] { Array(actions.prefix(3)) }
-    /// Needs the user now: the icon pulses.
+    var visibleActions: [NotchAlert.Action] { Array(actions.prefix(2)) }
+    var overflowActions: [NotchAlert.Action] { Array(actions.dropFirst(2)) }
+    /// Needs the user now: the icon pulses once on arrival.
     var wantsAttention: Bool { phase == .question || phase == .approval }
     /// Success and info fit on one line with their action inline.
     var isBrief: Bool { (phase == .success || phase == .info) && detail == nil && actions.count <= 1 && stackCount == 1 }

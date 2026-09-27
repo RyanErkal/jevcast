@@ -7,8 +7,8 @@ struct NotchGeometry: Equatable {
     var notchWidth: CGFloat
     var notchHeight: CGFloat
     /// The card is at least this wide, and 40 wider than the notch.
-    static let cardWidth: CGFloat = 380
-    static let cardBody: CGFloat = 90
+    static let cardWidth: CGFloat = 400
+    static let cardBody: CGFloat = 96
     /// Success or info with one action: one line.
     static let briefBody: CGFloat = 56
     /// A question's row of answers, above its buttons.
@@ -21,16 +21,19 @@ struct NotchGeometry: Equatable {
     /// Gap above the shape on a screen without a notch.
     static let topGap: CGFloat = 6
     /// A stack as a list: its header, then one row per alert.
-    static let listHeader: CGFloat = 38
-    static let rowHeight: CGFloat = 46
-    static let listBottom: CGFloat = 10
+    static let listHeader: CGFloat = 40
+    static let rowHeight: CGFloat = 48
+    static let listBottom: CGFloat = 8
     static let maxRows = 4
     /// The running detail: latest activity, progress, and Cancel.
-    static let detailBody: CGFloat = 144
+    static let detailBody: CGFloat = 140
     /// The question and the reply field.
-    static let replyBody: CGFloat = 104
+    static let replyBody: CGFloat = 112
+    /// Content starts 8 below the notch band. Without a notch it starts 16 from the top, so open modes grow by the difference.
+    static let bandGap: CGFloat = 8
+    static let plainExtra: CGFloat = NotchStyle.padding - bandGap
     /// Room around the shape for its shadow.
-    static let margin: CGFloat = 24
+    static let margin: CGFloat = 40
 
     init(screenFrame: CGRect, notchWidth: CGFloat, notchHeight: CGFloat) {
         self.screenFrame = screenFrame; self.notchWidth = notchWidth; self.notchHeight = notchHeight
@@ -58,6 +61,13 @@ struct NotchGeometry: Equatable {
     func bodyHeight(_ mode: NotchState.Mode, alert: NotchAlert?) -> CGFloat {
         switch mode {
         case .pill: return hasNotch ? 0 : Self.pillBody
+        default: return openBody(mode, alert: alert) + (hasNotch ? 0 : Self.plainExtra)
+        }
+    }
+
+    private func openBody(_ mode: NotchState.Mode, alert: NotchAlert?) -> CGFloat {
+        switch mode {
+        case .pill: return 0
         case .card:
             guard let alert else { return Self.cardBody }
             if alert.presentation.isBrief { return Self.briefBody }

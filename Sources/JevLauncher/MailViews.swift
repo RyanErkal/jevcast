@@ -79,15 +79,7 @@ struct MailList: View {
         VStack(spacing: 0) {
             header
             Divider()
-            List(selection: $model.selectedID) {
-                ForEach(model.messages) { message in
-                    MailRow(message: message, delete: { model.delete(message.rowID) },
-                            deleteAll: { model.select(message.rowID, byUser: false); model.deleteAllFromSender() })
-                        .tag(message.rowID)
-                }
-            }
-            .listStyle(.inset)
-            .overlay { if model.messages.isEmpty { Text(model.search.isEmpty ? "Inbox is empty" : "No matches").foregroundStyle(.secondary) } }
+            MailMessageList(model: model)
         }
         .onChange(of: model.searching) { _, on in searchFocused = on }
     }
@@ -95,7 +87,7 @@ struct MailList: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                Text("Inbox").font(.headline)
+                MailPlacePicker(model: model).font(.headline)
                 if model.unreadInInbox > 0 { Text("\(model.unreadInInbox) unread").foregroundStyle(.secondary) }
                 Spacer()
                 Button { model.searching.toggle() } label: { Image(systemName: "magnifyingglass") }.help("Search (⌘F)")
@@ -103,8 +95,9 @@ struct MailList: View {
                 Button { model.compose() } label: { Image(systemName: "square.and.pencil") }.help("New message (⌘N)")
             }
             .buttonStyle(.borderless)
+            MailClosedNote(model: model)
             if model.searching {
-                TextField("Search senders and subjects", text: $model.search)
+                TextField("Search senders, subjects, and text", text: $model.search)
                     .textFieldStyle(.roundedBorder).focused($searchFocused)
                     .onSubmit { model.searching = !model.search.isEmpty }
             }
@@ -114,7 +107,9 @@ struct MailList: View {
 }
 
 /// Sender, subject, and date: no preview, so the inbox reads at a glance. Hovering shows Delete.
-struct MailRow: View {
+/// Rows compare by message only, so a list update redraws just the rows that changed.
+struct MailRow: View, Equatable {
+    static func == (a: MailRow, b: MailRow) -> Bool { a.message == b.message }
     let message: MailSummary
     var delete: () -> Void = {}
     var deleteAll: () -> Void = {}
@@ -203,8 +198,8 @@ struct MailReader: View {
     @ViewBuilder private func body(_ message: MailSummary) -> some View {
         if let detail = model.detail {
             // The message as the sender styled it, with its images. Plain text only when there is no HTML.
-            if let html = detail.html, !(prefersPlain && hasPlain(detail)) {
-                MailHTMLView(html: html, inlineImages: detail.inlineImages, loadsRemote: model.loadsImages,
+            if let html = model.detailHTML, !(prefersPlain && hasPlain(detail)) {
+                MailHTMLView(html: html, documentID: message.rowID, loadsRemote: model.loadsImages,
                              zoom: MailReading.clampZoom(zoom), fitsWidth: fitsWidth)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {

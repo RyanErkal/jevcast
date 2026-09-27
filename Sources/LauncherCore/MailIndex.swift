@@ -14,25 +14,30 @@ public struct MailMailbox: Equatable, Sendable, Identifiable, Hashable {
     /// The account's ID: the URL host, which is also the folder name under `~/Library/Mail/V…`.
     public var accountID: String { URL(string: url)?.host ?? "" }
     /// The path Mail's AppleScript uses for the mailbox, such as "INBOX" or "[Gmail]/All Mail".
+    /// A URL with an empty host, such as `local:///Inbox`, still has its path.
     public var path: String {
         let raw = url.components(separatedBy: "://").dropFirst().joined(separator: "://")
-        let afterHost = raw.split(separator: "/", maxSplits: 1).dropFirst().first.map(String.init) ?? ""
-        return afterHost.removingPercentEncoding ?? afterHost
+        let afterHost = raw.firstIndex(of: "/").map { String(raw[raw.index(after: $0)...]) } ?? ""
+        let trimmed = afterHost.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return trimmed.removingPercentEncoding ?? trimmed
     }
     public var name: String { path.split(separator: "/").last.map(String.init) ?? path }
 
     public enum Role: Sendable { case inbox, sent, drafts, archive, trash, junk, other }
     public var role: Role {
         let lower = name.lowercased(), full = path.lowercased()
-        // Only the top-level Inbox is the inbox; "Old/Inbox" is an ordinary folder.
+        // Only a top-level Inbox is the inbox, in any case: "INBOX" (IMAP, iCloud, Gmail),
+        // "Inbox" (Exchange, Outlook, Yahoo, On My Mac). "Old/Inbox" is an ordinary folder.
         if full == "inbox" { return .inbox }
         if ["sent", "sent messages", "sent items", "sent mail"].contains(lower) { return .sent }
-        if lower == "drafts" { return .drafts }
+        if ["drafts", "draft", "outbox"].contains(lower) { return .drafts }
         if lower == "archive" || full == "[gmail]/all mail" || lower == "all mail" { return .archive }
         if ["trash", "deleted messages", "deleted items", "bin"].contains(lower) { return .trash }
-        if ["junk", "spam", "junk e-mail", "junk email"].contains(lower) { return .junk }
+        if ["junk", "spam", "junk e-mail", "junk email", "bulk mail"].contains(lower) { return .junk }
         return .other
     }
+    /// True for mailboxes the All Mail list shows: everything but Trash, Junk, Sent, and Drafts.
+    public var inAllMail: Bool { ![.trash, .junk, .sent, .drafts].contains(role) }
 
     /// The folder that holds this mailbox's messages: each path part gains ".mbox".
     public func folder(in mailRoot: String) -> String {
@@ -62,10 +67,13 @@ public struct MailSummary: Equatable, Sendable, Identifiable, Hashable {
     public var read: Bool
     public var flagged: Bool
     public let conversation: Int64
+    /// The same email in two mailboxes, such as Gmail's Inbox and All Mail, has the same key.
+    public let messageKey: Int64
     public init(rowID: Int64, mailbox: Int64, subject: String, senderName: String, senderAddress: String, snippet: String,
-                date: Date, read: Bool, flagged: Bool, conversation: Int64) {
+                date: Date, read: Bool, flagged: Bool, conversation: Int64, messageKey: Int64? = nil) {
         self.rowID = rowID; self.mailbox = mailbox; self.subject = subject; self.senderName = senderName; self.senderAddress = senderAddress
         self.snippet = snippet; self.date = date; self.read = read; self.flagged = flagged; self.conversation = conversation
+        self.messageKey = messageKey ?? rowID
     }
     public var id: Int64 { rowID }
     public var sender: String { senderName.isEmpty ? senderAddress : senderName }

@@ -25,8 +25,9 @@ final class MailSource: ThingSource {
         let (boxes, messages) = try await Task.detached(priority: .userInitiated) { () throws -> ([MailMailbox], [MailSummary]) in
             let boxes = try MailStore.mailboxes(root: root)
             let inboxes = boxes.filter { $0.role == .inbox }.map(\.rowID)
+            // A search looks through All Mail: every mailbox but Trash, Junk, Sent, and Drafts, one copy per email.
             let query = filter.isEmpty ? MailStore.Query(mailboxes: inboxes, unreadOnly: true, limit: 6)
-                                       : MailStore.Query(mailboxes: [], text: filter, limit: 15)
+                                       : MailModel.query(.allMail, filter, boxes).with(limit: 15)
             return (boxes, try MailStore.messages(root: root, query))
         }.value
         let unread = boxes.filter { $0.role == .inbox }.map(\.unread).reduce(0, +)

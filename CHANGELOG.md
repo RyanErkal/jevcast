@@ -2,6 +2,24 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Fixed
+
+- **Mail shows all your mail.** The list no longer stops at 300 messages. It loads 200 at a time and loads more as you scroll near the end. The selection stays when more mail loads or new mail arrives.
+- Inboxes from Exchange, Outlook, iCloud, Yahoo, and On My Mac count as Inbox, in any letter case.
+
+### Added
+
+- **All Mail.** The mailbox menu in the Mail view and the Mail window lists every mailbox except Trash, Junk, Sent, and Drafts. An email in both Gmail's Inbox and All Mail shows once. Inbox stays the default.
+- Search also matches the body text that Apple Mail keeps for each message.
+- When Apple Mail is closed, the list says new mail is not arriving and offers Open Mail. Mail opens in the background.
+- `--diagnose-mail` prints message counts per mailbox kind, All Mail and inbox totals, whether Apple Mail runs, and query timings.
+
+### Changed
+
+- Mail reads its index through one kept connection with cached queries, and refreshes read only newer messages. On a 100,000 message test index, a page takes about 1 ms and a search under 35 ms.
+
 ## [1.9.2] - 2026-09-27
 
 ### Changed

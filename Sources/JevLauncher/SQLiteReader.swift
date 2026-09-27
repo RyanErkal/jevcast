@@ -16,6 +16,11 @@ final class SQLiteReader {
     }
 
     private var db: OpaquePointer?
+    /// Prepared statements by SQL text, kept for the connection's life. Queries rebuilt with the same
+    /// shape reuse their plan instead of parsing again.
+    private var statements: [String: OpaquePointer] = [:]
+    /// Checked while a query runs; true stops it with an "interrupted" error.
+    var shouldStop: (() -> Bool)?
 
     /// Opens `path` read-only. `immutable` skips locking, for a private copy nothing else writes.
     init(path: String, immutable: Bool = false) throws {
@@ -28,14 +33,38 @@ final class SQLiteReader {
         }
         sqlite3_busy_timeout(db, 1500)
     }
-    deinit { sqlite3_close(db) }
+    deinit {
+        for statement in statements.values { sqlite3_finalize(statement) }
+        sqlite3_close(db)
+    }
 
-    func rows(_ sql: String, _ arguments: [Value] = []) throws -> [[Value]] {
+    /// Runs `body` with `stop` checked every few thousand steps of each query.
+    func withStop<T>(_ stop: (() -> Bool)?, _ body: () throws -> T) rethrows -> T {
+        guard let stop else { return try body() }
+        shouldStop = stop
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        sqlite3_progress_handler(db, 2000, { context in
+            guard let context else { return 0 }
+            return Unmanaged<SQLiteReader>.fromOpaque(context).takeUnretainedValue().shouldStop?() == true ? 1 : 0
+        }, context)
+        defer { sqlite3_progress_handler(db, 0, nil, nil); shouldStop = nil }
+        return try body()
+    }
+
+    private func prepared(_ sql: String) throws -> OpaquePointer? {
+        if let cached = statements[sql] { return cached }
         var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+        guard sqlite3_prepare_v3(db, sql, -1, UInt32(SQLITE_PREPARE_PERSISTENT), &statement, nil) == SQLITE_OK else {
             throw Failure(text: "Query failed: " + String(cString: sqlite3_errmsg(db)))
         }
-        defer { sqlite3_finalize(statement) }
+        if statements.count >= 64, let (oldSQL, old) = statements.first { sqlite3_finalize(old); statements.removeValue(forKey: oldSQL) }
+        statements[sql] = statement
+        return statement
+    }
+
+    func rows(_ sql: String, _ arguments: [Value] = []) throws -> [[Value]] {
+        let statement = try prepared(sql)
+        defer { sqlite3_reset(statement); sqlite3_clear_bindings(statement) }
         let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
         for (index, argument) in arguments.enumerated() {
             let position = Int32(index + 1)

@@ -117,6 +117,39 @@ final class MIMEHostileTests: XCTestCase {
         XCTAssertEqual(MailMailbox.archive(for: "A", in: [nested, top]), top)
         XCTAssertEqual(MailMailbox(rowID: 7, url: "imap://A/Old/Inbox", unread: 0, total: 0).role, .other)
     }
+
+    func testInboxRoleAcrossAccountKinds() {
+        let inboxes = [
+            "imap://1A2B-GMAIL/INBOX",                  // Gmail
+            "imap://C3D4-ICLOUD/INBOX",                 // iCloud
+            "ews://E5F6-EXCHANGE/Inbox",                // Exchange and Outlook
+            "imap://ABCD-OUTLOOK/Inbox",                // Outlook.com over IMAP
+            "imap://7788-YAHOO/Inbox",                  // Yahoo
+            "local://local/Inbox",                      // On My Mac
+            "local:///Inbox",                           // On My Mac, no host
+            "imap://ACC/INBOX/",                        // Trailing slash
+            "imap://ACC/inbox"
+        ]
+        for url in inboxes {
+            XCTAssertEqual(MailMailbox(rowID: 1, url: url, unread: 0, total: 0).role, .inbox, url)
+        }
+        for url in ["imap://A/Old/Inbox", "ews://A/Clients/Inbox", "imap://A/INBOX/Receipts", "imap://A/Inboxes"] {
+            XCTAssertNotEqual(MailMailbox(rowID: 1, url: url, unread: 0, total: 0).role, .inbox, url)
+        }
+        XCTAssertEqual(MailMailbox(rowID: 1, url: "local:///Inbox", unread: 0, total: 0).path, "Inbox")
+        let roles: [(String, MailMailbox.Role)] = [
+            ("imap://A/%5BGmail%5D/Sent%20Mail", .sent), ("ews://A/Sent%20Items", .sent), ("imap://A/Drafts", .drafts),
+            ("imap://A/%5BGmail%5D/Spam", .junk), ("ews://A/Junk%20Email", .junk), ("ews://A/Deleted%20Items", .trash),
+            ("imap://A/%5BGmail%5D/Trash", .trash), ("imap://A/Bulk%20Mail", .junk)
+        ]
+        for (url, role) in roles {
+            let box = MailMailbox(rowID: 1, url: url, unread: 0, total: 0)
+            XCTAssertEqual(box.role, role, url)
+            XCTAssertFalse(box.inAllMail, url)
+        }
+        XCTAssertTrue(MailMailbox(rowID: 1, url: "imap://A/%5BGmail%5D/All%20Mail", unread: 0, total: 0).inAllMail)
+        XCTAssertTrue(MailMailbox(rowID: 1, url: "imap://A/Projects", unread: 0, total: 0).inAllMail)
+    }
 }
 
 final class InlineImageTests: XCTestCase {

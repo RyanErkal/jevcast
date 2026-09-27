@@ -39,13 +39,31 @@ extension Diagnostics {
         do {
             let db = try MailStore.open(root)
             print("messages columns: " + db.columns("messages").sorted().joined(separator: ", "))
+            print("Mailbox and date index: " + (MailStore.hasMailboxDateIndex(root: root) ? "yes" : "no (each mailbox is sorted in full)"))
             let boxes = try MailStore.mailboxes(root: root)
-            let roles = Dictionary(grouping: boxes, by: { "\($0.role)" }).mapValues(\.count)
-            print("Mailboxes: \(boxes.count) \(roles.sorted { $0.key < $1.key })")
+            print("Mailboxes: \(boxes.count)")
+            let byRole = Dictionary(grouping: boxes, by: { "\($0.role)" })
+            for (role, group) in byRole.sorted(by: { $0.key < $1.key }) {
+                print("  \(role): \(group.count) mailboxes, \(try MailStore.count(root: root, mailboxes: group.map(\.rowID))) messages")
+            }
             let inbox = boxes.filter { $0.role == .inbox }
-            let start = CFAbsoluteTimeGetCurrent()
-            let recent = try MailStore.messages(root: root, .init(mailboxes: inbox.map(\.rowID), limit: 50))
-            print("Inbox list: \(recent.count) rows in \(Int((CFAbsoluteTimeGetCurrent() - start) * 1000)) ms, unread \(recent.filter { !$0.read }.count)")
+            let allMail = boxes.filter(\.inAllMail).map(\.rowID)
+            print("Apple Mail running: " + (AppleScript.isRunning(MailActions.bundleID) ? "yes" : "no (new mail is not arriving)"))
+            func timed<T>(_ body: () throws -> T) rethrows -> (T, Int) {
+                let start = CFAbsoluteTimeGetCurrent()
+                let value = try body()
+                return (value, Int(((CFAbsoluteTimeGetCurrent() - start) * 1000).rounded()))
+            }
+            let (first, firstMs) = try timed { try MailStore.page(root: root, MailModel.query(.inbox, "", boxes)) }
+            let (next, nextMs) = try timed { try MailStore.page(root: root, MailModel.query(.inbox, "", boxes).after(nil, before: first.last)) }
+            let inboxTotal = try MailStore.count(root: root, mailboxes: inbox.map(\.rowID))
+            print("Messages in inboxes: \(inboxTotal); first page shows \(first.messages.count), next page \(next.messages.count), more pages: \(next.hasMore ? "yes" : "no")")
+            let (allCount, allMs) = try timed { try MailStore.count(root: root, mailboxes: allMail, distinct: true) }
+            print("All Mail: \(allCount) emails in \(allMail.count) mailboxes (counted in \(allMs) ms)")
+            let (_, searchMs) = try timed { try MailStore.page(root: root, MailModel.query(.allMail, "the", boxes)) }
+            print("Timings: first page \(firstMs) ms, next page \(nextMs) ms, search \(searchMs) ms")
+            let recent = first.messages
+            print("Unread in first page: \(recent.filter { !$0.read }.count)")
             var found = 0
             for message in recent.prefix(20) {
                 if let box = boxes.first(where: { $0.rowID == message.mailbox }), MailStore.messageFile(root: root, mailbox: box, rowID: message.rowID) != nil { found += 1 }

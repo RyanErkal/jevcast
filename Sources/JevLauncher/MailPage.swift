@@ -150,22 +150,21 @@ private struct MailPageView: View {
     private var needsAccess: Bool { if case .needsFullDiskAccess = mail.status { return true }; return false }
 
     private var list: some View {
-        ScrollViewReader { proxy in
-            List(selection: $mail.selectedID) {
-                ForEach(mail.messages) { message in
-                    MailRow(message: message, delete: { mail.delete(message.rowID) },
-                            deleteAll: { mail.select(message.rowID, byUser: false); mail.deleteAllFromSender() })
-                        .tag(message.rowID).id(message.rowID)
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    MailPlacePicker(model: mail).font(.headline)
+                    Spacer()
                 }
+                MailClosedNote(model: mail)
             }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            Divider()
             // A double click opens the message in Mail without delaying a single click's selection.
-            .contextMenu(forSelectionType: Int64.self, menu: { _ in }) { ids in
-                guard let id = ids.first else { return }
+            MailMessageList(model: mail, scrollsToSelection: true) { id in
                 mail.select(id, byUser: true); _ = page.handle(.open(shift: false))
             }
-            .listStyle(.inset).scrollContentBackground(.hidden)
-            .overlay { if mail.messages.isEmpty { Text(mail.search.isEmpty ? "Inbox is empty" : "No matches").foregroundStyle(.secondary) } }
-            .onChange(of: mail.selectedID) { _, id in if let id { proxy.scrollTo(id) } }
+            .scrollContentBackground(.hidden)
         }
     }
 }

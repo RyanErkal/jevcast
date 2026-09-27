@@ -7,6 +7,8 @@ import LauncherCore
 /// unless the user turns them off in the mail window.
 struct MailHTMLView: NSViewRepresentable {
     let html: String
+    /// Identifies the message, so an update compares a number instead of the whole document.
+    var documentID: Int64 = 0
     var inlineImages: [String: MIMEMessage.InlineImage] = [:]
     /// Web images, fonts, and style sheets load when true. Scripts never run either way.
     var loadsRemote = true
@@ -31,12 +33,19 @@ struct MailHTMLView: NSViewRepresentable {
     /// Without fitting, the page still scrolls both ways when it is wider than the pane.
     static let scrollStyle = "<style>html,body{overflow:auto!important}</style>"
 
-    static func document(_ html: String, inlineImages: [String: MIMEMessage.InlineImage] = [:], remote: Bool = true,
-                         fitsWidth: Bool = false) -> String {
+    /// The message's own images put in place of their `cid:` links. The costly step, so the mail
+    /// model runs it off the main thread and keeps the result.
+    nonisolated static func inlining(_ html: String, images: [String: MIMEMessage.InlineImage]) -> String {
         var body = html
-        for (cid, image) in inlineImages {
+        for (cid, image) in images {
             body = body.replacingOccurrences(of: "cid:" + cid, with: "data:\(image.mimeType);base64," + image.data.base64EncodedString())
         }
+        return body
+    }
+
+    static func document(_ html: String, inlineImages: [String: MIMEMessage.InlineImage] = [:], remote: Bool = true,
+                         fitsWidth: Bool = false) -> String {
+        let body = inlineImages.isEmpty ? html : inlining(html, images: inlineImages)
         let meta = "<meta http-equiv=\"Content-Security-Policy\" content=\"\(policy(remote: remote))\"><meta charset=\"utf-8\">"
         let style = "<style>:where(body){font:14px -apple-system,sans-serif;margin:12px;word-wrap:break-word}:where(img){max-width:100%;height:auto}</style>"
         // Appended after the body so these rules come last and override the sender's own style sheets.
@@ -58,7 +67,7 @@ struct MailHTMLView: NSViewRepresentable {
 
     func updateNSView(_ view: WKWebView, context: Context) {
         if abs(view.pageZoom - zoom) > 0.001 { view.pageZoom = zoom }
-        let key = html + (loadsRemote ? "#remote" : "#local") + (fitsWidth ? "#fit" : "#wide")
+        let key = "\(documentID)#\(html.utf8.count)" + (loadsRemote ? "#remote" : "#local") + (fitsWidth ? "#fit" : "#wide")
         guard context.coordinator.shown != key else { return }
         context.coordinator.shown = key
         view.loadHTMLString(Self.document(html, inlineImages: inlineImages, remote: loadsRemote, fitsWidth: fitsWidth), baseURL: nil)

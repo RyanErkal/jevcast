@@ -638,10 +638,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         show(); return true
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        Task { @MainActor in
-            await model.clipboard.prepareForQuit()
+        if UISnapshots.directory != nil { return .terminateNow }
+        // Save pending clipboard work, but never let a stalled save block quitting. While AppKit waits for
+        // the reply it runs the loop in modal mode, so the reply is scheduled in that mode too; 2 s at most.
+        var replied = false
+        let reply = {
+            guard !replied else { return }
+            replied = true
             sender.reply(toApplicationShouldTerminate: true)
         }
+        let modes: [RunLoop.Mode] = [.common, .modalPanel, .default]
+        Task { @MainActor in
+            await model.clipboard.prepareForQuit()
+            RunLoop.main.perform(inModes: modes) { MainActor.assumeIsolated { reply() } }
+        }
+        let timer = Timer(timeInterval: 2, repeats: false) { _ in MainActor.assumeIsolated { reply() } }
+        for mode in modes { RunLoop.main.add(timer, forMode: mode) }
         return .terminateLater
     }
 

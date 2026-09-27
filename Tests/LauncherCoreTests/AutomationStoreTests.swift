@@ -142,11 +142,11 @@ final class AutomationStoreTests: XCTestCase {
 
     func testTopFiles() throws {
         struct Item: Codable, Equatable { var name: String }
-        XCTAssertNil(store.readTopFile([Item].self, name: "clients.json"))
-        XCTAssertFalse(store.hasTopFile("clients.json"))
-        try store.writeTopFile([Item(name: "Stein")], name: "clients.json")
-        XCTAssertEqual(store.readTopFile([Item].self, name: "clients.json"), [Item(name: "Stein")])
-        XCTAssertEqual(try mode(store.root.appendingPathComponent("clients.json")), 0o600)
+        XCTAssertNil(store.readTopFile([Item].self, name: "items.json"))
+        XCTAssertFalse(store.hasTopFile("items.json"))
+        try store.writeTopFile([Item(name: "Sample")], name: "items.json")
+        XCTAssertEqual(store.readTopFile([Item].self, name: "items.json"), [Item(name: "Sample")])
+        XCTAssertEqual(try mode(store.root.appendingPathComponent("items.json")), 0o600)
         XCTAssertThrowsError(try store.writeTopFile(Item(name: "x"), name: "../x.json"))
         XCTAssertThrowsError(try store.writeTopFile(Item(name: "x"), name: "runner.json"))
     }

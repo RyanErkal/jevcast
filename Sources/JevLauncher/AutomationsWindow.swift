@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// The Automations window: background automations, runs that need you, Quill tasks, Codex, and dashboards.
+/// The Automations window: background automations, runs that need you, Quill tasks, and Codex.
 @MainActor
 final class AutomationsWindow: NSWindowController, NSWindowDelegate {
     let center: AutomationCenter?

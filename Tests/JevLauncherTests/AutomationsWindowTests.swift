@@ -61,7 +61,6 @@ final class AutomationPartsSnapshotTests: XCTestCase {
                 ProposalRow(item: item, checked: manifest.checked.first { $0.id == item.id }, refusal: manifest.refused[item.id], isOn: .constant(true), preview: {})
             }
         }, "proposal", width: 600)
-        save(HStack(alignment: .top) { ForEach(demo.dashboards) { DashboardCard(model: model, entry: $0) } }, "dashboards", width: 760)
         save(VStack { ForEach(demo.codex) { CodexCard(model: model, item: $0) } }, "codex", width: 700)
         save(VStack { ForEach(demo.quillTasks) { QuillTaskRow(model: model, task: $0) } }, "quill", width: 700)
         save(RunnerStatusPopover(model: model, status: .needsApproval), "popover", width: 300)

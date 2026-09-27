@@ -75,7 +75,6 @@ final class AutomationReviewTests: XCTestCase {
         let fifo = directory.appendingPathComponent("fifo")
         XCTAssertEqual(mkfifo(fifo.path, 0o600), 0)
         XCTAssertThrowsError(try SecureFile.read(fifo, maxBytes: 1024))
-        XCTAssertThrowsError(try DashboardReader.load(url: fifo))
     }
 
     func testScriptOutputRedactsExplicitEnvironmentValues() throws {

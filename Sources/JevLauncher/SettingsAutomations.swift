@@ -2,10 +2,10 @@ import AppKit
 import LauncherCore
 import SwiftUI
 
-/// Settings › Automations: the background runner, agent defaults, alerts, runs, Codex, and dashboards.
+/// Settings › Automations: the background runner, agent defaults, alerts, runs, and Codex.
 /// App-only choices are in Preferences; values the runner reads go through `AutomationCenter.saveSettings`.
 struct AutomationSettingsPane: View {
-    enum Part: String, CaseIterable { case runner = "Runner", agents = "Agents", alerts = "Alerts", dashboards = "Codex & Dashboards" }
+    enum Part: String, CaseIterable { case runner = "Runner", agents = "Agents", alerts = "Alerts", codex = "Codex" }
     @ObservedObject var preferences: Preferences
     @ObservedObject var center: AutomationCenter
     let resized: () -> Void
@@ -20,9 +20,7 @@ struct AutomationSettingsPane: View {
                 RunSettingsSection(preferences: preferences, center: center)
             case .agents: AgentSettingsSection(preferences: preferences, center: center)
             case .alerts: AlertSettingsSection(preferences: preferences, center: center)
-            case .dashboards:
-                CodexSettingsSection(preferences: preferences, center: center)
-                DashboardSettingsSection(center: center)
+            case .codex: CodexSettingsSection(preferences: preferences, center: center)
             }
             if let message = center.message {
                 Section { Label(message, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange) }

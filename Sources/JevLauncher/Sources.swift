@@ -33,7 +33,6 @@ extension LauncherModel {
         case .scheduled: made = ScheduledSource(timers: timers, catalogue: catalogue, tasks: quillTasks, openRun: { [weak self] in self?.openTaskRun?($0) },
                                                 automations: automationCenter, showCodex: { [weak self] in self?.preferences.showCodexAutomations ?? false })
         case .automations: made = automationCenter.map { AutomationsSource(center: $0) }
-        case .dashboards: made = automationCenter.map { DashboardsSource(center: $0) }
         case .help: made = HelpSource()
         case .cleanup: made = CleanupSource(preferences: preferences)
         case .taskRuns: made = TaskRunsSource(tasks: quillTasks, openRun: { [weak self] in self?.openTaskRun?($0) })

@@ -349,8 +349,8 @@ final class LauncherFlowTests: XCTestCase {
     func testFolderDetailKeepsTheLastTwoComponents() {
         let home = "/Users/test"
         XCTAssertEqual(LauncherModel.folderDetail(home + "/Downloads/invoice.pdf", home: home), "~/Downloads")
-        XCTAssertEqual(LauncherModel.folderDetail(home + "/Dev/docs/a.md", home: home), "~/Dev/docs")
-        XCTAssertEqual(LauncherModel.folderDetail(home + "/Dev/docs/scripts/dist/a.md", home: home), "…/scripts/dist")
+        XCTAssertEqual(LauncherModel.folderDetail(home + "/Projects/notes/a.md", home: home), "~/Projects/notes")
+        XCTAssertEqual(LauncherModel.folderDetail(home + "/Projects/notes/scripts/dist/a.md", home: home), "…/scripts/dist")
         XCTAssertEqual(LauncherModel.folderDetail(home + "/a.md", home: home), "~")
         XCTAssertEqual(LauncherModel.folderDetail("/tmp/a.md", home: home), "/tmp")
         XCTAssertEqual(LauncherModel.folderDetail("/Volumes/Data/a/b/c.txt", home: home), "…/a/b")

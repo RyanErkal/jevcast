@@ -54,7 +54,7 @@ enum AutomationTemplate: String, CaseIterable, Identifiable {
             d.argumentsText = "path/to/refresh-script.sh\n--out\npath/to/data.json"
             d.scriptFolder = ""
             d.schedule.preset = .everyHours; d.schedule.intervalHours = 4
-            d.notes = "Replace the script path and output file with your own. A dashboard can read the JSON file it writes."
+            d.notes = "Replace the script path and output file with your own."
         case .weeklyReport:
             d.name = "Weekly report"; d.symbol = "doc.text.magnifyingglass"
             d.kind = .agent; d.runner = .codex; d.effort = .high; d.output = .report; d.access = .readOnly

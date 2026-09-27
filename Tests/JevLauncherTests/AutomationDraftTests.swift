@@ -60,7 +60,7 @@ final class AutomationDraftTests: XCTestCase {
         d.allowedRoots = ["~/Desktop"]
         XCTAssertEqual(d.problems(isExecutable: ok), [])
 
-        d.kind = .script; d.program = "/opt/homebrew/bin/bun"; d.scriptFolder = "~/Dev/docs"
+        d.kind = .script; d.program = "/opt/homebrew/bin/bun"; d.scriptFolder = "~/Projects/app"
         XCTAssertEqual(d.problems(isExecutable: { _ in false }), ["The program is not an executable file."])
         d.program = "bun"
         XCTAssertTrue(d.problems(isExecutable: ok).first?.contains("full path") == true)
@@ -103,7 +103,7 @@ final class AutomationDraftTests: XCTestCase {
         for template in AutomationTemplate.allCases {
             let d = template.draft()
             let text = [d.name, d.prompt, d.program, d.argumentsText, d.scriptFolder, d.agentFolder, d.notes, d.sharedLock].joined(separator: " ").lowercased()
-            for word in ["dev/docs", "stein", "redesign", "robert", "meta", "client"] {
+            for word in ["/users/", "~/dev", "client"] {
                 XCTAssertFalse(text.contains(word), "\(template) mentions \(word)")
             }
         }

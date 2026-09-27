@@ -217,7 +217,7 @@ public final class AutomationStore: @unchecked Sendable {
 
     // MARK: Other files in the root
 
-    /// Reads a small JSON file directly in the root, such as `dashboards.json`. Nil when missing or unreadable.
+    /// Reads a small JSON file directly in the root. Nil when missing or unreadable.
     public func readTopFile<T: Decodable>(_ type: T.Type, name: String) -> T? {
         guard SecureFile.isSafeName(name) else { return nil }
         return locked { decodeTop(name) }
@@ -227,24 +227,6 @@ public final class AutomationStore: @unchecked Sendable {
     public func writeTopFile<T: Encodable>(_ value: T, name: String) throws {
         guard SecureFile.isSafeName(name), !["settings.json", "runner.json"].contains(name) else { throw AutomationStoreError.invalidID(name) }
         try locked { try encodeTop(value, name) }
-    }
-
-    /// Read or migrate under one lock, so a concurrent refresh cannot replace a saved dashboard list.
-    /// Missing files are empty; unreadable files and incomplete migrations are errors.
-    public func loadDashboards(migrate: Bool) throws -> [DashboardConfig]? {
-        try locked {
-            try createParentsOfRoot(); try SecureFile.ensureDirectory(root)
-            if let data = try SecureFile.read(root.appendingPathComponent("dashboards.json"), maxBytes: SecureFile.maxJSON) {
-                return try AutomationJSON.decoder().decode([DashboardConfig].self, from: data)
-            }
-            guard migrate,
-                  let data = try SecureFile.read(root.appendingPathComponent("clients.json"), maxBytes: SecureFile.maxJSON) else { return nil }
-            guard let configs = DashboardMigration.migrate(legacy: data) else {
-                throw CocoaError(.fileReadCorruptFile)
-            }
-            try encodeTop(configs, "dashboards.json")
-            return configs
-        }
     }
 
     /// The raw bytes of a small file directly in the root. Nil when missing or unreadable.

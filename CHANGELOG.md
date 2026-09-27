@@ -2,6 +2,14 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Removed
+
+- Dashboards are gone. The Automations window, Settings, and the launcher no longer show them.
+- The launcher words "dashboards", "clients", and "metrics" no longer open a source.
+- Jevcast no longer reads `dashboards.json` or `clients.json`. It does not delete them.
+
 ## [1.9.0] - 2026-09-27
 
 ### Added

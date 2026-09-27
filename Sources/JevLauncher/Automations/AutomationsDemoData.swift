@@ -1,7 +1,7 @@
 import Foundation
 import LauncherCore
 
-/// Invented automations, runs, and dashboards for `--snapshot-ui --demo` and tests. No real files or apps.
+/// Invented automations, and runs for `--snapshot-ui --demo` and tests. No real files or apps.
 @MainActor
 struct AutomationsDemoData {
     var automations: [Automation] = []
@@ -9,7 +9,6 @@ struct AutomationsDemoData {
     var runnerStatus: AutomationCenter.RunnerStatus = .running(since: Date().addingTimeInterval(-7200))
     var codex: [CodexAutomation] = []
     var codexIssues: [String: [String]] = [:]
-    var dashboards: [AutomationCenter.DashboardEntry] = []
     var quillTasks: [QuillTask] = []
     var quillRuns: [QuillTaskRun] = []
     var outputs: [String: String] = [:]
@@ -91,14 +90,6 @@ struct AutomationsDemoData {
         ]
         d.codexIssues["weekly-summary"] = ["Still ACTIVE in Codex. Pause it there first.", "No working folder in the source. Choose one before turning it on."]
 
-        d.dashboards = [
-            dashboard("sales", "Sales", now: now, updated: -3600, automationID: sales.id,
-                      json: ["totals": ["revenue": 18420.5, "orders": 214, "conversion": 3.4], "generated_at": ""],
-                      metrics: [("Revenue", "totals.revenue", .currency), ("Orders", "totals.orders", .number), ("Conversion", "totals.conversion", .percent)]),
-            dashboard("support", "Support", now: now, updated: -30 * 3600, automationID: nil,
-                      json: ["queue": ["open": 12, "median_reply_seconds": 2460], "status": "Normal", "generated_at": ""],
-                      metrics: [("Open tickets", "queue.open", .number), ("Median reply", "queue.median_reply_seconds", .duration), ("Status", "status", .text)])
-        ]
 
         d.quillTasks = [QuillTask(id: "brief", name: "Morning brief", prompt: "Brief me on today's meetings and unread mail.",
                                   schedule: .daily(hour: 8, minute: 0, weekdays: [2, 3, 4, 5, 6]), contexts: [.calendar, .unreadMail], created: week)]
@@ -107,14 +98,4 @@ struct AutomationsDemoData {
         return d
     }
 
-    private static func dashboard(_ id: String, _ name: String, now: Date, updated: TimeInterval, automationID: String?,
-                                  json: [String: Any], metrics: [(String, String, DashboardFormat)]) -> AutomationCenter.DashboardEntry {
-        var root = json
-        root["generated_at"] = ISO8601DateFormatter().string(from: now.addingTimeInterval(updated))
-        let config = DashboardConfig(id: id, name: name, filePath: "/Users/demo/Projects/reports/data/\(id).json",
-                                     metrics: metrics.map { DashboardMetric(id: id + "." + $0.1, label: $0.0, keyPath: $0.1, format: $0.2) },
-                                     updatedAtKeyPath: "generated_at", automationID: automationID,
-                                     openPath: "/Users/demo/Projects/reports/\(id).html")
-        return .init(config: config, snapshot: DashboardReader.snapshot(root, config: config), readError: nil, readAt: now)
-    }
 }

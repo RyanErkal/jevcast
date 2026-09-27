@@ -64,11 +64,11 @@ final class CodexImportTests: XCTestCase {
     }
 
     func testSuggestion() {
-        let exists: (String) -> Bool = { $0 == "/Users/test/Dev/docs" }
-        let s = CodexImport.suggestion(for: "Use gpt-6-astra with low reasoning for this.\nWork from /Users/test/Dev/docs. Then go.", folderExists: exists)
+        let exists: (String) -> Bool = { $0 == "/Users/test/Projects/app" }
+        let s = CodexImport.suggestion(for: "Use gpt-6-astra with low reasoning for this.\nWork from /Users/test/Projects/app. Then go.", folderExists: exists)
         XCTAssertEqual(s.model, "gpt-6-astra")
         XCTAssertEqual(s.effort, .low)
-        XCTAssertEqual(s.workingDirectory, "/Users/test/Dev/docs")
+        XCTAssertEqual(s.workingDirectory, "/Users/test/Projects/app")
         XCTAssertEqual(CodexImport.suggestion(for: "Use m with Extra High reasoning", folderExists: exists).effort, .xhigh)
         XCTAssertEqual(CodexImport.suggestion(for: "Use m with xhigh reasoning", folderExists: exists).effort, .xhigh)
         let none = CodexImport.suggestion(for: "Do things.\nUse m with low reasoning. In /nope, go.", folderExists: exists)

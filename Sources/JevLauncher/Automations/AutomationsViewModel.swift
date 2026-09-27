@@ -8,7 +8,7 @@ import LauncherCore
 @MainActor
 final class AutomationsViewModel: ObservableObject {
     enum Section: String, Hashable, CaseIterable, Identifiable {
-        case needsYou, all, running, failed, history, quill, codex, dashboards
+        case needsYou, all, running, failed, history, quill, codex
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -19,7 +19,6 @@ final class AutomationsViewModel: ObservableObject {
             case .history: return "History"
             case .quill: return "Quill Tasks"
             case .codex: return "Codex"
-            case .dashboards: return "Dashboards"
             }
         }
         var symbol: String {
@@ -31,7 +30,6 @@ final class AutomationsViewModel: ObservableObject {
             case .history: return "clock.arrow.circlepath"
             case .quill: return "text.quote"
             case .codex: return "chevron.left.forwardslash.chevron.right"
-            case .dashboards: return "chart.bar.xaxis"
             }
         }
         /// Sections that list runs rather than automations.
@@ -81,7 +79,6 @@ final class AutomationsViewModel: ObservableObject {
     var runnerStatus: AutomationCenter.RunnerStatus { demo?.runnerStatus ?? center?.runnerStatus ?? .off }
     var needsYou: [RunRecord] { demo?.needsYou ?? center?.needsYou ?? [] }
     var codex: [CodexAutomation] { demo?.codex ?? center?.codex ?? [] }
-    var dashboards: [AutomationCenter.DashboardEntry] { demo?.dashboards ?? center?.dashboards ?? [] }
     var problems: [String: String] { demo == nil ? center?.problems ?? [:] : [:] }
     var quillTasks: [QuillTask] { demo?.quillTasks ?? quill?.tasks ?? [] }
 
@@ -132,7 +129,6 @@ final class AutomationsViewModel: ObservableObject {
         case .all: return automations.isEmpty ? nil : automations.count
         case .quill: return quillTasks.isEmpty ? nil : quillTasks.count
         case .codex: return codex.isEmpty ? nil : codex.count
-        case .dashboards: return dashboards.isEmpty ? nil : dashboards.count
         case .history: return nil
         }
     }
@@ -195,8 +191,6 @@ final class AutomationsViewModel: ObservableObject {
         section = .all; selectedAutomationID = copy.id
         banner = "Imported “\(copy.name)” as a paused copy."
     }
-    func refreshDashboard(_ id: String) { live?.refreshDashboard(id) }
-    func openDashboardFile(_ id: String) { live?.openDashboardFile(id) }
 
     /// Saves the editor's automation. A new one is saved paused, then turned on when asked.
     /// Returns an error to show in the sheet, or nil when it saved.

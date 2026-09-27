@@ -35,7 +35,6 @@ struct AutomationsRootView: View {
         case .needsYou, .running, .failed, .history: RunListSplit(model: model, section: model.section)
         case .quill: QuillTasksView(model: model)
         case .codex: CodexSectionView(model: model)
-        case .dashboards: DashboardsSectionView(model: model)
         }
     }
 

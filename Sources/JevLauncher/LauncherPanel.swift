@@ -10,7 +10,11 @@ import SwiftUI
 final class LauncherPanel: NSPanel {
     static let width: CGFloat = 680
     /// A view such as Mail fills the panel at this size; search keeps `width`.
-    static let viewSize = NSSize(width: 860, height: 700)
+    /// Large enough to read a full email beside the list, and never bigger than the screen allows.
+    static var viewSize: NSSize {
+        let visible = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame.size ?? NSSize(width: 1440, height: 900)
+        return NSSize(width: max(860, min(1320, visible.width - 120)), height: max(620, min(880, visible.height - 140)))
+    }
     /// The width the frame is heading to. Height changes keep it, so they never undo a widening.
     private var targetWidth = LauncherPanel.width
     static let cornerRadius = LauncherMetrics.panelRadius

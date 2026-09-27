@@ -2,6 +2,12 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.9.2] - 2026-09-27
+
+### Changed
+
+- **Bigger views.** Mail, Calendar, Clipboard, and the other panel views open up to 1320 by 880 points, within the screen. The mail list is narrower, so the message gets most of the width.
+
 ## [1.9.1] - 2026-09-27
 
 ### Fixed

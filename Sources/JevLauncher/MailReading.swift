@@ -12,7 +12,7 @@ enum MailReading {
             }
         }
         /// The list's share of the panel width in two panes.
-        var listFraction: CGFloat { self == .widerMessage ? 0.34 : 0.5 }
+        var listFraction: CGFloat { self == .widerMessage ? 0.26 : 0.36 }
     }
 
     /// When a previewed message counts as read. Seconds; 0 is on open, -1 is never.

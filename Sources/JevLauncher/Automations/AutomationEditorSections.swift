@@ -43,17 +43,11 @@ struct EditorAgent: View {
         let diagnosis = draft.kind == .scriptWithDiagnosis
         Section(diagnosis ? "Diagnosis when the script fails" : "Agent") {
             Picker("Runner", selection: $draft.runner) { ForEach(AgentRunner.allCases, id: \.self) { Text($0.title).tag($0) } }
-            LabeledContent("Model") {
-                HStack(spacing: 6) {
-                    TextField("Model", text: $draft.model, prompt: Text("CLI default")).labelsHidden()
-                    Menu {
-                        Button("CLI default") { draft.model = "" }
-                        Divider()
-                        ForEach(AutomationModels.suggestions(draft.runner), id: \.self) { m in Button(m) { draft.model = m } }
-                    } label: { Image(systemName: "chevron.down") }
-                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().accessibilityLabel("Model suggestions")
+                .onChange(of: draft.runner) { _, runner in
+                    // A model from the other runner would not work; fall back to the CLI default.
+                    if AgentModels.isKnown(draft.model, runner: runner == .codex ? .claude : .codex) { draft.model = "" }
                 }
-            }
+            AgentModelPicker(runner: draft.runner, model: $draft.model)
             Picker("Reasoning", selection: $draft.effort) {
                 ForEach(ReasoningEffort.allCases, id: \.self) { Text($0.title).tag($0) }
             }

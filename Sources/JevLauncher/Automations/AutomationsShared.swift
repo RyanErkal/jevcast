@@ -81,7 +81,7 @@ struct EmptyStateView: View {
             Text(title).font(.title3.weight(.semibold))
             Text(message).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 360)
             if let actionTitle, let action {
-                Button(actionTitle, action: action).controlSize(.large).padding(.top, 4)
+                Button(actionTitle, action: action).buttonStyle(.borderedProminent).controlSize(.large).padding(.top, 4)
             }
         }
         .padding(30)

@@ -6,16 +6,16 @@ struct AutomationsRootView: View {
     @ObservedObject var model: AutomationsViewModel
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $model.columnVisibility) {
             AutomationsSidebar(model: model)
-                .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
+                .navigationSplitViewColumnWidth(min: 210, ideal: 220, max: 280)
         } detail: {
             detail
         }
         .navigationTitle(model.section.title)
         .searchable(text: $model.search, placement: .toolbar, prompt: "Search")
         .toolbar { toolbar }
-        .frame(minWidth: 860, minHeight: 520)
+        .frame(minWidth: 980, minHeight: 560)
         .sheet(item: $model.editor) { request in
             AutomationEditorView(model: model, draft: request.draft, dismiss: { model.editor = nil })
         }

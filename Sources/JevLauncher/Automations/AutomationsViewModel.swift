@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import Combine
 import LauncherCore
 
@@ -57,6 +58,8 @@ final class AutomationsViewModel: ObservableObject {
     @Published var banner: String?
     @Published var pendingDelete: Automation?
     @Published var showQuillExplainer = false
+    /// The split view's columns. The window sets `.all` each time it opens.
+    @Published var columnVisibility: NavigationSplitViewVisibility = .all
 
     /// Set by the app: opens Quill's new-task flow (the launcher).
     var configureNewDraft: ((inout AutomationDraft) -> Void)?

@@ -169,9 +169,9 @@ private struct AgentSettingsSection: View {
                 ForEach(AgentRunner.allCases, id: \.self) { Text($0.title).tag($0) }
             }
             if preferences.automationRunner == .codex {
-                TextField("Model", text: $preferences.automationCodexModel, prompt: Text("gpt-6-astra"))
+                AgentModelPicker(runner: .codex, model: $preferences.automationCodexModel)
             } else {
-                TextField("Model", text: $preferences.automationClaudeModel, prompt: Text("opus, or empty for the CLI default"))
+                AgentModelPicker(runner: .claude, model: $preferences.automationClaudeModel)
             }
             Picker("Reasoning effort", selection: $preferences.automationEffort) {
                 ForEach(ReasoningEffort.allCases, id: \.self) { Text($0.title).tag($0) }

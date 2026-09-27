@@ -7,7 +7,7 @@ struct AutomationListSplit: View {
 
     var body: some View {
         HSplitView {
-            list.frame(minWidth: 260, idealWidth: 300, maxWidth: 420)
+            list.frame(minWidth: 280, idealWidth: 330, maxWidth: 440)
             Group {
                 if let automation = model.selectedAutomation {
                     AutomationDetailView(model: model, automation: automation)
@@ -58,21 +58,26 @@ struct AutomationRow: View {
         let last = model.lastRun(automation.id)
         HStack(spacing: 10) {
             SymbolTile(symbol: automation.symbol, tint: automation.enabled ? AutomationTint.color(automation.id) : .gray, size: 30)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(automation.name).font(.body.weight(.medium)).lineLimit(1)
-                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(automation.name).font(.body.weight(.medium)).lineLimit(1).truncationMode(.tail)
+                HStack(spacing: 5) {
+                    if let last, last.state != .succeeded { StatusChip(last.state) }
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                }
             }
+            .layoutPriority(1)
             Spacer(minLength: 6)
-            if let last { StatusChip(last.state) }
             Toggle("", isOn: Binding(get: { automation.enabled }, set: { model.setEnabled(automation.id, $0) }))
                 .toggleStyle(.switch).controlSize(.mini).labelsHidden()
                 .accessibilityLabel(automation.enabled ? "Pause \(automation.name)" : "Turn on \(automation.name)")
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 4)
+        .help(automation.name)
     }
 
     private var subtitle: String {
         var parts = [automation.scheduleSummary]
+        if let agent = automation.agent { parts.append(AgentModels.displayName(agent.model, runner: agent.runner)) }
         if !automation.enabled { parts.append("Paused") }
         else if let next = model.nextRun(automation.id) { parts.append("next " + AutomationFormat.relative(next)) }
         return parts.joined(separator: " · ")

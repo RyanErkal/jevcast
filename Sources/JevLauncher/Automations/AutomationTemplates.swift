@@ -91,8 +91,3 @@ enum AutomationSymbols {
 }
 
 /// Model suggestions per runner. Empty uses the CLI's default.
-enum AutomationModels {
-    static func suggestions(_ runner: AgentRunner) -> [String] {
-        runner == .codex ? ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"] : ["opus", "sonnet", "fable", "haiku"]
-    }
-}

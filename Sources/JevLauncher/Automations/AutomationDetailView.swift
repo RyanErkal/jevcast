@@ -119,13 +119,14 @@ struct AutomationOverview: View {
         if let agent = automation.agent {
             if automation.script != nil { Divider(); Text("If the script fails, an agent writes a diagnosis:").font(.caption).foregroundStyle(.secondary) }
             FactRow(label: "Runner", value: agent.runner.title)
-            FactRow(label: "Model", value: (agent.model.isEmpty ? "CLI default" : agent.model) + " · " + agent.effort.title + (agent.fast && agent.runner == .codex ? " · Fast" : ""))
+            FactRow(label: "Model", value: AgentModels.displayName(agent.model, runner: agent.runner) + " · " + agent.effort.title + (agent.fast && agent.runner == .codex ? " · Fast" : ""))
             FactRow(label: "Access", value: agent.access.title)
             FactRow(label: "Output", value: agent.output.title)
             FactRow(label: "Folder", value: AutomationFormat.path(agent.workingDirectory))
             if !agent.allowedRoots.isEmpty { FactRow(label: "Allowed folders", value: agent.allowedRoots.map(Paths.display).joined(separator: "\n")) }
             if automation.script == nil {
                 Text(agent.prompt).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(10).frame(maxWidth: .infinity, alignment: .leading)
                     .background(.background, in: RoundedRectangle(cornerRadius: 6))
             }

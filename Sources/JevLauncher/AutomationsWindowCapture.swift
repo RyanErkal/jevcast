@@ -11,6 +11,7 @@ enum AutomationsWindowCapture {
         let shots: [(String, AnyView)] = AutomationsViewModel.Section.allCases.map { ("automations-\($0.rawValue)", AnyView(AutomationsWindow.snapshotView(demo: true, section: $0))) }
             + AutomationTemplate.allCases.map { ("automations-editor-\($0)", AnyView(AutomationsWindow.snapshotEditor($0).frame(width: 720, height: 820))) }
         Task { @MainActor in
+            await captureRealWindow(to: directory)
             for (name, view) in shots {
                 let window = NSWindow(contentRect: NSRect(x: 80, y: 80, width: 1240, height: 780),
                                       styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
@@ -27,6 +28,41 @@ enum AutomationsWindowCapture {
             print("Saved \(shots.count) captures to \(directory)")
             NSApp.terminate(nil)
         }
+    }
+
+    /// Opens the real `AutomationsWindow` through `show`, as Hyper+A does, with demo data and a stale,
+    /// too-small saved frame. Then hides the sidebar, closes, and opens it again.
+    private static func captureRealWindow(to directory: String) async {
+        let name = "JevcastAutomationsCapture"
+        let key = "NSWindow Frame " + name
+        UserDefaults.standard.set("0 240 420 300 0 0 1800 1130 ", forKey: key)
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+        let model = AutomationsViewModel(center: nil, quill: nil, demo: AutomationsDemoData.make())
+        let controller = AutomationsWindow(model: model, autosaveName: name)
+        controller.show(automationID: "desktop-tidy-demo", runID: nil)
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        guard let window = controller.window else { return }
+        FileHandle.standardError.write(Data("Real window frame: \(window.frame) content: \(window.contentView?.frame ?? .zero) screen: \(window.screen?.visibleFrame ?? .zero)\n".utf8))
+        save(window, to: (directory as NSString).appendingPathComponent("automations-window-open.png"))
+        screenshot(window, to: (directory as NSString).appendingPathComponent("automations-window-open-screen.png"))
+        model.columnVisibility = .detailOnly
+        try? await Task.sleep(nanoseconds: 800_000_000)
+        controller.close()
+        controller.show(automationID: nil, runID: nil)
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        save(window, to: (directory as NSString).appendingPathComponent("automations-window-reopen.png"))
+        screenshot(window, to: (directory as NSString).appendingPathComponent("automations-window-reopen-screen.png"))
+        controller.close()
+    }
+
+    /// A true screen image of the window through `screencapture`, which draws materials and sidebars as
+    /// they look. Needs Screen Recording access for Jevcast; without it the file is not written.
+    private static func screenshot(_ window: NSWindow, to path: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        process.arguments = ["-x", "-o", "-l", String(window.windowNumber), path]
+        try? process.run()
+        process.waitUntilExit()
     }
 
     private static func save(_ window: NSWindow, to path: String) {

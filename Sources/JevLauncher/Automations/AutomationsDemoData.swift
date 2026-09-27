@@ -103,7 +103,7 @@ struct AutomationsDemoData {
         d.quillTasks = [QuillTask(id: "brief", name: "Morning brief", prompt: "Brief me on today's meetings and unread mail.",
                                   schedule: .daily(hour: 8, minute: 0, weekdays: [2, 3, 4, 5, 6]), contexts: [.calendar, .unreadMail], created: week)]
         d.quillRuns = [QuillTaskRun(taskID: "brief", taskName: "Morning brief", date: now.addingTimeInterval(-5 * 3600), succeeded: true,
-                                    preview: "Three meetings today · Two unread from clients", file: nil)]
+                                    preview: "Three meetings today · Two unread messages", file: nil)]
         return d
     }
 

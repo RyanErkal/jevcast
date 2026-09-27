@@ -2,6 +2,32 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+
+- **Dashboards.** A dashboard card shows numbers from any JSON file on this Mac. Pick the file, then pick values from a list of what it holds. Give each value a label and a format: number, currency, percent, duration, or text. An optional "updated at" value shows how old the data is. A card can also run an automation with Refresh Now and open a file you choose.
+- **Model menu.** The automation editor and Settings › Automations › Agents have a model menu. Codex offers GPT-6 Astra, GPT-6 Sol, and GPT-6 Luna. Claude offers Opus, Sonnet, Fable, and Haiku. Both have CLI default and Other. Rows and details show the model name.
+- The Automations sidebar shows counts for each section.
+- Settings has Advanced sections for rarely used options in Clipboard, AI › Jev, and Automations › Runner.
+
+### Changed
+
+- Clients is now Dashboards in the Automations window, in Settings, and in the launcher. Type "dashboards". "clients" and "metrics" still work.
+- Saved clients move to dashboards once, with their numbers kept. The old `clients.json` stays in place. A client of an unknown kind becomes a card with no values and a note.
+- The "Meta metrics refresh" template is now "Refresh a data file", with placeholder paths. "Weekly client report" is now "Weekly report". Templates hold no personal folders or scripts.
+- An empty section shows one message with one main button.
+- Settings › General and Settings › Mail show the Quill and Jev switches as status only. Change them in Settings › AI.
+- Settings captions are shorter. Dictation details moved into info buttons.
+
+### Fixed
+
+- The Automations window no longer opens with the sidebar cut off. A long prompt made the page wider than the window. A saved window size that is too small or off screen now opens at the normal size, and each open shows the sidebar.
+
+### Removed
+
+- Jevcast no longer adds client dashboards by itself on first run.
+
 ## [1.8.2] - 2026-09-27
 
 ### Removed

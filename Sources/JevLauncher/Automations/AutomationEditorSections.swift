@@ -147,7 +147,7 @@ struct EditorScript: View {
             PathField(title: "Working folder", path: $draft.scriptFolder)
             EnvironmentField(pairs: $draft.environment)
             SecretNamesField(names: $draft.secretNames)
-            TextField("Shared lock", text: $draft.sharedLock, prompt: Text("Optional, such as docs-metrics"))
+            TextField("Shared lock", text: $draft.sharedLock, prompt: Text("Optional, such as data-refresh"))
         }
     }
 }

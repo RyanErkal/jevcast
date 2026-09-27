@@ -5,7 +5,7 @@ import SwiftUI
 /// Settings › Automations: the background runner, agent defaults, alerts, runs, Codex, and dashboards.
 /// App-only choices are in Preferences; values the runner reads go through `AutomationCenter.saveSettings`.
 struct AutomationSettingsPane: View {
-    enum Part: String, CaseIterable { case runner = "Runner", agents = "Agents", alerts = "Alerts", clients = "Codex & Dashboards" }
+    enum Part: String, CaseIterable { case runner = "Runner", agents = "Agents", alerts = "Alerts", dashboards = "Codex & Dashboards" }
     @ObservedObject var preferences: Preferences
     @ObservedObject var center: AutomationCenter
     let resized: () -> Void
@@ -20,7 +20,7 @@ struct AutomationSettingsPane: View {
                 RunSettingsSection(preferences: preferences, center: center)
             case .agents: AgentSettingsSection(preferences: preferences, center: center)
             case .alerts: AlertSettingsSection(preferences: preferences, center: center)
-            case .clients:
+            case .dashboards:
                 CodexSettingsSection(preferences: preferences, center: center)
                 DashboardSettingsSection(center: center)
             }

@@ -97,7 +97,7 @@ public struct ScriptTask: Codable, Equatable, Sendable {
         self.executable = executable; self.arguments = arguments; self.workingDirectory = workingDirectory
         self.environment = environment; self.secretNames = secretNames
     }
-    /// One line for rows: "bun scripts/x.ts --client a".
+    /// One line for rows: "zsh scripts/x.sh --out data.json".
     public var commandLine: String {
         ([URL(fileURLWithPath: executable).lastPathComponent] + arguments.map { $0.contains(" ") ? "\"\($0)\"" : $0 }).joined(separator: " ")
     }
@@ -212,7 +212,7 @@ public struct Policy: Codable, Equatable, Sendable {
     public var alertOnSuccess: Bool
     /// Runs kept on disk for this automation.
     public var keepRuns: Int
-    /// Automations with the same lock name never run at the same time, for example "docs-metrics".
+    /// Automations with the same lock name never run at the same time, for example "data-refresh".
     public var sharedLock: String?
     public init(timeout: Int = 1200, retries: Int = 0, catchUp: CatchUp = .skip, alertOnFailure: Bool = true,
                 alertOnSuccess: Bool = false, keepRuns: Int = 50, sharedLock: String? = nil) {

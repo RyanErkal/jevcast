@@ -8,7 +8,8 @@ struct CodexSectionView: View {
     var body: some View {
         if model.codex.isEmpty {
             EmptyStateView(symbol: "chevron.left.forwardslash.chevron.right", title: "No Codex automations",
-                           message: "Automations you make in the Codex app show here, read only, so you can bring them into Jevcast.")
+                           message: "Automations you make in the Codex app show here, read only, so you can copy them into Jevcast.",
+                           actionTitle: "Check Again") { model.live?.refresh() }
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {

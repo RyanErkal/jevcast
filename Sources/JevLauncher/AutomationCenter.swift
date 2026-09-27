@@ -1,7 +1,7 @@
 import AppKit
 import LauncherCore
 
-/// The app's view of automations: definitions, runs, the background runner, Codex, and client metrics.
+/// The app's view of automations: definitions, runs, the background runner, Codex, and dashboards.
 /// The runner owns run state. This class reads the shared folder, writes definitions and requests,
 /// checks and applies proposals, and shows notch alerts.
 ///

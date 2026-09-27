@@ -20,29 +20,33 @@ struct RunListSplit: View {
 
     var body: some View {
         let runs = model.runs(in: section)
-        HSplitView {
-            Group {
-                if runs.isEmpty { empty } else {
-                    List(selection: $model.selectedRunID) {
-                        ForEach(runs) { run in RunRow(model: model, run: run, showsName: true).tag(run.id) }
+        // With nothing to list, one full-width message; a second "nothing selected" pane adds nothing.
+        if runs.isEmpty {
+            empty
+        } else {
+            HSplitView {
+                List(selection: $model.selectedRunID) {
+                    ForEach(runs) { run in RunRow(model: model, run: run, showsName: true).tag(run.id) }
+                }
+                .listStyle(.inset)
+                .frame(minWidth: 300, idealWidth: 340, maxWidth: 440)
+                Group {
+                    if let run = model.selectedRun, runs.contains(where: { $0.id == run.id }) {
+                        RunScreen(model: model, run: run).id(run.id)
+                    } else {
+                        EmptyStateView(symbol: "doc.text.magnifyingglass", title: "No run selected", message: "Choose a run to see what happened.")
                     }
-                    .listStyle(.inset)
                 }
+                .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(minWidth: 300, idealWidth: 340, maxWidth: 440)
-            Group {
-                if let run = model.selectedRun, runs.contains(where: { $0.id == run.id }) {
-                    RunScreen(model: model, run: run).id(run.id)
-                } else {
-                    EmptyStateView(symbol: "doc.text.magnifyingglass", title: "No run selected", message: "Choose a run to see what happened.")
-                }
-            }
-            .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
     @ViewBuilder private var empty: some View {
         switch section {
+        case _ where !model.search.trimmingCharacters(in: .whitespaces).isEmpty:
+            EmptyStateView(symbol: "magnifyingglass", title: "No matches", message: "No run matches “\(model.search)”.",
+                           actionTitle: "Clear Search") { model.search = "" }
         case .needsYou: EmptyStateView(symbol: "checkmark.seal", title: "All caught up", message: "Questions and changes to approve show here.")
         case .running: EmptyStateView(symbol: "moon.zzz", title: "Nothing running", message: "Runs show here while they work.")
         case .failed: EmptyStateView(symbol: "checkmark.circle", title: "No failures this week", message: "Runs that fail show here for seven days.")

@@ -6,27 +6,29 @@ struct AutomationListSplit: View {
     @ObservedObject var model: AutomationsViewModel
 
     var body: some View {
-        HSplitView {
-            list.frame(minWidth: 280, idealWidth: 330, maxWidth: 440)
-            Group {
-                if let automation = model.selectedAutomation {
-                    AutomationDetailView(model: model, automation: automation)
-                } else {
-                    EmptyStateView(symbol: "square.stack.3d.up", title: "No automation selected",
-                                   message: "Choose an automation to see its schedule, runs, and settings.")
+        if model.automations.isEmpty {
+            EmptyStateView(symbol: "wand.and.stars", title: "No automations yet",
+                           message: "Automations run a prompt or a script on a schedule, in the background. Start from a template in the New menu, or a blank one.",
+                           actionTitle: "New Automation") { model.newAutomation() }
+        } else {
+            HSplitView {
+                list.frame(minWidth: 280, idealWidth: 330, maxWidth: 440)
+                Group {
+                    if let automation = model.selectedAutomation {
+                        AutomationDetailView(model: model, automation: automation)
+                    } else {
+                        EmptyStateView(symbol: "square.stack.3d.up", title: "No automation selected",
+                                       message: "Choose an automation to see its schedule, runs, and settings.")
+                    }
                 }
+                .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
     @ViewBuilder private var list: some View {
         let items = model.filteredAutomations
-        if model.automations.isEmpty {
-            EmptyStateView(symbol: "wand.and.stars", title: "No automations yet",
-                           message: "Automations run a prompt or a script on a schedule, in the background. Start from a template or a blank one.",
-                           actionTitle: "New Automation") { model.newAutomation() }
-        } else if items.isEmpty {
+        if items.isEmpty {
             EmptyStateView(symbol: "magnifyingglass", title: "No matches", message: "Nothing matches “\(model.search)”.",
                            actionTitle: "Clear Search") { model.search = "" }
         } else {
@@ -77,7 +79,7 @@ struct AutomationRow: View {
 
     private var subtitle: String {
         var parts = [automation.scheduleSummary]
-        if let agent = automation.agent { parts.append(AgentModels.displayName(agent.model, runner: agent.runner)) }
+        if automation.script == nil, let agent = automation.agent { parts.append(AgentModels.displayName(agent.model, runner: agent.runner)) }
         if !automation.enabled { parts.append("Paused") }
         else if let next = model.nextRun(automation.id) { parts.append("next " + AutomationFormat.relative(next)) }
         return parts.joined(separator: " · ")

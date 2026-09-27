@@ -9,6 +9,7 @@ enum AutomationsWindowCapture {
     static func run(to directory: String) {
         try? FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
         let shots: [(String, AnyView)] = AutomationsViewModel.Section.allCases.map { ("automations-\($0.rawValue)", AnyView(AutomationsWindow.snapshotView(demo: true, section: $0))) }
+            + AutomationsViewModel.Section.allCases.map { ("automations-empty-\($0.rawValue)", AnyView(AutomationsWindow.snapshotView(demo: false, section: $0))) }
             + AutomationTemplate.allCases.map { ("automations-editor-\($0)", AnyView(AutomationsWindow.snapshotEditor($0).frame(width: 720, height: 820))) }
         Task { @MainActor in
             await captureRealWindow(to: directory)
@@ -22,7 +23,7 @@ enum AutomationsWindowCapture {
                 window.title = "Automations"
                 window.orderFrontRegardless()
                 try? await Task.sleep(nanoseconds: 1_200_000_000)
-                save(window, to: (directory as NSString).appendingPathComponent(name + ".png"))
+                capture(window, to: (directory as NSString).appendingPathComponent(name + ".png"))
                 window.orderOut(nil)
             }
             print("Saved \(shots.count) captures to \(directory)")
@@ -43,16 +44,21 @@ enum AutomationsWindowCapture {
         try? await Task.sleep(nanoseconds: 1_500_000_000)
         guard let window = controller.window else { return }
         FileHandle.standardError.write(Data("Real window frame: \(window.frame) content: \(window.contentView?.frame ?? .zero) screen: \(window.screen?.visibleFrame ?? .zero)\n".utf8))
-        save(window, to: (directory as NSString).appendingPathComponent("automations-window-open.png"))
-        screenshot(window, to: (directory as NSString).appendingPathComponent("automations-window-open-screen.png"))
+        capture(window, to: (directory as NSString).appendingPathComponent("automations-window-open.png"))
         model.columnVisibility = .detailOnly
         try? await Task.sleep(nanoseconds: 800_000_000)
         controller.close()
         controller.show(automationID: nil, runID: nil)
         try? await Task.sleep(nanoseconds: 1_500_000_000)
-        save(window, to: (directory as NSString).appendingPathComponent("automations-window-reopen.png"))
-        screenshot(window, to: (directory as NSString).appendingPathComponent("automations-window-reopen-screen.png"))
+        capture(window, to: (directory as NSString).appendingPathComponent("automations-window-reopen.png"))
         controller.close()
+    }
+
+    /// A screen image when Screen Recording access allows it; otherwise the app draws the window itself.
+    private static func capture(_ window: NSWindow, to path: String) {
+        try? FileManager.default.removeItem(atPath: path)
+        screenshot(window, to: path)
+        if !FileManager.default.fileExists(atPath: path) { save(window, to: path) }
     }
 
     /// A true screen image of the window through `screencapture`, which draws materials and sidebars as

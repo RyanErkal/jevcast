@@ -14,20 +14,22 @@ struct DictationSettings: View {
             Section("Dictation") {
                 if DictationEngines.isSupported {
                     Toggle("Hold Right Command to dictate", isOn: $preferences.dictationEnabled)
-                    Text("Hold Right Command, speak, then let go. The text goes into the app in front. A short tap, or a shortcut such as ⌘C, records nothing. Speech is transcribed on this Mac; audio is kept in memory only and never saved or sent.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    InfoCaption("Speak, then let go. The text goes into the app in front.",
+                                detail: "A short tap, or a shortcut such as ⌘C, records nothing. Speech is changed to text on this Mac. Audio stays in memory only. It is never saved or sent.")
                     if let preparing = dictation.preparing { Text(preparing).font(.caption).foregroundStyle(.secondary) }
                 } else {
                     Text("Dictation needs macOS 26 or later.").foregroundStyle(.secondary)
                 }
             }
-            Section("Quill clean-up") {
-                LabeledContent("Quill") {
-                    Text(preferences.quillEnabled && preferences.quillSendsDictation ? "Cleans transcripts" : "Off").foregroundStyle(.secondary)
+            Section("Clean-up") {
+                LabeledContent("Quill clean-up") {
+                    HStack {
+                        Text(preferences.quillEnabled && preferences.quillSendsDictation ? "On" : "Off").foregroundStyle(.secondary)
+                        Button("Quill Settings…", action: openQuill).controlSize(.small)
+                    }
                 }
-                Text("Jevcast removes “um” and “uh” on this Mac. Quill can also fix punctuation and self-corrections. Turn on “Dictation transcripts” in Settings › AI › Quill to send transcript text; audio is never sent.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Button("Open Quill Settings", action: openQuill).controlSize(.small)
+                InfoCaption("“Um” and “uh” are always removed on this Mac.",
+                            detail: "Quill can also fix punctuation and corrections you speak. To send transcript text, turn on “Dictation transcripts” in Settings › AI › Quill. Audio is never sent.")
             }
             Section("History") {
                 Picker("Keep transcripts", selection: $preferences.dictationRetention) {
@@ -47,7 +49,7 @@ struct DictationSettings: View {
                     else { Permission.microphone.openSystemSettings() }
                 })
                 PermissionRow(permission: .accessibility)
-                Text("Accessibility lets Jevcast see Right Command in other apps and paste the text. Without it, the text is left on the clipboard.")
+                Text("Accessibility lets \(AppIdentity.name) see Right Command and paste the text. Without it, the text stays on the clipboard.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

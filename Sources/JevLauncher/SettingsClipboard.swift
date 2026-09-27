@@ -20,14 +20,6 @@ struct ClipboardSettingsSections: View {
                     ForEach(ClipboardSettings.keepDayChoices, id: \.self) { days in Text(Self.daysTitle(days)).tag(days) }
                 }
                 .disabled(!on)
-                Picker("Maximum entries", selection: settings.maxItems) {
-                    ForEach(ClipboardSettings.maxItemChoices, id: \.self) { Text($0.formatted()).tag($0) }
-                }
-                .disabled(!on)
-                Picker("Storage limit", selection: settings.maxBytes) {
-                    ForEach(ClipboardSettings.maxByteChoices, id: \.self) { Text(ClipStyle.bytes($0)).tag($0) }
-                }
-                .disabled(!on)
                 LabeledContent("In use") {
                     Text("\(history.entries.count.formatted()) entries · \(ClipStyle.bytes(history.storageBytes))").monospacedDigit()
                 }
@@ -74,6 +66,16 @@ struct ClipboardSettingsSections: View {
             } header: { Text("Ignored apps") } footer: {
                 Text("Copies made while these apps are in front are never recorded.").font(.caption).foregroundStyle(.secondary)
             }
+            Section("Advanced") {
+                Picker("Maximum entries", selection: settings.maxItems) {
+                    ForEach(ClipboardSettings.maxItemChoices, id: \.self) { Text($0.formatted()).tag($0) }
+                }
+                Picker("Storage limit", selection: settings.maxBytes) {
+                    ForEach(ClipboardSettings.maxByteChoices, id: \.self) { Text(ClipStyle.bytes($0)).tag($0) }
+                }
+                Text("The oldest entries go first when a limit is reached.").font(.caption).foregroundStyle(.secondary)
+            }
+            .disabled(!on)
             Section("Privacy") {
                 Label {
                     Text("Clipboard history stays on this Mac and is never sent anywhere. Passwords and other items that apps mark as concealed or temporary are skipped.")

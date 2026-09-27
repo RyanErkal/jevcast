@@ -61,10 +61,8 @@ struct GeneralSettings: View {
             }
             Section {
                 Toggle("Check for updates once a day", isOn: $preferences.checksForUpdates)
-                Toggle("Jev natural-language matching", isOn: Binding(
-                    get: { keys.hasKey && preferences.jevEnabled }, set: { preferences.jevEnabled = $0 }
-                )).disabled(!keys.hasKey)
-                Toggle("Quill answers and writing", isOn: $preferences.quillEnabled)
+                LabeledContent("Jev matching") { Text(keys.hasKey && preferences.jevEnabled ? "On" : "Off").foregroundStyle(.secondary) }
+                LabeledContent("Quill writing") { Text(preferences.quillEnabled ? "On" : "Off").foregroundStyle(.secondary) }
                 HStack {
                     Text(updateStatus).font(.caption).foregroundStyle(.secondary)
                     Spacer()
@@ -75,7 +73,7 @@ struct GeneralSettings: View {
                     }
                 }
             } header: { Text("Network") } footer: {
-                InfoCaption("These, and web images in mail, are the only network use.",
+                InfoCaption("These, and web images in mail, are the only network use. Change Jev and Quill in Settings › AI.",
                             detail: "HTML mail loads web images, fonts, and styles unless you turn that off in Settings › Mail. The update check asks GitHub for the newest version and sends nothing else. Jev gets request text and candidate names. Quill gets only what Settings › AI › Quill allows. File paths, clipboard history, and audio are never sent.")
             }
             if !preferences.cleanupIgnored.isEmpty {

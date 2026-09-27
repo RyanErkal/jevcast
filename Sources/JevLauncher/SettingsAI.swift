@@ -43,11 +43,10 @@ struct MailSettings: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Quill") {
-                Toggle("Quill may read messages for summaries and replies", isOn: $preferences.quillSendsMail)
-                    .disabled(!preferences.quillEnabled)
-                if !preferences.quillEnabled {
-                    Text("Turn on Quill in Settings › AI first.").font(.caption).foregroundStyle(.secondary)
+                LabeledContent("Quill reads mail") {
+                    Text(preferences.quillEnabled && preferences.quillSendsMail ? "On" : "Off").foregroundStyle(.secondary)
                 }
+                Text("Change this in Settings › AI › Quill.").font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

@@ -12,7 +12,7 @@ struct HyperKeySettings: View {
     var body: some View {
         Section {
             Toggle("Use Caps Lock as a Hyper key", isOn: $preferences.hyperKeyEnabled)
-            Text("Hold Caps Lock and press a key below. Caps Lock never types capitals while this is on; its light shows while you hold it. Quit Jevcast and Caps Lock works as before.")
+            Text("Hold Caps Lock and press a key below. While this is on, Caps Lock does not type capitals. When you quit \(AppIdentity.name), Caps Lock works as before.")
                 .font(.caption).foregroundStyle(.secondary)
             if preferences.hyperKeyEnabled { status }
         } header: { Text("Hyper key") }
@@ -41,13 +41,10 @@ struct HyperKeySettings: View {
 
     @ViewBuilder private var status: some View {
         if !controller.tapRunning {
-            HStack {
-                Label("Jevcast cannot see the keyboard yet. Allow Accessibility and Input Monitoring.", systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption).foregroundStyle(.orange)
-                Spacer()
-                Button("Accessibility…") { Permission.accessibility.openSystemSettings() }.controlSize(.small)
-                Button("Input Monitoring…") { Permission.requestInputMonitoring() }.controlSize(.small)
-            }
+            Label("\(AppIdentity.name) cannot read the keyboard yet. Allow both permissions below.", systemImage: "exclamationmark.triangle.fill")
+                .font(.caption).foregroundStyle(.orange)
+            PermissionRow(permission: .accessibility)
+            PermissionRow(permission: .inputMonitoring, request: Permission.requestInputMonitoring)
         }
         if let error = controller.remapError {
             Label(error, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)

@@ -59,7 +59,7 @@ struct JevSettings: View {
                 }
                 .font(.caption)
             }
-        } header: { Text("Jev") } footer: {
+        } header: { Text("Key") } footer: {
             InfoCaption(sharedWithQuill ? "Used by Jev and Quill." : "Optional. A TypeSafe or OpenRouter key.",
                         detail: "Jev, a model from TypeSafe, matches loose requests such as “make this window bigger”. Use a TypeSafe key, or an OpenRouter key (sk-or-…) to run Jev through OpenRouter. Quill uses an OpenRouter Jev key when it has no key of its own.")
         }
@@ -74,6 +74,8 @@ struct JevSettings: View {
             } else {
                 Text("Add a key to turn this on.").font(.caption).foregroundStyle(.secondary)
             }
+        }
+        Section("Advanced") {
             Toggle("Check the kind of request first", isOn: $preferences.jevLayered).disabled(!keys.hasKey || !preferences.jevEnabled)
             InfoCaption("More accurate. Usually two small calls.",
                         detail: "Jev also names the kind of request, such as “open an app” or “move a window”. When that disagrees with its first pick, it chooses again among every item of that kind. Most requests cost two small calls at once; a disagreement adds a third.")

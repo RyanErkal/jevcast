@@ -40,9 +40,9 @@ struct UsageSettings: View {
                 InfoCaption("Remembered picks need no Jev call.",
                             detail: "When you choose a result for a request, \(AppIdentity.name) remembers it on this Mac. The same request then needs no Jev call. Press ⌘Z on a remembered pick to forget it.")
                 HStack {
-                    Button("Forget all") { preferences.clearLearned() }.disabled(preferences.learned.entries.isEmpty)
+                    Button("Forget All") { preferences.clearLearned() }.disabled(preferences.learned.entries.isEmpty)
                     Spacer()
-                    Button("Reset usage…") { confirmReset = true }.disabled(usage.ledger.isEmpty)
+                    Button("Reset Usage…") { confirmReset = true }.disabled(usage.ledger.isEmpty)
                 }
                 .controlSize(.small)
             } header: { Text("Memory") }

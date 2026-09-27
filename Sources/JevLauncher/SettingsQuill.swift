@@ -34,9 +34,9 @@ struct QuillSettings: View {
                 Toggle("Fast", isOn: $preferences.quillFast)
                 Text("Faster replies. Uses more credits.").font(.caption).foregroundStyle(.secondary)
             }
-            Section("OpenRouter key") {
+            Section("Key") {
                 if usesJevKey {
-                    LabeledContent("Key") { Text("Shared with Jev (OpenRouter key in AI › Jev)").foregroundStyle(.secondary) }
+                    LabeledContent("Key") { Text("Shared with Jev").foregroundStyle(.secondary) }
                 } else if quillKeys.hasKey {
                     LabeledContent("Key") {
                         HStack { Text("Stored in Keychain").foregroundStyle(.secondary); Button("Remove", action: remove).controlSize(.small) }

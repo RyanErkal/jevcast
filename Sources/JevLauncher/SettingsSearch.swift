@@ -71,7 +71,7 @@ struct SearchSettings: View {
                     AddButton(title: "Add keyword…") { sheet = .keyword(nil) }
                     Spacer()
                     if !missingDefaults.isEmpty {
-                        Button("Restore defaults") { preferences.quicklinks += missingDefaults }.controlSize(.small)
+                        Button("Restore Defaults") { preferences.quicklinks += missingDefaults }.controlSize(.small)
                     }
                 }
                 Text("Type a keyword and a search in the launcher, for example “gh swiftui”.")

@@ -118,14 +118,6 @@ private struct RunSettingsSection: View {
                 Text("7 days").tag(7); Text("30 days").tag(30); Text("90 days").tag(90)
             }
             Toggle("Keep Mac awake while running", isOn: center.setting(\.preventIdleSleep))
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    TextField("PATH for scripts", text: center.setting(\.scriptPath))
-                    Button("Reset") { var s = center.settings; s.scriptPath = defaultPath; center.saveSettings(s) }
-                        .controlSize(.small).disabled(center.settings.scriptPath == defaultPath)
-                }
-                Text("Scripts get only this PATH. Jevcast never reads it from a login shell.").font(.caption).foregroundStyle(.secondary)
-            }
             HStack {
                 Button("Open Automations Folder") {
                     try? center.store.ensureRoot()
@@ -139,6 +131,14 @@ private struct RunSettingsSection: View {
         } header: { Text("Runs") } footer: {
             Text("The timeout applies to new automations. Each automation can change it in its editor.")
                 .font(.caption).foregroundStyle(.secondary)
+        }
+        Section("Advanced") {
+            HStack {
+                TextField("PATH for scripts", text: center.setting(\.scriptPath))
+                Button("Reset") { var s = center.settings; s.scriptPath = defaultPath; center.saveSettings(s) }
+                    .controlSize(.small).disabled(center.settings.scriptPath == defaultPath)
+            }
+            Text("Scripts get only this PATH. \(AppIdentity.name) never reads it from a login shell.").font(.caption).foregroundStyle(.secondary)
         }
         .confirmationDialog("Delete all finished run history?", isPresented: $confirmDelete) {
             Button("Delete History", role: .destructive, action: deleteHistory)

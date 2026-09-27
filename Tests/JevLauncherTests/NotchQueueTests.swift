@@ -107,7 +107,7 @@ final class NotchQueueTests: XCTestCase {
         let stack = NotchQueue.stack((0..<6).map { alert("q\($0)", .question) })
         XCTAssertEqual(g.bodyHeight(.pill, alert: nil), 0)
         XCTAssertEqual(g.width(.pill), 180 + 2 * NotchGeometry.pillWing)
-        XCTAssertEqual(g.bodyHeight(.detail, alert: stack), NotchGeometry.cardBody + 4 * NotchGeometry.rowHeight)
+        XCTAssertEqual(g.bodyHeight(.detail, alert: stack), NotchGeometry.listHeader + 4 * NotchGeometry.rowHeight + NotchGeometry.listBottom)
         XCTAssertGreaterThan(g.panelFrame(.reply, alert: nil).height, g.panelFrame.height)
         XCTAssertEqual(g.panelFrame.maxY, 982)
     }

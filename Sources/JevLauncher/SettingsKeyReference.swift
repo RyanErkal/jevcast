@@ -7,7 +7,7 @@ struct KeyReference: View {
     var body: some View {
         Section {
             row(launcherKeys, "Open the launcher", note: "Change it in General.")
-            row(["Right ⌘"], "Hold to dictate", note: preferences.dictationEnabled ? nil : "Off. Turn it on in Dictation.")
+            row(["Right ⌘"], "Hold to dictate", note: preferences.dictationEnabled ? nil : "Off. Turn it on in Voice › Dictation.")
         } header: { Text("Global") }
         Section {
             row(["⌃", "⌥", "⌘", "←", "→", "↑", "↓"], "Halves")

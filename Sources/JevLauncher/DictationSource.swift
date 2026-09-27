@@ -12,7 +12,7 @@ final class DictationSource: ThingSource {
         let all = store.all()
         let matches = filter.isEmpty ? all : all.filter { $0.text.localizedCaseInsensitiveContains(filter) }
         guard !matches.isEmpty else {
-            throw SourceProblem(text: all.isEmpty ? "No dictations yet. Turn on dictation in Settings › Dictation, then hold Right Command." : "No dictation matches.")
+            throw SourceProblem(text: all.isEmpty ? "No dictations yet. Turn on dictation in Settings › Voice › Dictation, then hold Right Command." : "No dictation matches.")
         }
         return matches.prefix(100).enumerated().map { index, entry in
             let text = entry.text

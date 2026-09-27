@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Voice input and its permissions.
+/// Settings › Voice › Voice input: the sections for voice input and its permissions.
 struct VoiceSettings: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var speech: SpeechService
@@ -12,7 +12,6 @@ struct VoiceSettings: View {
     }
 
     var body: some View {
-        Form {
             Section("Voice input") {
                 Toggle("Listen when the launcher opens", isOn: $preferences.voiceEnabled)
                 Text("Uses on-device speech recognition. Audio is not saved.")
@@ -25,8 +24,6 @@ struct VoiceSettings: View {
                     Text(speechStatus).font(.caption).foregroundStyle(speech.errorMessage == nil ? Color.secondary : Color.orange)
                 }
             }
-        }
-        .formStyle(.grouped)
     }
 }
 

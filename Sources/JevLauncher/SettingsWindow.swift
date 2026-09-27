@@ -7,12 +7,12 @@ import SwiftUI
 @MainActor
 final class SettingsWindow: NSWindowController, NSToolbarDelegate {
     enum Tab: String, CaseIterable {
-        case general, search, library, windows, voice, dictation, ai, automations, mail
+        case general, keys, search, library, windows, voice, ai, automations, mail
         var title: String {
             switch self {
             case .general: return "General"; case .search: return "Search"
             case .library: return "Library"; case .windows: return "Windows"
-            case .voice: return "Voice"; case .dictation: return "Dictation"; case .ai: return "AI"; case .mail: return "Mail"
+            case .keys: return "Keys"; case .voice: return "Voice"; case .ai: return "AI"; case .mail: return "Mail"
             case .automations: return "Automations"
             }
         }
@@ -20,13 +20,12 @@ final class SettingsWindow: NSWindowController, NSToolbarDelegate {
             switch self {
             case .general: return "gearshape"; case .search: return "magnifyingglass"
             case .library: return "books.vertical"; case .windows: return "macwindow"
-            case .voice: return "waveform"; case .dictation: return "mic"; case .ai: return "sparkles"; case .mail: return "envelope"
+            case .keys: return "keyboard"; case .voice: return "waveform"; case .ai: return "sparkles"; case .mail: return "envelope"
             case .automations: return "bolt.badge.clock"
             }
         }
         var identifier: NSToolbarItem.Identifier { NSToolbarItem.Identifier(rawValue) }
-        /// Dictation needs macOS 26, so its tab is hidden on older systems.
-        static var shown: [Tab] { allCases.filter { $0 != .dictation || DictationEngines.isSupported } }
+        static var shown: [Tab] { allCases }
     }
     static let width: CGFloat = 600
     static let minHeight: CGFloat = 200
@@ -102,10 +101,11 @@ final class SettingsWindow: NSWindowController, NSToolbarDelegate {
         switch tab {
         case .general: GeneralSettings(preferences: preferences, status: status, updates: updates, speech: model.speech, windows: model.windows, keys: model.keys, history: model.clipboard, changed: changed, resized: resized)
         case .search: SearchSettings(preferences: preferences, catalogue: catalogue)
-        case .windows: WindowSettings(preferences: preferences, model: model, hyper: hyper, changed: changed, resized: resized)
+        case .keys: Form { KeysSettings(preferences: preferences, controller: hyper, resized: resized) }.formStyle(.grouped)
+        case .windows: WindowSettings(preferences: preferences, model: model, changed: changed)
         case .library: CommandSettings(preferences: preferences, catalogue: catalogue, resized: resized)
-        case .voice: VoiceSettings(preferences: preferences, speech: model.speech)
-        case .dictation: DictationSettings(preferences: preferences, dictation: dictation, openQuill: { [weak self] in self?.select(.ai) })
+        case .voice: VoicePane(preferences: preferences, speech: model.speech, dictation: dictation,
+                               openQuill: { [weak self] in self?.select(.ai) }, resized: resized)
         case .ai: AISettings(preferences: preferences, model: model, resized: resized)
         case .automations: AutomationSettingsPane(preferences: preferences, center: automations, resized: resized)
         case .mail: MailSettings(preferences: preferences, openMail: openMail)

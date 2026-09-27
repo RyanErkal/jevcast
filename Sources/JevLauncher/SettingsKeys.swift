@@ -1,7 +1,7 @@
 import SwiftUI
 import LauncherCore
 
-/// Settings › Windows › Keys: the Hyper key and its layer first, then every other shortcut.
+/// Settings › Keys: the Hyper key and its layer first, then every other shortcut.
 struct KeysSettings: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var controller: HyperKeyController

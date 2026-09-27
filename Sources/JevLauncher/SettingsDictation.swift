@@ -2,7 +2,7 @@ import AVFoundation
 import SwiftUI
 import LauncherCore
 
-/// Hold Right Command to dictate. Off by default; audio is never saved or sent.
+/// Settings › Voice › Dictation: hold Right Command to dictate. Off by default; audio is never saved or sent.
 struct DictationSettings: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var dictation: DictationController
@@ -10,7 +10,6 @@ struct DictationSettings: View {
     @State private var confirmDelete = false
 
     var body: some View {
-        Form {
             Section("Dictation") {
                 if DictationEngines.isSupported {
                     Toggle("Hold Right Command to dictate", isOn: $preferences.dictationEnabled)
@@ -52,7 +51,5 @@ struct DictationSettings: View {
                 Text("Accessibility lets \(AppIdentity.name) see Right Command and paste the text. Without it, the text stays on the clipboard.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-        }
-        .formStyle(.grouped)
     }
 }

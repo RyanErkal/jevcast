@@ -97,9 +97,10 @@ struct SourcePermissionRow: View {
 /// window's height probe renders the same part the user sees.
 struct PaneSections<Part: Hashable & CaseIterable & RawRepresentable>: View where Part.AllCases: RandomAccessCollection, Part.RawValue == String {
     @Binding var selection: Part
+    var parts: [Part]? = nil
     var body: some View {
         Picker("", selection: $selection) {
-            ForEach(Part.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            ForEach(parts ?? Array(Part.allCases), id: \.self) { Text($0.rawValue).tag($0) }
         }
         .pickerStyle(.segmented).labelsHidden()
         .frame(maxWidth: .infinity)

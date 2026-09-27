@@ -101,11 +101,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         model.clipboardPasteTarget = { [weak self] in self?.previousApp?.processIdentifier }
         model.onClose = { [weak self] restore in self?.hide(restoreFocus: restore) }
         model.openQuillSettings = { [weak self] in self?.showSettings(tab: .ai, aiPart: .quill) }
+        // Keys moved out of Settings › Windows, which now has one part.
+        UserDefaults.standard.removeObject(forKey: "settingsWindowsPart")
         model.openSettingsTab = { [weak self] name in
-            if name == "keys" {
-                UserDefaults.standard.set(WindowSettings.Part.keys.rawValue, forKey: "settingsWindowsPart")
-                self?.showSettings(tab: .windows); return
-            }
+            if name == "dictation" { self?.showSettings(tab: .voice, voicePart: .dictation); return }
             if let tab = SettingsWindow.Tab(rawValue: name) { self?.showSettings(tab: tab) }
         }
         model.openMail = { [weak self] rowID in self?.showMailView(select: rowID) }
@@ -253,7 +252,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             self.settings?.window?.orderFrontRegardless()
         }))
         // Panes with parts render each part. The stored choice is put back after the last capture.
-        let partKeys = ["settingsGeneralPart", "settingsAIPart", "settingsLibraryPart", "settingsAutomationsPart", "settingsWindowsPart"]
+        let partKeys = ["settingsGeneralPart", "settingsAIPart", "settingsLibraryPart", "settingsAutomationsPart", "settingsVoicePart"]
         let storedParts = partKeys.map { UserDefaults.standard.string(forKey: $0) }
         for tab in SettingsWindow.Tab.allCases {
             let parts: (key: String, values: [String])? = switch tab {
@@ -261,7 +260,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             case .ai: ("settingsAIPart", AISettings.Part.allCases.map(\.rawValue))
             case .library: ("settingsLibraryPart", CommandSettings.Part.allCases.map(\.rawValue))
             case .automations: ("settingsAutomationsPart", AutomationSettingsPane.Part.allCases.map(\.rawValue))
-            case .windows: ("settingsWindowsPart", WindowSettings.Part.allCases.map(\.rawValue))
+            case .voice: ("settingsVoicePart", VoicePane.Part.shown.map(\.rawValue))
             default: nil
             }
             guard let parts else {
@@ -269,7 +268,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
                 continue
             }
             for value in parts.values {
-                let slug = value.lowercased().replacingOccurrences(of: " & ", with: "-")
+                let slug = value.lowercased().replacingOccurrences(of: " & ", with: "-").replacingOccurrences(of: " ", with: "-")
                 steps.append(("settings-\(tab.rawValue)-\(slug)", 0.9, settingsView, { [weak self] in
                     UserDefaults.standard.set(value, forKey: parts.key)
                     self?.settings?.select(tab)
@@ -610,8 +609,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
               mailWindow: { [weak self] rowID in self?.model.closeAllViews(handingOff: true); self?.showMail(select: rowID) },
               runWindow: { [weak self] run in self?.showRun(run) })
     }
-    func showSettings(tab: SettingsWindow.Tab, aiPart: AISettings.Part? = nil) {
+    func showSettings(tab: SettingsWindow.Tab, aiPart: AISettings.Part? = nil, voicePart: VoicePane.Part? = nil) {
         if let aiPart { UserDefaults.standard.set(aiPart.rawValue, forKey: "settingsAIPart") }
+        if let voicePart { UserDefaults.standard.set(voicePart.rawValue, forKey: "settingsVoicePart") }
         showSettings()
         settings?.select(tab)
     }

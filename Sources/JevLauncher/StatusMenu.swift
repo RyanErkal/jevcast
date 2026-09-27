@@ -127,6 +127,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func fix(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let tab = SettingsWindow.Tab(rawValue: raw) else { return }
         if tab == .ai { UserDefaults.standard.set(AISettings.Part.jev.rawValue, forKey: "settingsAIPart") }
+        if tab == .voice { UserDefaults.standard.set(VoicePane.Part.voice.rawValue, forKey: "settingsVoicePart") }
         openSettings(tab)
     }
 }

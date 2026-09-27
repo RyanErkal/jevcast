@@ -78,14 +78,14 @@ final class DictationController: ObservableObject {
         // One dictation at a time, so a new hold cannot restore the clipboard or pill of the last one.
         guard let engine, canStart(), !finishing else { return }
         // Without Accessibility, keys in other apps are not seen, so a chord such as ⌘C would look like a hold.
-        guard NSApp.isActive || AXIsProcessTrusted() else { refusal = "Allow Accessibility in Settings › Dictation."; return }
+        guard NSApp.isActive || AXIsProcessTrusted() else { refusal = "Allow Accessibility in Settings › Voice › Dictation."; return }
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: break
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .audio) { _ in }
             return
         default:
-            refusal = "Allow the microphone in Settings › Dictation."
+            refusal = "Allow the microphone in Settings › Voice › Dictation."
             return
         }
         do {

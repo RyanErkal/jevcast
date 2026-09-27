@@ -97,8 +97,9 @@ enum MailStore {
         guard let labels = Columns(cols).labels else { return boxes }
         let c = Columns(cols)
         return try boxes.map { box in
-            guard box.role == .inbox,
-                  try !db.rows("SELECT 1 FROM labels WHERE \(labels.mailbox) = ? LIMIT 1", [.int(box.rowID)]).isEmpty else { return box }
+            guard box.role == .inbox else { return box }
+            let gmail = boxes.contains { $0.accountID == box.accountID && $0.path.lowercased() == "[gmail]/all mail" }
+            guard try gmail || !db.rows("SELECT 1 FROM labels WHERE \(labels.mailbox) = ? LIMIT 1", [.int(box.rowID)]).isEmpty else { return box }
             let (sql, arguments) = membershipCount(cols, [box.rowID], filter: "\(c.read) = 0", distinct: false)
             let count = Int(try db.rows(sql, arguments).first?.first?.int ?? 0)
             return MailMailbox(rowID: box.rowID, url: box.url, unread: count, total: box.total)

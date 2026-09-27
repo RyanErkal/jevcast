@@ -359,7 +359,7 @@ final class MailModel: ObservableObject {
 
     /// Reads older rows for body matches, for about `budget` seconds or 200 matches.
     func searchBodies(budget: TimeInterval = 2) {
-        guard let root, !search.isEmpty, bodySearch != .running, bodySearch != .done, !listStop.isStopped else { return }
+        guard let root, !search.isEmpty, !refreshing, bodySearch != .running, bodySearch != .done, !listStop.isStopped else { return }
         let query = Self.query(place, search, mailboxes), cursor = bodyCursor, stop = listStop, generation = self.generation
         bodySearch = .running
         Task { @MainActor [weak self] in
@@ -375,22 +375,25 @@ final class MailModel: ObservableObject {
         }
     }
 
-    /// Reads every row above the top cursor, without discarding loaded older pages.
+    /// Rechecks the loaded date range, including older rows that gained a mailbox label.
     @discardableResult
     func refresh() -> Bool {
-        guard !reloading, !refreshing, !listStop.isStopped else { return false }
+        guard !reloading, !refreshing, bodySearch != .running, !listStop.isStopped else { return false }
         guard let root, let top, !messages.isEmpty else { reload(keepSelection: true); return true }
         refreshing = true
         let place = self.place, search = self.search, generation = self.generation
         let ids = messages.map(\.rowID), stop = listStop
         let identity = indexIdentity
+        // Labels can change without changing date_received. Include the bottom date's ties;
+        // once the list is exhausted, also check older rows that newly entered this mailbox.
+        let floor = hasMore ? bottom.map { MailStore.Cursor(date: $0.date, rowID: .min) } ?? top : nil
         Task { @MainActor [weak self] in
             let result = await Task.detached(priority: .userInitiated) { () -> ([MailSummary], MailStore.Cursor?, [Int64: MailStore.RowState], [MailMailbox])? in
                 do {
                     guard MailStore.FileIdentity(path: MailStore.indexPath(root)) == identity else { return nil }
                     let boxes = try MailStore.mailboxes(root: root)
                     var query = Self.query(place, search, boxes)
-                    query.after = top
+                    query.after = floor
                     var newer: [MailSummary] = []
                     var first: MailStore.Cursor?
                     while true {
@@ -418,6 +421,11 @@ final class MailModel: ObservableObject {
             let added = newer.filter { self.removing[$0.rowID] == nil }
             if let first { self.top = first }
             self.install(Self.merge(kept, added, query: query))
+            if !search.isEmpty {
+                // A newly labelled row can match only its body, including behind the old body cursor.
+                self.bodyCursor = nil; self.bodySearch = .off
+                self.searchBodies(budget: 0.15)
+            }
         }
         return true
     }

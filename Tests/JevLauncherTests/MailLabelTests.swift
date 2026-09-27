@@ -104,6 +104,84 @@ final class MailLabelTests: XCTestCase {
     }
     private static let small = MailLabelFixture.Layout(gmail: 1_200, yahooInbox: 300, yahooArchive: 100)
 
+    private func write(_ root: String, _ sql: String) throws {
+        var db: OpaquePointer?
+        guard sqlite3_open(MailStore.indexPath(root), &db) == SQLITE_OK else { throw CocoaError(.fileWriteUnknown) }
+        defer { sqlite3_close(db) }
+        guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
+            throw SQLiteReader.Failure(text: String(cString: sqlite3_errmsg(db)))
+        }
+    }
+
+    @MainActor private func wait(_ predicate: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(5)
+        while !predicate(), Date() < deadline { try await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertTrue(predicate(), "Timed out waiting for the mail model")
+    }
+
+    func testEmptyGmailInboxDoesNotRestoreStaleUnreadCount() throws {
+        let root = try make(.init(gmail: 12, yahooInbox: 3, yahooArchive: 1))
+        try write(root, "UPDATE mailboxes SET unread_count = 9 WHERE ROWID IN (1, 5)")
+        XCTAssertEqual(try MailStore.mailboxes(root: root).first { $0.rowID == 1 }?.unread, 1)
+        try write(root, "DELETE FROM labels WHERE mailbox_id = 1")
+        let boxes = try MailStore.mailboxes(root: root)
+        XCTAssertEqual(boxes.first { $0.rowID == 1 }?.unread, 0)
+        XCTAssertEqual(boxes.first { $0.rowID == 5 }?.unread, 9)
+        XCTAssertEqual(try MailStore.count(root: root, mailboxes: [1]), 0)
+    }
+
+    @MainActor func testRefreshFindsOlderNewLabelMembersWithoutLosingPages() async throws {
+        let root = try make(.init(gmail: 1_500, yahooInbox: 0, yahooArchive: 0))
+        let model = MailModel(quill: { _ in throw CancellationError() }, quillAllowed: { false }, statusProvider: { .ready(root: root) })
+        model.refreshStatus()
+        try await wait { model.messages.count == 200 && !model.isLoading }
+        model.loadNextPage()
+        try await wait { model.messages.count == 400 && !model.isLoading }
+        let selected = try XCTUnwrap(model.messages.last?.rowID)
+        model.select(selected, byUser: false)
+        let bottom = model.bottom
+        try write(root, "INSERT INTO labels VALUES (1001, 1); DELETE FROM labels WHERE message_id = 1200 AND mailbox_id = 1")
+        XCTAssertTrue(model.refresh())
+        try await wait { !model.isLoading }
+        XCTAssertTrue(model.messages.contains { $0.rowID == 1001 })
+        XCTAssertFalse(model.messages.contains { $0.rowID == 1200 })
+        XCTAssertEqual(model.messages.count, 400)
+        XCTAssertEqual(model.selectedID, selected)
+        XCTAssertEqual(model.bottom, bottom)
+        XCTAssertEqual(Set(model.messages.map(\.rowID)).count, model.messages.count)
+        model.loadNextPage()
+        try await wait { !model.isLoading && !model.hasMore }
+        XCTAssertEqual(model.messages.count, 500)
+        // This row is older than the last cursor. A fully loaded list must discover it too.
+        try write(root, "INSERT INTO labels VALUES (1, 1)")
+        XCTAssertTrue(model.refresh())
+        try await wait { !model.isLoading }
+        XCTAssertEqual(model.messages.count, 501)
+        XCTAssertEqual(model.messages.last?.rowID, 1)
+        XCTAssertEqual(model.messages, model.messages.sorted { MailModel.isNewer($0, than: .init($1)) })
+    }
+
+    @MainActor func testRefreshRestartsBodySearchForNewLabelMembers() async throws {
+        let root = try make(.init(gmail: 12, yahooInbox: 0, yahooArchive: 0))
+        try write(root, """
+            INSERT INTO summaries VALUES (1, 'body-only-token');
+            UPDATE messages SET summary = 1;
+            UPDATE subjects SET subject = 'body-only-token' WHERE ROWID = 13;
+            """)
+        let model = MailModel(quill: { _ in throw CancellationError() }, quillAllowed: { false }, statusProvider: { .ready(root: root) })
+        model.refreshStatus()
+        try await wait { model.messages.count == 4 && !model.isLoading }
+        model.search = "body-only-token"
+        try await wait { model.bodySearch == .done && !model.isLoading }
+        XCTAssertEqual(model.messages.count, 4)
+        try write(root, "INSERT INTO labels VALUES (1, 1)")
+        XCTAssertTrue(model.refresh())
+        try await wait { !model.isLoading }
+        XCTAssertEqual(model.messages.count, 5)
+        XCTAssertEqual(model.messages.last?.rowID, 1)
+        XCTAssertEqual(model.messages.last?.labels, [1])
+    }
+
     private func walk(_ root: String, _ query: MailStore.Query) throws -> [MailSummary] {
         var all: [MailSummary] = []
         var query = query

@@ -43,14 +43,35 @@ extension Diagnostics {
             let names = { (type: String) in try db.rows("SELECT name FROM sqlite_master WHERE type = ? ORDER BY name", [.text(type)]).compactMap { $0.first?.text } }
             print("Tables: " + (try names("table")).joined(separator: ", "))
             print("messages indexes: " + (try db.rows("SELECT name FROM pragma_index_list('messages') ORDER BY name").compactMap { $0.first?.text }).joined(separator: ", "))
+            // Gmail keeps membership (Inbox, Sent, labels) in `labels`; names only.
+            if let labels = MailStore.labelTable(db) {
+                let indexes = (try db.rows("SELECT name FROM pragma_index_list('labels') ORDER BY name").compactMap { $0.first?.text })
+                let mailboxIndexed = try indexes.contains { name in
+                    try db.rows("SELECT name FROM pragma_index_info(?) ORDER BY seqno LIMIT 1", [.text(name)]).first?.first?.text == labels.mailbox
+                }
+                let columns: String = db.columns("labels").sorted().joined(separator: ", ")
+                let indexList: String = indexes.isEmpty ? "none" : indexes.joined(separator: ", ")
+                let indexed: String = mailboxIndexed ? "yes" : "no (label lists scan the labels table)"
+                print("labels table: yes, columns: \(columns); indexes: \(indexList); mailbox column indexed: \(indexed)")
+            } else {
+                print("labels table: no")
+            }
             print("Mailbox and date index: " + (MailStore.hasMailboxDateIndex(root: root) ? "yes" : "no (each mailbox is sorted in full)"))
             let boxes = try MailStore.mailboxes(root: root)
             print("Mailboxes: \(boxes.count)")
             let byRole = Dictionary(grouping: boxes, by: { "\($0.role)" })
             for (role, group) in byRole.sorted(by: { $0.key < $1.key }) {
-                print("  \(role): \(group.count) mailboxes, \(try MailStore.count(root: root, mailboxes: group.map(\.rowID))) messages")
+                print("  \(role): \(group.count) mailboxes, \(try MailStore.count(root: root, mailboxes: group.map(\.rowID))) messages (label members included)")
             }
             let inbox = boxes.filter { $0.role == .inbox }
+            // Accounts are numbered in index order; no addresses or account IDs.
+            var accounts: [String] = []
+            for box in inbox where !accounts.contains(box.accountID) { accounts.append(box.accountID) }
+            for (number, account) in accounts.enumerated() {
+                let ids = inbox.filter { $0.accountID == account }.map(\.rowID)
+                let unread = inbox.filter { $0.accountID == account }.map(\.unread).reduce(0, +)
+                print("  inbox of account \(number + 1): \(try MailStore.count(root: root, mailboxes: ids)) messages, \(unread) unread")
+            }
             let allMail = boxes.filter(\.inAllMail).map(\.rowID)
             print("Apple Mail running: " + (AppleScript.isRunning(MailActions.bundleID) ? "yes" : "no (new mail is not arriving)"))
             func timed<T>(_ body: () throws -> T) rethrows -> (T, Int) {

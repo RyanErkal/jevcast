@@ -41,7 +41,7 @@ final class MailSource: ThingSource {
                                    symbol: "envelope", action: .thing(Thing(verbs: [open, compose], twoLine: false)), score: openScore)]
         // A search ranks its messages first; the plain "mail" list stays below the Mail app.
         let base = filter.isEmpty ? 95.0 : 3000.0
-        rows += messages.enumerated().map { index, message in row(message, mailbox: boxes.first { $0.rowID == message.mailbox }, score: base - Double(index) * 0.01) }
+        rows += messages.enumerated().map { index, message in row(message, mailbox: MailMailbox.actionTarget(for: message, in: boxes), score: base - Double(index) * 0.01) }
         return rows
     }
 

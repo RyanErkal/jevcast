@@ -430,8 +430,8 @@ final class MailModel: ObservableObject {
             guard requested.contains(original.rowID) else { return original }
             guard let state = states[original.rowID] else { return nil }
             var message = original
-            message.mailbox = state.mailbox; message.read = state.read; message.flagged = state.flagged
-            let fits = allowed.contains(state.mailbox) && (!query.unreadOnly || !state.read) && (!query.flaggedOnly || state.flagged)
+            message.mailbox = state.mailbox; message.read = state.read; message.flagged = state.flagged; message.labels = state.labels
+            let fits = !allowed.isDisjoint(with: message.mailboxes) && (!query.unreadOnly || !state.read) && (!query.flaggedOnly || state.flagged)
             return fits || message.rowID == selectedID ? message : nil
         }
     }
@@ -444,7 +444,7 @@ final class MailModel: ObservableObject {
             var chosen: [String: MailSummary] = [:]
             for message in sorted {
                 if let old = chosen[message.messageKey] {
-                    if query.preferred.contains(message.mailbox), !query.preferred.contains(old.mailbox) { chosen[message.messageKey] = message }
+                    if !query.preferred.isDisjoint(with: message.mailboxes), query.preferred.isDisjoint(with: old.mailboxes) { chosen[message.messageKey] = message }
                 } else { chosen[message.messageKey] = message }
             }
             sorted = chosen.values.sorted { isNewer($0, than: .init($1)) }
@@ -498,7 +498,9 @@ final class MailModel: ObservableObject {
             guard !Task.isCancelled, let self, self.root == root else { return }
             guard let found else { self.banner = "This message is no longer in Mail's index."; return }
             self.pending = found
-            let target = Place.mailbox(found.mailbox)
+            // A Gmail row lives in All Mail; it opens in its Inbox when it has that label.
+            let inbox = found.labels.first { id in self.mailboxes.contains { $0.rowID == id && $0.role == .inbox } }
+            let target = Place.mailbox(inbox ?? found.mailbox)
             if self.place == target { self.reload() } else { self.place = target }
         }
         return true
@@ -516,7 +518,7 @@ final class MailModel: ObservableObject {
         let identity = indexIdentity
         loadingID = rowID
         // A selection the model made, such as after a delete or a reload, never marks mail read.
-        if markRead { markReadSoon(message, in: box) } else { readTimer?.cancel() }
+        if markRead, let target = actionBox(message) { markReadSoon(message, in: target) } else { readTimer?.cancel() }
         if let cached = bodies[rowID] {
             remember(cached, for: rowID)
             detail = cached.message; detailHTML = cached.html; detailMissing = false
@@ -605,8 +607,15 @@ final class MailModel: ObservableObject {
         }
     }
 
+    /// The mailbox Mail's scripts address for `message`. Bodies still load from the row's own mailbox.
+    func actionBox(_ message: MailSummary) -> MailMailbox? {
+        var viewing: Int64?
+        if case .mailbox(let id) = place { viewing = id }
+        return MailMailbox.actionTarget(for: message, viewing: viewing, in: mailboxes)
+    }
+
     func archive() {
-        guard let message = selected, let box = mailbox(message.mailbox) else { return }
+        guard let message = selected, let box = actionBox(message) else { return }
         guard let archive = MailMailbox.archive(for: box.accountID, in: mailboxes), archive.rowID != box.rowID else {
             banner = "This account has no Archive mailbox."; return
         }
@@ -618,7 +627,7 @@ final class MailModel: ObservableObject {
         delete()
     }
     func delete() {
-        guard let message = selected, let box = mailbox(message.mailbox) else { return }
+        guard let message = selected, let box = actionBox(message) else { return }
         perform("delete", removes: true) { try await MailActions.delete(message, in: box) }
     }
     /// Deletes every message in the list from the selected message's sender: for clearing out junk.
@@ -630,21 +639,21 @@ final class MailModel: ObservableObject {
     }
     var selectedSender: String? { selected?.senderAddress }
     func toggleFlag() {
-        guard let message = selected, let box = mailbox(message.mailbox) else { return }
+        guard let message = selected, let box = actionBox(message) else { return }
         let flagged = !message.flagged
         perform(flagged ? "flag" : "unflag") { try await MailActions.setFlagged(flagged, message, in: box) } update: { $0.flagged = flagged }
     }
     func toggleRead() {
-        guard let message = selected, let box = mailbox(message.mailbox) else { return }
+        guard let message = selected, let box = actionBox(message) else { return }
         let read = !message.read
         perform(read ? "mark read" : "mark unread") { try await MailActions.setRead(read, message, in: box) } update: { $0.read = read }
     }
     func move(to destination: MailMailbox) {
-        guard let message = selected, let box = mailbox(message.mailbox) else { return }
+        guard let message = selected, let box = actionBox(message) else { return }
         perform("move", removes: true) { try await MailActions.move(message, from: box, to: destination) }
     }
     func openInMail() {
-        guard let message = selected, let box = mailbox(message.mailbox) else { return }
+        guard let message = selected, let box = actionBox(message) else { return }
         // You now use Mail itself, so closing the inbox leaves it running.
         MailActions.openedByUser = true
         Task { @MainActor [weak self] in
@@ -692,10 +701,10 @@ final class MailModel: ObservableObject {
                 case .new:
                     try await MailActions.send(to: MailActions.addresses(draft.to), cc: MailActions.addresses(draft.cc), subject: draft.subject, body: draft.body)
                 case .reply(let all):
-                    guard let original = draft.original, let box = self?.mailbox(original.mailbox) else { return }
+                    guard let original = draft.original, let box = self?.actionBox(original) else { return }
                     try await MailActions.reply(original, in: box, text: draft.body, all: all)
                 case .forward:
-                    guard let original = draft.original, let box = self?.mailbox(original.mailbox) else { return }
+                    guard let original = draft.original, let box = self?.actionBox(original) else { return }
                     try await MailActions.forward(original, in: box, text: draft.body, to: MailActions.addresses(draft.to))
                 }
                 self?.draft = nil

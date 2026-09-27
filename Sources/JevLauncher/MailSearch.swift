@@ -46,7 +46,7 @@ extension MailStore {
             """, scope.arguments)
             let kept = query.dedupe ? try canonicalRows(db, cols, query, rows) : rows
             let cursor = Cursor(date: edge[1].double ?? 0, rowID: edgeID)
-            return BodyResult(messages: summaries(kept), cursor: cursor, done: (edge[2].int ?? 0) < bodyWindow)
+            return BodyResult(messages: try withLabels(db, cols, summaries(kept)), cursor: cursor, done: (edge[2].int ?? 0) < bodyWindow)
         }
     }
 

@@ -39,7 +39,7 @@ enum MailStore {
             self.root = root
             identity = FileIdentity(path: MailStore.indexPath(root))
             db = try MailStore.open(root)
-            columns = db.columns("messages")
+            columns = MailStore.schemaColumns(db)
             schemaVersion = try db.rows("PRAGMA schema_version").first?.first?.int
         }
     }
@@ -68,7 +68,7 @@ enum MailStore {
             shared = connection
             let schemaVersion = try connection.db.rows("PRAGMA schema_version").first?.first?.int
             if connection.schemaVersion != schemaVersion {
-                connection.columns = connection.db.columns("messages")
+                connection.columns = schemaColumns(connection.db)
                 connection.schemaVersion = schemaVersion
             }
             do { return try connection.db.withStop(stop) { try body(connection.db, connection.columns) } }
@@ -81,17 +81,97 @@ enum MailStore {
     }
 
     static func mailboxes(root: String) throws -> [MailMailbox] {
-        try withIndex(root) { db, _ in try mailboxes(db) }
+        try withIndex(root) { db, cols in try mailboxes(db, cols) }
     }
 
-    private static func mailboxes(_ db: SQLiteReader) throws -> [MailMailbox] {
+    private static func mailboxes(_ db: SQLiteReader, _ cols: Set<String>) throws -> [MailMailbox] {
         let columns = db.columns("mailboxes")
         let unread = columns.contains("unread_count") ? "unread_count" : "0"
         let total = columns.contains("total_count") ? "total_count" : "0"
-        return try db.rows("SELECT ROWID, url, \(unread), \(total) FROM mailboxes").compactMap { row in
+        let boxes: [MailMailbox] = try db.rows("SELECT ROWID, url, \(unread), \(total) FROM mailboxes").compactMap { row in
             guard row.count == 4, let id = row[0].int, let url = row[1].text else { return nil }
             return MailMailbox(rowID: id, url: url, unread: Int(row[2].int ?? 0), total: Int(row[3].int ?? 0))
         }
+        // A Gmail inbox holds no rows of its own: its messages sit in All Mail with an Inbox label.
+        // Its unread count is read through the labels, so it matches the list.
+        guard let labels = Columns(cols).labels else { return boxes }
+        let c = Columns(cols)
+        return try boxes.map { box in
+            guard box.role == .inbox,
+                  try !db.rows("SELECT 1 FROM labels WHERE \(labels.mailbox) = ? LIMIT 1", [.int(box.rowID)]).isEmpty else { return box }
+            let (sql, arguments) = membershipCount(cols, [box.rowID], filter: "\(c.read) = 0", distinct: false)
+            let count = Int(try db.rows(sql, arguments).first?.first?.int ?? 0)
+            return MailMailbox(rowID: box.rowID, url: box.url, unread: count, total: box.total)
+        }
+    }
+
+    /// Gmail keeps each message once, in All Mail, and records its other mailboxes (Inbox, Sent,
+    /// its labels) in the `labels` table. The column names are read from the index itself.
+    struct LabelTable: Equatable, Sendable {
+        let message: String, mailbox: String
+    }
+
+    static func labelTable(_ db: SQLiteReader) -> LabelTable? {
+        let names = db.columns("labels")
+        guard !names.isEmpty else { return nil }
+        let keys = (try? db.rows("SELECT \"table\", \"from\" FROM pragma_foreign_key_list('labels')")) ?? []
+        func column(_ table: String, _ fallbacks: [String]) -> String? {
+            let linked = keys.first { $0.count == 2 && $0[0].text?.lowercased() == table }?[1].text
+            return ([linked].compactMap { $0 } + fallbacks).first { names.contains($0) && isIdentifier($0) }
+        }
+        guard let message = column("messages", ["message_id", "message"]),
+              let mailbox = column("mailboxes", ["mailbox_id", "mailbox"]), message != mailbox else { return nil }
+        return LabelTable(message: message, mailbox: mailbox)
+    }
+
+    static func isIdentifier(_ name: String) -> Bool {
+        !name.isEmpty && name.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_") }
+    }
+
+    /// The `messages` columns, plus two marker entries naming the `labels` columns when the table exists.
+    static func schemaColumns(_ db: SQLiteReader) -> Set<String> {
+        var columns = db.columns("messages")
+        if let labels = labelTable(db) { columns.insert("@labels.message:" + labels.message); columns.insert("@labels.mailbox:" + labels.mailbox) }
+        return columns
+    }
+
+    /// Rows in `mailboxes`, by their own mailbox or by a label, each row once, with `filter` applied.
+    /// The two parts do not overlap, so their counts add up.
+    static func membershipCount(_ cols: Set<String>, _ mailboxes: [Int64], filter: String? = nil, distinct: Bool) -> (String, [SQLiteReader.Value]) {
+        let c = Columns(cols)
+        let list = "(" + mailboxes.map { _ in "?" }.joined(separator: ",") + ")"
+        let ids: [SQLiteReader.Value] = mailboxes.map { .int($0) }
+        let extra = filter.map { " AND " + $0 } ?? ""
+        var parts = ["SELECT \(c.key) AS k FROM messages m WHERE \(c.deleted) = 0 AND m.mailbox IN \(list)\(extra)"]
+        var arguments = ids
+        if let labels = c.labels {
+            parts.append("SELECT \(c.key) AS k FROM messages m WHERE \(c.deleted) = 0 AND m.ROWID IN (SELECT \(labels.message) FROM labels WHERE \(labels.mailbox) IN \(list)) AND m.mailbox NOT IN \(list)\(extra)")
+            arguments += ids + ids
+        }
+        let what = distinct ? "COUNT(DISTINCT k)" : "COUNT(*)"
+        return ("SELECT \(what) FROM (" + parts.joined(separator: " UNION ALL ") + ")", arguments)
+    }
+
+    /// The label mailboxes of each row, for rows that have any.
+    static func labels(_ db: SQLiteReader, _ cols: Set<String>, rowIDs: [Int64]) throws -> [Int64: [Int64]] {
+        guard let labels = Columns(cols).labels, !rowIDs.isEmpty else { return [:] }
+        var result: [Int64: [Int64]] = [:]
+        for start in stride(from: 0, to: rowIDs.count, by: 500) {
+            let chunk = Array(rowIDs[start..<min(start + 500, rowIDs.count)])
+            let sql = "SELECT \(labels.message), \(labels.mailbox) FROM labels WHERE \(labels.message) IN ("
+                + chunk.map { _ in "?" }.joined(separator: ",") + ") ORDER BY 1, 2"
+            for row in try db.rows(sql, chunk.map { .int($0) }) where row.count == 2 {
+                guard let id = row[0].int, let box = row[1].int else { continue }
+                result[id, default: []].append(box)
+            }
+        }
+        return result
+    }
+
+    static func withLabels(_ db: SQLiteReader, _ cols: Set<String>, _ messages: [MailSummary]) throws -> [MailSummary] {
+        let found = try labels(db, cols, rowIDs: messages.map(\.rowID))
+        guard !found.isEmpty else { return messages }
+        return messages.map { message in var copy = message; copy.labels = found[message.rowID] ?? []; return copy }
     }
 
     /// A place in the newest-first order: `date_received`, then `ROWID`, both descending.
@@ -154,7 +234,7 @@ enum MailStore {
             guard let sql else { return result }
             let rows = try db.rows(sql, arguments)
             let kept = query.dedupe ? try canonicalRows(db, cols, query, rows) : rows
-            let messages = summaries(kept)
+            let messages = try withLabels(db, cols, summaries(kept))
             if result.first == nil { result.first = cursor(rows.first) }
             if result.messages.count + messages.count >= limit, rows.count >= limit || result.messages.count + messages.count > limit {
                 // The page ends at its last shown row; rows after it are read again next time.
@@ -182,7 +262,11 @@ enum MailStore {
         let read, flagged, deleted, key: String
         let prefix: String
         let summary: Bool
+        let labels: LabelTable?
         init(_ cols: Set<String>) {
+            let message = cols.first { $0.hasPrefix("@labels.message:") }?.dropFirst(16)
+            let mailbox = cols.first { $0.hasPrefix("@labels.mailbox:") }?.dropFirst(16)
+            labels = message.flatMap { m in mailbox.map { LabelTable(message: String(m), mailbox: String($0)) } }
             read = cols.contains("read") ? "m.read" : "(m.flags & 1)"
             flagged = cols.contains("flagged") ? "m.flagged" : "((m.flags >> 4) & 1)"
             deleted = cols.contains("deleted") ? "m.deleted" : "((m.flags >> 1) & 1)"
@@ -243,7 +327,14 @@ enum MailStore {
         } else {
             for box in query.mailboxes { arms.append(arm("m.mailbox = ?", [.int(box)])) }
         }
-        let rows = arms.joined(separator: " UNION ALL ") + " ORDER BY d DESC, id DESC LIMIT \(limit)"
+        // Gmail's messages reach Inbox, Sent, and labels through the labels table. One more arm reads
+        // them; UNION keeps a row once when it is also found by its own mailbox (All Mail).
+        let labelled = query.rowIDs.isEmpty && c.labels != nil
+        if let labels = c.labels, labelled {
+            arms.append(arm("m.ROWID IN (SELECT \(labels.message) FROM labels WHERE \(labels.mailbox) IN ("
+                + query.mailboxes.map { _ in "?" }.joined(separator: ",") + "))", query.mailboxes.map { .int($0) }))
+        }
+        let rows = arms.joined(separator: labelled ? " UNION " : " UNION ALL ") + " ORDER BY d DESC, id DESC LIMIT \(limit)"
         return Scope(ctes: ctes, rows: rows, arguments: arguments, words: searchWords)
     }
 
@@ -292,8 +383,14 @@ enum MailStore {
         var eligible = "\(c.deleted) = 0"
         var scopeArguments: [SQLiteReader.Value]
         if query.rowIDs.isEmpty {
-            eligible += " AND m.mailbox IN (" + query.mailboxes.map { _ in "?" }.joined(separator: ",") + ")"
+            let list = "(" + query.mailboxes.map { _ in "?" }.joined(separator: ",") + ")"
             scopeArguments = query.mailboxes.map { .int($0) }
+            if let labels = c.labels {
+                eligible += " AND (m.mailbox IN \(list) OR m.ROWID IN (SELECT \(labels.message) FROM labels WHERE \(labels.mailbox) IN \(list)))"
+                scopeArguments += scopeArguments
+            } else {
+                eligible += " AND m.mailbox IN \(list)"
+            }
         } else {
             eligible += " AND m.ROWID IN (" + query.rowIDs.map { _ in "?" }.joined(separator: ",") + ")"
             scopeArguments = query.rowIDs.map { .int($0) }
@@ -301,13 +398,22 @@ enum MailStore {
         if query.unreadOnly { eligible += " AND \(c.read) = 0" }
         if query.flaggedOnly { eligible += " AND \(c.flagged) = 1" }
         var best: [String: (preferred: Bool, date: Double, rowID: Int64)] = [:]
+        // A Gmail row counts as preferred when it carries a preferred mailbox's label (the inbox).
+        let preferredList = query.preferred.sorted()
+        var labelled = "0"
+        if let labels = c.labels, !preferredList.isEmpty {
+            labelled = "EXISTS (SELECT 1 FROM labels WHERE \(labels.message) = m.ROWID AND \(labels.mailbox) IN ("
+                + preferredList.map { _ in "?" }.joined(separator: ",") + "))"
+        }
+        let labelArguments: [SQLiteReader.Value] = labelled == "0" ? [] : preferredList.map { .int($0) }
         func read(_ column: String, _ ids: [Int64], extra: String) throws {
             guard !ids.isEmpty else { return }
-            let sql = "SELECT m.ROWID, m.mailbox, m.date_received, \(c.key) FROM messages m WHERE m.\(column) IN ("
+            let sql = "SELECT m.ROWID, m.mailbox, m.date_received, \(c.key), \(labelled) FROM messages m WHERE m.\(column) IN ("
                 + ids.map { _ in "?" }.joined(separator: ",") + ") AND " + extra + eligible
-            for row in try db.rows(sql, ids.map { .int($0) } + scopeArguments) where row.count == 4 {
+            for row in try db.rows(sql, labelArguments + ids.map { .int($0) } + scopeArguments) where row.count == 5 {
                 guard let id = row[0].int, let key = row[3].text else { continue }
-                let candidate = (preferred: query.preferred.contains(row[1].int ?? 0), date: row[2].double ?? 0, rowID: id)
+                let preferred = query.preferred.contains(row[1].int ?? 0) || (row[4].int ?? 0) != 0
+                let candidate = (preferred: preferred, date: row[2].double ?? 0, rowID: id)
                 if let old = best[key], beats(old, candidate) { continue }
                 best[key] = candidate
             }
@@ -346,7 +452,11 @@ enum MailStore {
 
     /// The current mailbox and flags of rows already on screen, for a refresh that does not
     /// read the whole list again. Rows Mail removed are missing from the result.
-    struct RowState: Equatable { let mailbox: Int64; let read: Bool; let flagged: Bool }
+    struct RowState: Equatable {
+        let mailbox: Int64; let read: Bool; let flagged: Bool
+        /// Gmail's label mailboxes for the row, such as its Inbox.
+        var labels: [Int64] = []
+    }
     static func states(root: String, rowIDs: [Int64], stop: (() -> Bool)? = nil) throws -> [Int64: RowState] {
         guard !rowIDs.isEmpty else { return [:] }
         return try withIndex(root, stop: stop) { db, cols in
@@ -362,6 +472,7 @@ enum MailStore {
                     result[id] = RowState(mailbox: row[1].int ?? 0, read: (row[2].int ?? 0) != 0, flagged: (row[3].int ?? 0) != 0)
                 }
             }
+            for (id, boxes) in try labels(db, cols, rowIDs: rowIDs) where result[id] != nil { result[id]?.labels = boxes }
             return result
         }
     }
@@ -370,10 +481,8 @@ enum MailStore {
     static func count(root: String, mailboxes: [Int64], distinct: Bool = false) throws -> Int {
         guard !mailboxes.isEmpty else { return 0 }
         return try withIndex(root) { db, cols in
-            let c = Columns(cols)
-            let what = distinct ? "COUNT(DISTINCT \(c.key))" : "COUNT(*)"
-            let sql = "SELECT \(what) FROM messages m WHERE \(c.deleted) = 0 AND m.mailbox IN (" + mailboxes.map { _ in "?" }.joined(separator: ",") + ")"
-            return Int(try db.rows(sql, mailboxes.map { .int($0) }).first?.first?.int ?? 0)
+            let (sql, arguments) = membershipCount(cols, mailboxes, distinct: distinct)
+            return Int(try db.rows(sql, arguments).first?.first?.int ?? 0)
         }
     }
 

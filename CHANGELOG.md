@@ -2,6 +2,16 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Fixed
+
+- **Gmail inboxes show their mail.** Apple Mail keeps each Gmail message once, in All Mail, and marks its Inbox, Sent, and labels in a separate table. Inbox, Unread, Flagged, and label mailboxes now read that table.
+- All Mail shows each Gmail message once and counts it once.
+- Unread counts for Gmail inboxes come from the messages in the Inbox.
+- Archive, Move, and Delete on a Gmail message act on its Inbox, as Mail does. The message body still loads from All Mail.
+- `--diagnose-mail` counts label members for each mailbox kind. It also shows the labels table, its columns and indexes, and the inbox count for each account by number.
+
 ## [1.10.0] - 2026-09-27
 
 ### Fixed

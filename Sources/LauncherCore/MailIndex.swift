@@ -45,6 +45,17 @@ public struct MailMailbox: Equatable, Sendable, Identifiable, Hashable {
         return ([mailRoot, accountID] + parts).joined(separator: "/")
     }
 
+    /// The mailbox Mail's scripts should address for a row: the mailbox the list shows (`viewing`)
+    /// when the row is in it, then the row's Inbox label, then its own mailbox. For Gmail this makes
+    /// Archive and Move take the message out of Inbox, as Mail does.
+    public static func actionTarget(for message: MailSummary, viewing: Int64? = nil, in mailboxes: [MailMailbox]) -> MailMailbox? {
+        let own = mailboxes.first { $0.rowID == message.mailbox }
+        if viewing == message.mailbox { return own }
+        if let viewing, message.labels.contains(viewing), let box = mailboxes.first(where: { $0.rowID == viewing }) { return box }
+        let inbox = message.labels.lazy.compactMap { id in mailboxes.first { $0.rowID == id && $0.role == .inbox } }.first
+        return inbox ?? own
+    }
+
     /// Where the archive for an account lives: its "Archive" mailbox, or Gmail's All Mail.
     public static func archive(for account: String, in mailboxes: [MailMailbox]) -> MailMailbox? {
         let own = mailboxes.filter { $0.accountID == account }
@@ -69,6 +80,8 @@ public struct MailSummary: Equatable, Sendable, Identifiable, Hashable {
     public let conversation: Int64
     /// The same email in two mailboxes, such as Gmail's Inbox and All Mail, has the same key.
     public let messageKey: String
+    /// Gmail's label mailboxes for this row, such as its Inbox. The row itself lives in All Mail (`mailbox`).
+    public var labels: [Int64] = []
     public init(rowID: Int64, mailbox: Int64, subject: String, senderName: String, senderAddress: String, snippet: String,
                 date: Date, read: Bool, flagged: Bool, conversation: Int64, messageKey: String? = nil) {
         self.rowID = rowID; self.mailbox = mailbox; self.subject = subject; self.senderName = senderName; self.senderAddress = senderAddress
@@ -77,6 +90,8 @@ public struct MailSummary: Equatable, Sendable, Identifiable, Hashable {
     }
     public var id: Int64 { rowID }
     public var sender: String { senderName.isEmpty ? senderAddress : senderName }
+    /// Every mailbox that shows this row: its own and its labels.
+    public var mailboxes: [Int64] { [mailbox] + labels.filter { $0 != mailbox } }
 }
 
 public enum MailFiles {

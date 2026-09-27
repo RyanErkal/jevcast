@@ -36,7 +36,7 @@ final class NotchAlertController {
     private var hovering = false
     private var timerTask: Task<Void, Never>?
     private var menuTask: Task<Void, Never>?
-    private var closeTask: Task<Void, Never>?
+    private var closing = NotchCloseSequence()
     private var pointerTimer: Timer?
     private var inputReadyAt = Date.distantFuture
     private var announced: Set<String> = []
@@ -140,10 +140,7 @@ final class NotchAlertController {
     private func endReply() {
         let wasReply = state.mode == .reply
         state.endReply()
-        if wasReply {
-            deferPointerInput()
-            resize(to: state.geometry.panelFrame(state.mode, alert: state.alert))
-        }
+        if wasReply { deferPointerInput() }
         guard let panel else { return }
         panel.allowsKey = false
         if panel.isKeyWindow { panel.resignKey() }
@@ -210,7 +207,7 @@ final class NotchAlertController {
     }
 
     private func present(_ alert: NotchAlert) {
-        closeTask?.cancel()
+        closing.cancel()
         guard let screen = NSScreen.screens.first else { return }
         let geometry = NotchGeometry(screen: screen)
         let previous = state.alert
@@ -221,20 +218,25 @@ final class NotchAlertController {
         let panel = self.panel ?? makePanel()
         let opening = previous == nil || !panel.isVisible
         state.geometry = geometry
+        // The panel stays at its largest size, so the SwiftUI shape does all the visible motion.
+        if panel.frame != geometry.maxPanelFrame { panel.setFrame(geometry.maxPanelFrame, display: false) }
         if opening {
             state.alert = alert
             state.mode = mode
             state.expanded = false
-            panel.setFrame(geometry.panelFrame(mode, alert: alert), display: true)
+            state.closing = false
+            // Lay out and draw the collapsed shape at notch size before the panel is on screen.
+            panel.contentView?.layoutSubtreeIfNeeded()
+            panel.displayIfNeeded()
             panel.orderFrontRegardless()
             panel.ignoresMouseEvents = true
-            // Let the collapsed shape draw once at notch size, then grow.
+            // Grow on the next pass, after the notch-size frame is on screen.
             DispatchQueue.main.async { [weak self] in
-                guard let self, self.queue.presentation != nil, self.available else { return }
+                guard let self, self.queue.presentation != nil, self.available, self.panel?.isVisible == true else { return }
                 self.withMotion { self.state.expanded = true }
             }
         } else {
-            resize(to: geometry.panelFrame(mode, alert: alert))
+            // A new alert or mode morphs from wherever the shape is now, also halfway through a close.
             withMotion { state.present(alert, mode: mode) }
         }
         if opening || !wasExpanded || previous != alert || previousMode != mode { deferPointerInput() }
@@ -266,7 +268,6 @@ final class NotchAlertController {
     private func setMode(_ mode: NotchState.Mode) {
         guard panel != nil, state.mode != mode else { return }
         deferPointerInput()
-        resize(to: state.geometry.panelFrame(mode, alert: state.alert))
         withMotion { state.mode = mode }
     }
 
@@ -288,21 +289,6 @@ final class NotchAlertController {
         if hovering != inside && state.expanded && panel.isVisible { hover(inside) }
     }
 
-    /// Grows at once; shrinks after the shape has animated smaller, so nothing is clipped.
-    private func resize(to frame: CGRect) {
-        guard let panel else { return }
-        if frame.height >= panel.frame.height && frame.width >= panel.frame.width {
-            panel.setFrame(frame, display: true)
-        } else {
-            Task { @MainActor [weak self, weak panel] in
-                try? await Task.sleep(nanoseconds: 350_000_000)
-                guard let self, let panel, let alert = self.state.alert,
-                      self.state.geometry.panelFrame(self.state.mode, alert: alert) == frame else { return }
-                panel.setFrame(frame, display: true)
-            }
-        }
-    }
-
     /// VoiceOver hears a new alert once. Running indicators are not announced.
     private func announce(_ alert: NotchAlert) {
         let ids = alert.isStack ? alert.stack.map(\.id) : [alert.id]
@@ -317,13 +303,14 @@ final class NotchAlertController {
 
     private func hidePanel() {
         pointerTimer?.invalidate(); pointerTimer = nil
-        closeTask?.cancel()
+        closing.cancel()
         endReply()
         // A hidden panel never sends the pointer's exit.
         hovering = false
         panel?.orderOut(nil)
         state.alert = nil
         state.expanded = false
+        state.closing = false
         state.mode = .card
     }
 
@@ -333,17 +320,37 @@ final class NotchAlertController {
         menuTask?.cancel()
         endReply()
         hovering = false
-        guard state.alert != nil else { panel?.orderOut(nil); return }
-        panel?.ignoresMouseEvents = true
-        withMotion { state.expanded = false }
-        closeTask?.cancel()
-        closeTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 350_000_000)
-            guard !Task.isCancelled, let self, self.queue.presentation == nil else { return }
-            self.state.alert = nil
-            self.state.mode = .card
-            self.panel?.orderOut(nil)
+        guard state.alert != nil, let panel, panel.isVisible else { finishClose(); return }
+        panel.ignoresMouseEvents = true
+        let token = closing.begin()
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        // Content fades first; then the shape retracts into the notch; the panel leaves only once the shape has settled.
+        withAnimation(NotchMotion.contentHide(reduceMotion: reduceMotion)) {
+            state.closing = true
+        } completion: { [weak self] in
+            MainActor.assumeIsolated { self?.retract(token, reduceMotion: reduceMotion) }
         }
+    }
+
+    private func retract(_ token: Int, reduceMotion: Bool) {
+        guard closing.isCurrent(token), queue.presentation == nil else { return }
+        withAnimation(NotchMotion.settle(closing: true, reduceMotion: reduceMotion), completionCriteria: .removed) {
+            state.expanded = false
+        } completion: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.closing.finish(token), self.queue.presentation == nil else { return }
+                self.finishClose()
+            }
+        }
+    }
+
+    private func finishClose() {
+        closing.cancel()
+        panel?.orderOut(nil)
+        state.alert = nil
+        state.expanded = false
+        state.closing = false
+        state.mode = .card
     }
 
     // MARK: Timers
@@ -386,7 +393,6 @@ final class NotchAlertController {
     }
 
     private func withMotion(_ change: () -> Void) {
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { change() }
-        else { withAnimation(NotchStyle.morph(reduceMotion: false), change) }
+        withAnimation(NotchStyle.morph(reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion), change)
     }
 }

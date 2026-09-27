@@ -91,6 +91,23 @@ struct NotchGeometry: Equatable {
         return CGRect(x: screenFrame.midX - width / 2, y: screenFrame.maxY - height, width: width, height: height)
     }
 
+    /// The largest shape any mode or stack can draw. The island lays out in this canvas, so modes morph without layout jumps.
+    var maxShapeSize: CGSize {
+        let list = Self.listHeader + CGFloat(Self.maxRows) * Self.rowHeight + Self.listBottom
+        let body = max(list, Self.detailBody, Self.cardBody + Self.choicesRow, Self.replyBody, Self.briefBody)
+        let height = notchHeight + max(body + (hasNotch ? 0 : Self.plainExtra), bodyHeight(.pill, alert: nil))
+        return CGSize(width: max(width(.pill), width(.card)), height: height)
+    }
+
+    /// The panel is this size while it is on screen, so it never resizes while the shape morphs.
+    /// Pointer input outside the shape passes through (see `contains`).
+    var maxPanelFrame: CGRect {
+        let size = maxShapeSize
+        let width = size.width + Self.margin
+        let height = size.height + (hasNotch ? 0 : Self.topGap) + Self.margin
+        return CGRect(x: screenFrame.midX - width / 2, y: screenFrame.maxY - height, width: width, height: height)
+    }
+
     /// Screen coordinates. Transparent margins, the top gap, and rounded corners pass through.
     func contains(_ point: CGPoint, mode: NotchState.Mode, alert: NotchAlert) -> Bool {
         let size = shapeSize(mode, alert: alert)

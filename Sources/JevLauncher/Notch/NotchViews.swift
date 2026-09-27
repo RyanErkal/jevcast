@@ -11,38 +11,32 @@ struct NotchHandlers {
     static let none = NotchHandlers(perform: { _, _ in }, submit: { _ in }, cancel: {})
 }
 
-/// The panel's root view. The controller sets `state.alert`, `state.mode`, and `state.expanded`;
-/// this view draws them. On arrival the island pauses at compact for a beat, so it visibly grows out of the notch.
+/// The panel's root view. The controller sets `state.alert`, `state.mode`, `state.expanded`, and `state.closing`;
+/// this view draws them. The panel is already at its largest size, so only the shape moves.
 struct NotchAlertView: View {
     @ObservedObject var state: NotchState
     let action: (String) -> Void
     let hover: (Bool) -> Void
-    @State private var staged = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
             if let alert = state.alert {
                 NotchIsland(alert: alert, geometry: state.geometry, mode: mode, replyTarget: state.replyTarget,
-                            handlers: handlers)
+                            handlers: handlers, canvas: state.geometry.maxShapeSize,
+                            contentHidden: state.closing, retracting: !state.expanded)
+                    // Reduce Motion: no growth out of the notch, only a cross-fade.
+                    .opacity(reduceMotion && !state.expanded ? 0 : 1)
                     .onHover(perform: hover)
             }
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .environment(\.colorScheme, .dark)
-        .onChange(of: state.expanded) { _, open in
-            guard open else { staged = true; return }
-            if reduceMotion { staged = false; return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
-                withAnimation(NotchStyle.morph(reduceMotion: false)) { staged = false }
-            }
-        }
     }
 
     private var mode: NotchMode {
-        guard state.expanded else { return .collapsed }
-        if staged && !reduceMotion { return .compact }
+        guard state.expanded || reduceMotion else { return .collapsed }
         return NotchMode(state.mode)
     }
 
@@ -56,6 +50,8 @@ struct NotchAlertView: View {
 }
 
 /// The black island in one mode. It draws only from its inputs, so snapshots can render any state.
+/// Width and height follow separate springs, so the shape widens slightly ahead of growing down.
+/// Content is laid out at its final size and clipped to the moving outline; only the path, opacity, and offset animate.
 struct NotchIsland: View {
     let alert: NotchAlert
     let geometry: NotchGeometry
@@ -66,25 +62,43 @@ struct NotchIsland: View {
     var liveField = true
     /// Text shown in the reply field when it opens. Snapshots use it.
     var draft = ""
+    /// A fixed area to lay out in, larger than any mode. Nil sizes the view to the shape, for snapshots.
+    var canvas: CGSize?
+    /// True while the island closes: content fades out before the shape retracts.
+    var contentHidden = false
+    /// Picks the faster retract springs.
+    var retracting = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var parts
 
     private var p: NotchPresentation { alert.presentation }
     private var hasNotch: Bool { geometry.hasNotch }
-    private var shape: NotchShape {
-        let radius = NotchStyle.bottomRadius(mode, hasNotch: hasNotch)
-        return NotchShape(bottomRadius: radius, topRadius: hasNotch ? 0 : radius, topFlare: hasNotch ? (mode.isOpen ? 10 : 7) : 0)
-    }
+
+    private struct ContentKey: Hashable { let id: String; let mode: NotchMode }
 
     var body: some View {
         let size = NotchStyle.size(mode, alert, geometry)
+        let area = canvas ?? size
+        let outline = NotchStyle.outline(mode, hasNotch: hasNotch)
         ZStack(alignment: .top) {
-            NotchSurface(shape: shape, mode: mode)
-            content
-                .frame(width: size.width, height: size.height, alignment: .top)
-                .clipShape(shape)
+            // One keyed child: a new alert or mode cross-fades instead of changing in place.
+            ForEach([ContentKey(id: alert.id, mode: mode)], id: \.self) { key in
+                let own = NotchStyle.size(key.mode, alert, geometry)
+                content(key.mode)
+                    .frame(width: own.width, height: own.height, alignment: .top)
+                    .frame(width: area.width, height: area.height, alignment: .top)
+                    .transition(NotchMotion.contentTransition(reduceMotion: reduceMotion))
+            }
         }
-        .frame(width: size.width, height: size.height)
-        .contentShape(shape)
+        .opacity(contentHidden ? 0 : 1)
+        .frame(width: area.width, height: area.height, alignment: .top)
+        .animation(NotchMotion.height(closing: retracting, reduceMotion: reduceMotion)) {
+            $0.modifier(IslandOutline(height: size.height, outline: outline, open: mode.isOpen))
+        }
+        .animation(NotchMotion.width(closing: retracting, reduceMotion: reduceMotion)) {
+            $0.modifier(IslandWidth(width: size.width))
+        }
+        .contentShape(NotchIslandShape(width: size.width, height: size.height, outline: outline))
         .scaleEffect(x: 1, y: !hasNotch && mode == .collapsed ? 0.6 : 1, anchor: .top)
         .opacity(!hasNotch && mode == .collapsed ? 0 : 1)
         .offset(y: hasNotch ? 0 : (mode == .collapsed ? -NotchGeometry.pillBody : NotchGeometry.topGap))
@@ -92,15 +106,13 @@ struct NotchIsland: View {
         .accessibilityLabel("\(p.title). \(p.message)\(p.detail.map { ". " + $0 } ?? "")")
     }
 
-    @ViewBuilder private var content: some View {
-        let fade = NotchStyle.contentFade(reduceMotion: reduceMotion)
+    @ViewBuilder private func content(_ mode: NotchMode) -> some View {
         switch mode {
         case .collapsed: Color.clear
-        case .compact: compact.transition(fade)
-        case .card: card.transition(fade)
-        case .detail:
-            Group { if alert.isStack { list } else { runningDetail } }.transition(fade)
-        case .reply: reply.transition(fade)
+        case .compact: compact
+        case .card: card
+        case .detail: if alert.isStack { list } else { runningDetail }
+        case .reply: reply
         }
     }
 
@@ -111,6 +123,7 @@ struct NotchIsland: View {
     private var compact: some View {
         HStack(spacing: 8) {
             NotchIcon(p: p, diameter: 20, reduceMotion: reduceMotion)
+                .matchedGeometryEffect(id: "icon", in: parts)
             if hasNotch {
                 Spacer(minLength: geometry.notchWidth)
             } else {
@@ -176,10 +189,12 @@ struct NotchIsland: View {
     private func header(_ p: NotchPresentation, lines: Int = 1, trailing: some View = EmptyView()) -> some View {
         HStack(alignment: .center, spacing: 12) {
             NotchIcon(p: p, diameter: 32, reduceMotion: reduceMotion)
+                .matchedGeometryEffect(id: "icon", in: parts)
             VStack(alignment: .leading, spacing: 2) {
                 Text(p.title)
                     .font(NotchStyle.Font.title).foregroundStyle(.white)
                     .lineLimit(1)
+                    .matchedGeometryEffect(id: "title", in: parts, properties: .position)
                 Text(subtitle(p))
                     .font(NotchStyle.Font.message).foregroundStyle(NotchStyle.secondaryText)
                     .lineLimit(lines)
@@ -261,6 +276,7 @@ struct NotchIsland: View {
             if hasNotch { band(collapse: true) }
             HStack(spacing: 8) {
                 Text(p.title).font(NotchStyle.Font.title).foregroundStyle(.white).lineLimit(1)
+                    .matchedGeometryEffect(id: "title", in: parts, properties: .position)
                 if alert.stackCount > NotchGeometry.maxRows {
                     Text("\(NotchGeometry.maxRows) of \(alert.stackCount)")
                         .font(NotchStyle.Font.meta).foregroundStyle(NotchStyle.metaText)
@@ -324,6 +340,45 @@ struct NotchIsland: View {
             NotchReplyRow(live: liveField, initial: draft, submit: handlers.submit, cancel: handlers.cancel)
         }
         .modifier(IslandPadding(hasNotch: hasNotch))
+    }
+}
+
+/// Passes the animated width down to `IslandOutline`, which follows its own spring.
+private struct IslandWidth: ViewModifier, Animatable {
+    var width: CGFloat
+    var animatableData: CGFloat {
+        get { width }
+        set { width = newValue }
+    }
+    func body(content: Content) -> some View { content.environment(\.notchIslandWidth, width) }
+}
+
+private struct IslandWidthKey: EnvironmentKey { static let defaultValue: CGFloat = 0 }
+
+private extension EnvironmentValues {
+    var notchIslandWidth: CGFloat {
+        get { self[IslandWidthKey.self] }
+        set { self[IslandWidthKey.self] = newValue }
+    }
+}
+
+/// Draws the black surface behind the content and clips the content to it, at the animated size and radii.
+private struct IslandOutline: ViewModifier, Animatable {
+    var height: CGFloat
+    var outline: NotchShape
+    let open: Bool
+    @Environment(\.notchIslandWidth) private var width
+
+    var animatableData: AnimatablePair<CGFloat, NotchShape.AnimatableData> {
+        get { AnimatablePair(height, outline.animatableData) }
+        set { height = newValue.first; outline.animatableData = newValue.second }
+    }
+
+    func body(content: Content) -> some View {
+        let shape = NotchIslandShape(width: width, height: height, outline: outline)
+        content
+            .clipShape(shape)
+            .background(alignment: .top) { NotchSurface(shape: shape, open: open) }
     }
 }
 

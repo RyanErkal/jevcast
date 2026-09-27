@@ -20,6 +20,8 @@ final class NotchState: ObservableObject {
     /// True once the shape has grown out of the notch. False while it opens or closes.
     @Published var expanded = false
     @Published var mode: Mode = .card
+    /// True while the island closes: content has faded, and the shape retracts next.
+    @Published var closing = false
     @Published var geometry = NotchGeometry(screenFrame: .zero, notchWidth: 0, notchHeight: 0)
     /// The alert the reply field answers. Nil unless `mode == .reply`.
     @Published var replyTarget: String?
@@ -28,6 +30,7 @@ final class NotchState: ObservableObject {
         self.alert = alert
         self.mode = mode
         expanded = true
+        closing = false
     }
 
     func endReply() {

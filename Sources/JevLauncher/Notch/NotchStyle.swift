@@ -2,7 +2,7 @@ import SwiftUI
 
 /// What the island draws. `collapsed` is the notch itself; `compact` is the pill beside it.
 /// The others follow `NotchState.Mode`.
-enum NotchMode: Equatable {
+enum NotchMode: Hashable {
     case collapsed, compact, card, detail, reply
 
     init(_ mode: NotchState.Mode) {
@@ -84,26 +84,39 @@ enum NotchStyle {
         }
     }
 
-    /// A critically damped spring: the shape grows out of the notch and settles without a bounce.
-    static func morph(reduceMotion: Bool) -> Animation {
-        reduceMotion ? .easeInOut(duration: 0.18) : .spring(response: 0.42, dampingFraction: 0.92, blendDuration: 0.1)
+    /// The outline for a mode: flat top with outward curves under a notch, round corners elsewhere.
+    static func outline(_ mode: NotchMode, hasNotch: Bool) -> NotchShape {
+        let radius = bottomRadius(mode, hasNotch: hasNotch)
+        return NotchShape(bottomRadius: radius, topRadius: hasNotch ? 0 : radius, topFlare: hasNotch ? (mode.isOpen ? 10 : 7) : 0)
     }
 
-    /// Content fades in once the shape has mostly grown, and fades out at once.
-    static func contentFade(reduceMotion: Bool) -> AnyTransition {
-        reduceMotion ? .opacity : .asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.22).delay(0.08)),
-                                              removal: .opacity.animation(.easeIn(duration: 0.1)))
+    /// The ambient spring for mode changes. The shape's own width and height springs are in `NotchMotion`.
+    static func morph(reduceMotion: Bool) -> Animation {
+        NotchMotion.settle(closing: false, reduceMotion: reduceMotion)
+    }
+}
+
+/// The outline drawn at a given size, top centre of whatever rect it fills. Hit testing and clipping use the same path.
+struct NotchIslandShape: Shape {
+    var width: CGFloat
+    var height: CGFloat
+    var outline: NotchShape
+
+    func path(in rect: CGRect) -> Path {
+        outline.path(in: CGRect(x: rect.midX - width / 2, y: rect.minY, width: width, height: height))
     }
 }
 
 /// The island's solid black shape, a hairline edge for dark wallpapers, and a neutral shadow while open.
 struct NotchSurface: View {
-    let shape: NotchShape
-    let mode: NotchMode
+    let shape: NotchIslandShape
+    let open: Bool
 
     var body: some View {
         shape.fill(Color.black)
-            .overlay { shape.stroke(NotchStyle.hairline, lineWidth: 0.5).opacity(mode.isOpen ? 1 : 0) }
-            .shadow(color: .black.opacity(mode.isOpen ? 0.35 : 0), radius: 16, y: 6)
+            .overlay { shape.stroke(NotchStyle.hairline, lineWidth: 0.5).opacity(open ? 1 : 0) }
+            .shadow(color: .black.opacity(open ? 0.35 : 0), radius: 16, y: 6)
+            // Rasterise the shadow on the GPU; the margin keeps the shadow and the top flare inside the layer.
+            .padding(32).drawingGroup().padding(-32)
     }
 }

@@ -1,7 +1,7 @@
 import Foundation
 import LauncherCore
 
-/// Invented automations, runs, and clients for `--snapshot-ui --demo` and tests. No real files or apps.
+/// Invented automations, runs, and dashboards for `--snapshot-ui --demo` and tests. No real files or apps.
 @MainActor
 struct AutomationsDemoData {
     var automations: [Automation] = []
@@ -9,7 +9,7 @@ struct AutomationsDemoData {
     var runnerStatus: AutomationCenter.RunnerStatus = .running(since: Date().addingTimeInterval(-7200))
     var codex: [CodexAutomation] = []
     var codexIssues: [String: [String]] = [:]
-    var clients: [AutomationCenter.ClientEntry] = []
+    var dashboards: [AutomationCenter.DashboardEntry] = []
     var quillTasks: [QuillTask] = []
     var quillRuns: [QuillTaskRun] = []
     var outputs: [String: String] = [:]
@@ -30,20 +30,20 @@ struct AutomationsDemoData {
                                                      workingDirectory: home + "/Desktop", allowedRoots: [home + "/Desktop"], output: .proposal)),
                               schedule: Schedule(rule: .rrule("FREQ=WEEKLY;BYDAY=SU;BYHOUR=18;BYMINUTE=0"), anchor: week), enabled: true, created: week)
         tidy.notes = "Keeps the Desktop clear for screen sharing."
-        let stein = Automation(id: "stein-metrics-demo", name: "Stein metrics", symbol: "chart.line.uptrend.xyaxis",
-                               kind: .scriptWithDiagnosis(ScriptTask(executable: "/opt/homebrew/bin/bun",
-                                                                     arguments: ["scripts/utils/redesign-daily-metrics.ts", "--client", "stein-firm"],
-                                                                     workingDirectory: home + "/Dev/docs"),
-                                                          AgentTask(prompt: AutomationDraft.defaultDiagnosisPrompt, workingDirectory: home + "/Dev/docs")),
+        let stein = Automation(id: "sales-data-demo", name: "Sales data refresh", symbol: "chart.line.uptrend.xyaxis",
+                               kind: .scriptWithDiagnosis(ScriptTask(executable: "/bin/zsh",
+                                                                     arguments: ["scripts/refresh-sales.sh", "--out", "data/sales.json"],
+                                                                     workingDirectory: home + "/Projects/reports"),
+                                                          AgentTask(prompt: AutomationDraft.defaultDiagnosisPrompt, workingDirectory: home + "/Projects/reports")),
                                schedule: Schedule(rule: .rrule("FREQ=HOURLY;INTERVAL=4"), anchor: week),
-                               policy: Policy(retries: 1, sharedLock: "docs-metrics"), enabled: true, created: week,
-                               source: .init(app: .codex, sourceID: "stein-firm-daily-metrics", path: home + "/.codex/automations/stein-firm-daily-metrics/automation.toml", hash: "demo"))
-        let report = Automation(id: "weekly-client-report-demo", name: "Weekly client report", symbol: "doc.text.magnifyingglass",
-                                kind: .agent(AgentTask(runner: .claude, prompt: "Write this week's client report from the metrics files.", model: "opus", effort: .high,
-                                                       workingDirectory: home + "/Dev/docs", access: .workspaceWriteNetwork, output: .report)),
+                               policy: Policy(retries: 1, sharedLock: "reports-data"), enabled: true, created: week,
+                               source: .init(app: .codex, sourceID: "sales-data-refresh", path: home + "/.codex/automations/sales-data-refresh/automation.toml", hash: "demo"))
+        let report = Automation(id: "weekly-report-demo", name: "Weekly report", symbol: "doc.text.magnifyingglass",
+                                kind: .agent(AgentTask(runner: .claude, prompt: "Write this week's report from the data files.", model: "opus", effort: .high,
+                                                       workingDirectory: home + "/Projects/reports", access: .workspaceWriteNetwork, output: .report)),
                                 schedule: Schedule(rule: .rrule("FREQ=WEEKLY;BYDAY=MO;BYHOUR=8;BYMINUTE=0"), anchor: week), enabled: true, created: week)
-        let backup = Automation(id: "docs-backup-demo", name: "Docs backup", symbol: "externaldrive",
-                                kind: .script(ScriptTask(executable: "/bin/zsh", arguments: ["scripts/backup.sh"], workingDirectory: home + "/Dev/docs")),
+        let backup = Automation(id: "docs-backup-demo", name: "Documents backup", symbol: "externaldrive",
+                                kind: .script(ScriptTask(executable: "/bin/zsh", arguments: ["scripts/backup.sh"], workingDirectory: home + "/Documents")),
                                 schedule: Schedule(rule: .manual, anchor: week), enabled: false, created: week)
         d.automations = [tidy, stein, report, backup]
 
@@ -59,12 +59,12 @@ struct AutomationsDemoData {
                            tokens: TokenUsage(input: 18_400, cachedInput: 9_000, output: 1_250))
         d.runs[tidy.id] = [approval,
                            run(tidy, "20260919T180000Z-a1", .succeeded, ago: 7 * 86400, length: 81, summary: "Moved 6 files", tokens: TokenUsage(input: 16_000, output: 900))]
-        d.runs[stein.id] = [run(stein, failedRunID, .failed, ago: 3 * 3600, length: 41, summary: "Meta API returned an error",
-                                error: "Meta Graph API: (#17) User request limit reached. Exit status 1."),
+        d.runs[stein.id] = [run(stein, failedRunID, .failed, ago: 3 * 3600, length: 41, summary: "The sales API returned an error",
+                                error: "Sales API: request limit reached (429). Exit status 1."),
                             run(stein, "20260926T080000Z-s2", .succeeded, ago: 7 * 3600, length: 38, summary: "Refreshed 3 sources")]
         d.runs[report.id] = [run(report, "20260926T140000Z-r1", .running, ago: 240, length: 0, summary: "", trigger: .manual)]
-        d.outputs[failedRunID] = "[metrics] fetching insights for act_1234…\n[metrics] retry 1/1 after 30s\nError: (#17) User request limit reached\n    at fetchInsights (scripts/utils/meta.ts:88)"
-        d.outputs["20260926T080000Z-s2"] = "## Refresh complete\n\n- **Meta**: 3 days closed through 2026-09-25\n- **CRM**: 42 forms\n\nNo problems found."
+        d.outputs[failedRunID] = "[sales] fetching orders…\n[sales] retry 1/1 after 30s\nError: request limit reached (429)\n    at fetchOrders (scripts/refresh-sales.sh:41)"
+        d.outputs["20260926T080000Z-s2"] = "## Refresh complete\n\n- **Orders**: 3 days closed through 2026-09-25\n- **Leads**: 42 new\n\nNo problems found."
 
         let items: [(String, ProposalItem.Operation, String, String?, String)] = [
             ("1", .mkdir, home + "/Desktop/Screenshots/2026-09", nil, "Folder for this month's screenshots"),
@@ -84,17 +84,21 @@ struct AutomationsDemoData {
             checked: Array(checked), refused: ["4": "The file changed after the proposal was made."], roots: [home + "/Desktop"], digest: "demo")
 
         d.codex = [
-            CodexAutomation(id: "stein-firm-daily-metrics", name: "Stein Firm daily metrics", kind: "cron", status: .paused,
-                            rrule: "RRULE:FREQ=HOURLY;INTERVAL=4", prompt: "Run the metrics script.", path: home + "/.codex/automations/stein-firm-daily-metrics/automation.toml", hash: "a"),
-            CodexAutomation(id: "goodrich-weekly-meta-ads-report", name: "Goodrich weekly report", kind: "cron", status: .active,
-                            rrule: "RRULE:FREQ=WEEKLY;BYDAY=MO;BYHOUR=9;BYMINUTE=0", prompt: "Write the report.", path: home + "/.codex/automations/goodrich-weekly-meta-ads-report/automation.toml", hash: "b")
+            CodexAutomation(id: "sales-data-refresh", name: "Sales data refresh", kind: "cron", status: .paused,
+                            rrule: "RRULE:FREQ=HOURLY;INTERVAL=4", prompt: "Run the data script.", path: home + "/.codex/automations/sales-data-refresh/automation.toml", hash: "a"),
+            CodexAutomation(id: "weekly-summary", name: "Weekly summary", kind: "cron", status: .active,
+                            rrule: "RRULE:FREQ=WEEKLY;BYDAY=MO;BYHOUR=9;BYMINUTE=0", prompt: "Write the summary.", path: home + "/.codex/automations/weekly-summary/automation.toml", hash: "b")
         ]
-        d.codexIssues["goodrich-weekly-meta-ads-report"] = ["Still ACTIVE in Codex. Pause it there first.", "No working folder in the source. Choose one before turning it on."]
+        d.codexIssues["weekly-summary"] = ["Still ACTIVE in Codex. Pause it there first.", "No working folder in the source. Choose one before turning it on."]
 
-        d.clients = [client("stein", "Stein Firm", .stein, now: now, fresh: true,
-                            kpis: ["spend": 4210.5, "formQualified": 37, "costPerFormQualified": 113.8, "metaFormQualified": 44]),
-                     client("redesign", "ReDesign", .redesign, now: now, fresh: false,
-                            kpis: ["spend": 2890, "paidTaggedForms": 19, "costPerForm": 152.1, "qualifiedMeetings": NSNull()])]
+        d.dashboards = [
+            dashboard("sales", "Sales", now: now, updated: -3600, automationID: stein.id,
+                      json: ["totals": ["revenue": 18420.5, "orders": 214, "conversion": 3.4], "generated_at": ""],
+                      metrics: [("Revenue", "totals.revenue", .currency), ("Orders", "totals.orders", .number), ("Conversion", "totals.conversion", .percent)]),
+            dashboard("support", "Support", now: now, updated: -30 * 3600, automationID: nil,
+                      json: ["queue": ["open": 12, "median_reply_seconds": 2460], "status": "Normal", "generated_at": ""],
+                      metrics: [("Open tickets", "queue.open", .number), ("Median reply", "queue.median_reply_seconds", .duration), ("Status", "status", .text)])
+        ]
 
         d.quillTasks = [QuillTask(id: "brief", name: "Morning brief", prompt: "Brief me on today's meetings and unread mail.",
                                   schedule: .daily(hour: 8, minute: 0, weekdays: [2, 3, 4, 5, 6]), contexts: [.calendar, .unreadMail], created: week)]
@@ -103,21 +107,14 @@ struct AutomationsDemoData {
         return d
     }
 
-    private static func client(_ id: String, _ name: String, _ profile: ClientMetricsProfile, now: Date, fresh: Bool, kpis: [String: Any]) -> AutomationCenter.ClientEntry {
-        let iso = ISO8601DateFormatter()
-        let json: [String: Any] = [
-            "schemaVersion": 4, "generatedAt": iso.string(from: now.addingTimeInterval(-3600)), "reportingTimezone": "America/Los_Angeles",
-            "reportRange": ["from": "2026-09-01", "to": "2026-09-25"],
-            "sourceFreshness": [
-                ["source": "meta", "last_success_at": iso.string(from: now.addingTimeInterval(fresh ? -3600 : -14 * 3600)), "last_status": "success", "closed_day_through": "2026-09-25"],
-                ["source": "crm", "last_success_at": iso.string(from: now.addingTimeInterval(fresh ? -2 * 3600 : -40 * 3600)), "last_status": fresh ? "success" : "error", "last_error": fresh ? "" : "Token expired"]
-            ],
-            "derivedKpis": kpis
-        ]
-        let data = (try? JSONSerialization.data(withJSONObject: json)) ?? Data()
-        let snapshot = try? ClientMetricsReader.decode(data, profile: profile)
-        let config = AutomationCenter.ClientConfig(id: id, name: name, profile: profile, metricsPath: "/Users/demo/metrics/\(id).json",
-                                                   dashboardPath: "/Users/demo/metrics/\(id).html", automationID: nil)
-        return .init(config: config, snapshot: snapshot, readError: nil, readAt: now)
+    private static func dashboard(_ id: String, _ name: String, now: Date, updated: TimeInterval, automationID: String?,
+                                  json: [String: Any], metrics: [(String, String, DashboardFormat)]) -> AutomationCenter.DashboardEntry {
+        var root = json
+        root["generated_at"] = ISO8601DateFormatter().string(from: now.addingTimeInterval(updated))
+        let config = DashboardConfig(id: id, name: name, filePath: "/Users/demo/Projects/reports/data/\(id).json",
+                                     metrics: metrics.map { DashboardMetric(id: id + "." + $0.1, label: $0.0, keyPath: $0.1, format: $0.2) },
+                                     updatedAtKeyPath: "generated_at", automationID: automationID,
+                                     openPath: "/Users/demo/Projects/reports/\(id).html")
+        return .init(config: config, snapshot: DashboardReader.snapshot(root, config: config), readError: nil, readAt: now)
     }
 }

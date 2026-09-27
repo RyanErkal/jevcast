@@ -7,7 +7,7 @@ import LauncherCore
 ///
 /// INTERFACE CONTRACT: views code against the members below. Keep every signature.
 /// Watching is in `AutomationCenter+Watch.swift`, the runner and tools in `+Runner`, proposals in `+Proposals`,
-/// clients in `+Clients`, and alerts in `+Alerts`.
+/// dashboards in `+Dashboards`, and alerts in `+Alerts`.
 @MainActor
 final class AutomationCenter: ObservableObject {
     enum RunnerStatus: Equatable {
@@ -35,20 +35,10 @@ final class AutomationCenter: ObservableObject {
         var isRunning: Bool { if case .running = self { return true } else { return false } }
     }
 
-    /// A configured client metrics sidecar. Stored in `Automations/clients.json`.
-    struct ClientConfig: Codable, Equatable, Identifiable {
-        var id: String
-        var name: String
-        var profile: ClientMetricsProfile
-        var metricsPath: String
-        var dashboardPath: String?
-        /// The automation that refreshes this client's metrics, for "Refresh now".
-        var automationID: String?
-    }
-
-    struct ClientEntry: Identifiable {
-        var config: ClientConfig
-        var snapshot: ClientMetricsSnapshot?
+    /// A dashboard card and its last read.
+    struct DashboardEntry: Identifiable {
+        var config: DashboardConfig
+        var snapshot: DashboardSnapshot?
         /// Set when the last read failed; the previous snapshot stays shown as stale.
         var readError: String?
         var readAt: Date?
@@ -73,7 +63,7 @@ final class AutomationCenter: ObservableObject {
     @Published var runnerStatus: RunnerStatus = .off
     @Published var settings = AutomationSettings()
     @Published var codex: [CodexAutomation] = []
-    @Published var clients: [ClientEntry] = []
+    @Published var dashboards: [DashboardEntry] = []
     @Published var codexTool: ToolInfo?
     @Published var claudeTool: ToolInfo?
 
@@ -90,7 +80,7 @@ final class AutomationCenter: ObservableObject {
     @Published var applyingProposal = false
     /// The Codex registry folder, read only.
     nonisolated static let codexFolder = URL(fileURLWithPath: NSHomeDirectory() + "/.codex/automations", isDirectory: true)
-    /// Snapshot and demo runs: a temporary store, no runner, tools, Codex, clients seeding, or alerts.
+    /// Snapshot and demo runs: a temporary store, no runner, tools, Codex, dashboard migration, or alerts.
     let isolated: Bool
     /// App-level alert switches, set by the app from Preferences.
     var alertSettings: () -> AlertSettings = { AlertSettings() }
@@ -103,10 +93,10 @@ final class AutomationCenter: ObservableObject {
     var started = false
     var signalObserver: AutomationSignal.Observer?
     var rootWatch: DirectoryWatch?
-    var clientWatches: [DirectoryWatch] = []
-    var clientViewers = 0
-    var clientReadGeneration = 0
-    var clientRefreshGenerations: [String: Int] = [:]
+    var dashboardWatches: [DirectoryWatch] = []
+    var dashboardViewers = 0
+    var dashboardReadGeneration = 0
+    var dashboardRefreshGenerations: [String: Int] = [:]
     var reloadTask: Task<Void, Never>?
     var rescanTask: Task<Void, Never>?
     var quietTask: Task<Void, Never>?
@@ -145,7 +135,7 @@ final class AutomationCenter: ObservableObject {
         reload()
         if !isolated {
             loadCodex()
-            loadClients(seed: true)
+            loadDashboards(migrate: true)
             // After launch settles; reads `--version` of the saved or found CLIs off the main thread.
             Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: 5_000_000_000)
@@ -176,14 +166,14 @@ final class AutomationCenter: ObservableObject {
         started = false
         signalObserver = nil
         rootWatch = nil
-        clientWatches = []
+        dashboardWatches = []
         reloadTask?.cancel(); rescanTask?.cancel(); quietTask?.cancel()
     }
 
     /// Re-reads everything now.
     func refresh() {
         reload()
-        if !isolated { loadCodex(); loadClients(seed: false) }
+        if !isolated { loadCodex(); loadDashboards(migrate: false) }
     }
 
     // MARK: Definitions

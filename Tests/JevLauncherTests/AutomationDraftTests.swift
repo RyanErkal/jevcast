@@ -69,7 +69,7 @@ final class AutomationDraftTests: XCTestCase {
     }
 
     func testBuildSavesNewAutomationsPausedAndKeepsEditsIdentity() throws {
-        var d = AutomationTemplate.desktopTidy.draft(home: "/Users/x")
+        var d = AutomationTemplate.desktopTidy.draft()
         let built = try XCTUnwrap(d.build(isExecutable: { _ in true }))
         XCTAssertFalse(built.enabled, "New automations are saved paused.")
         XCTAssertTrue(AutomationID.isValid(built.id))
@@ -86,13 +86,26 @@ final class AutomationDraftTests: XCTestCase {
         XCTAssertEqual(edited.name, "Desk")
     }
 
-    func testMetricsTemplateIsScriptWithDiagnosis() throws {
-        let d = AutomationTemplate.metricsRefresh.draft(bunPath: "/opt/homebrew/bin/bun")
+    func testDataRefreshTemplateIsScriptWithDiagnosis() throws {
+        var d = AutomationTemplate.dataRefresh.draft()
+        XCTAssertEqual(d.kind, .scriptWithDiagnosis)
+        XCTAssertEqual(d.agentFolder, "")
+        d.scriptFolder = "~/Projects"
         let built = try XCTUnwrap(d.build(isExecutable: { _ in true }))
         guard case .scriptWithDiagnosis(let script, let agent) = built.kind else { return XCTFail() }
-        XCTAssertEqual(script.arguments, ["scripts/utils/redesign-daily-metrics.ts", "--client", "stein-firm"])
+        XCTAssertEqual(script.arguments, ["path/to/refresh-script.sh", "--out", "path/to/data.json"])
         XCTAssertEqual(agent.access, .readOnly)
-        XCTAssertEqual(built.policy.sharedLock, "docs-metrics")
         XCTAssertEqual(built.schedule.rule, .rrule("FREQ=HOURLY;INTERVAL=4"))
+    }
+
+    /// Templates are for anyone: no personal folders, clients, or scripts.
+    func testTemplatesHoldNoPersonalPaths() {
+        for template in AutomationTemplate.allCases {
+            let d = template.draft()
+            let text = [d.name, d.prompt, d.program, d.argumentsText, d.scriptFolder, d.agentFolder, d.notes, d.sharedLock].joined(separator: " ").lowercased()
+            for word in ["dev/docs", "stein", "redesign", "robert", "meta", "client"] {
+                XCTAssertFalse(text.contains(word), "\(template) mentions \(word)")
+            }
+        }
     }
 }

@@ -3,7 +3,7 @@ import LauncherCore
 
 /// Starting points in the New Automation menu. Each fills a draft; nothing is saved until the user saves.
 enum AutomationTemplate: String, CaseIterable, Identifiable {
-    case blank, desktopTidy, downloadsSort, metricsRefresh, weeklyClientReport, morningBrief
+    case blank, desktopTidy, downloadsSort, dataRefresh, weeklyReport, morningBrief
     var id: String { rawValue }
 
     var title: String {
@@ -11,8 +11,8 @@ enum AutomationTemplate: String, CaseIterable, Identifiable {
         case .blank: return "Blank Automation"
         case .desktopTidy: return "Desktop Tidy"
         case .downloadsSort: return "Downloads Sort"
-        case .metricsRefresh: return "Meta Metrics Refresh"
-        case .weeklyClientReport: return "Weekly Client Report"
+        case .dataRefresh: return "Refresh a Data File"
+        case .weeklyReport: return "Weekly Report"
         case .morningBrief: return "Morning Brief"
         }
     }
@@ -22,8 +22,8 @@ enum AutomationTemplate: String, CaseIterable, Identifiable {
         case .blank: return "square.dashed"
         case .desktopTidy: return "menubar.dock.rectangle"
         case .downloadsSort: return "arrow.down.circle"
-        case .metricsRefresh: return "chart.line.uptrend.xyaxis"
-        case .weeklyClientReport: return "doc.text.magnifyingglass"
+        case .dataRefresh: return "arrow.triangle.2.circlepath"
+        case .weeklyReport: return "doc.text.magnifyingglass"
         case .morningBrief: return "sun.horizon"
         }
     }
@@ -31,8 +31,8 @@ enum AutomationTemplate: String, CaseIterable, Identifiable {
     /// Morning brief is a Quill task, not a background automation.
     var isQuillTask: Bool { self == .morningBrief }
 
-    /// A filled draft. `bun` is looked up when the template is chosen, never while drawing.
-    func draft(home: String = Paths.home, bunPath: String? = nil, now: Date = Date()) -> AutomationDraft {
+    /// A filled draft. Templates hold no personal paths; folders use `~` or are left for the user.
+    func draft(now: Date = Date()) -> AutomationDraft {
         var d = AutomationDraft()
         d.schedule.anchor = now
         switch self {
@@ -46,20 +46,20 @@ enum AutomationTemplate: String, CaseIterable, Identifiable {
             d.agentFolder = "~/" + folder; d.allowedRoots = ["~/" + folder]
             d.prompt = Self.tidyPrompt(folder)
             d.schedule.preset = .weekly; d.schedule.weekdays = [1]; d.schedule.hour = 18; d.schedule.minute = 0
-        case .metricsRefresh:
-            d.name = "Meta metrics refresh"; d.symbol = "chart.line.uptrend.xyaxis"
+        case .dataRefresh:
+            // Placeholders only: the user picks their own script, arguments, and folder.
+            d.name = "Refresh a data file"; d.symbol = "arrow.triangle.2.circlepath"
             d.kind = .scriptWithDiagnosis
-            d.program = bunPath ?? "/opt/homebrew/bin/bun"
-            d.argumentsText = "scripts/utils/redesign-daily-metrics.ts\n--client\nstein-firm"
-            d.scriptFolder = "~/Dev/docs"
-            d.sharedLock = "docs-metrics"
+            d.program = "/bin/zsh"
+            d.argumentsText = "path/to/refresh-script.sh\n--out\npath/to/data.json"
+            d.scriptFolder = ""
             d.schedule.preset = .everyHours; d.schedule.intervalHours = 4
-            d.notes = "Change the client after --client to the one this refresh is for."
-        case .weeklyClientReport:
-            d.name = "Weekly client report"; d.symbol = "doc.text.magnifyingglass"
-            d.kind = .agent; d.runner = .codex; d.effort = .high; d.output = .report; d.access = .workspaceWriteNetwork
-            d.agentFolder = "~/Dev/docs"
-            d.prompt = "Write this week's client report. Use only the numbers in the client's metrics files, keep each metric's exact name, and mark anything not measured as N/A. Do not send anything."
+            d.notes = "Replace the script path and output file with your own. A dashboard can read the JSON file it writes."
+        case .weeklyReport:
+            d.name = "Weekly report"; d.symbol = "doc.text.magnifyingglass"
+            d.kind = .agent; d.runner = .codex; d.effort = .high; d.output = .report; d.access = .readOnly
+            d.agentFolder = ""
+            d.prompt = "Write a short report on this week's numbers from the data files in this folder. Keep each metric's exact name, and mark anything not measured as N/A. Do not send anything."
             d.schedule.preset = .weekly; d.schedule.weekdays = [2]; d.schedule.hour = 8; d.schedule.minute = 0
         }
         return d
@@ -72,11 +72,6 @@ enum AutomationTemplate: String, CaseIterable, Identifiable {
         screenshots older than 14 days to the Trash. Never touch existing folders or anything inside them. \
         Give a short reason for each change.
         """
-    }
-
-    /// The first `bun` found in the usual places.
-    static func detectBun(home: String = Paths.home) -> String? {
-        ["/opt/homebrew/bin/bun", "/usr/local/bin/bun", home + "/.bun/bin/bun"].first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 }
 

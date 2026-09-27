@@ -155,17 +155,19 @@ final class AutomationCenterTests: XCTestCase {
         XCTAssertEqual(AutomationCenter.importAnchor("nonsense", zone: zone, now: now), now)
     }
 
-    func testClientSeedsOnlyExistingFiles() throws {
-        let home = base.path
-        XCTAssertTrue(AutomationCenter.seedClients(home: home).isEmpty)
-        let folder = home + "/Dev/docs/4-delivery/clients/robert-parish/meta-ads"
-        try fm.createDirectory(atPath: folder, withIntermediateDirectories: true)
-        try Data("{}".utf8).write(to: URL(fileURLWithPath: folder + "/robert-parish-dashboard.metrics.json"))
-        try Data("<html></html>".utf8).write(to: URL(fileURLWithPath: folder + "/robert-parish-dashboard.html"))
-        let seeded = AutomationCenter.seedClients(home: home)
-        XCTAssertEqual(seeded.map(\.id), ["robert-parish"])
-        XCTAssertEqual(seeded.first?.profile, .robertParish)
-        XCTAssertEqual(seeded.first?.dashboardPath, folder + "/robert-parish-dashboard.html")
+    func testLegacyClientsMigrateAndStayInPlace() throws {
+        let store = AutomationStore(root: base.appendingPathComponent("migrate", isDirectory: true))
+        let legacy = #"[{"id":"a","name":"A","profile":"redesign","metricsPath":"/tmp/a.metrics.json","dashboardPath":"/tmp/a.html","automationID":"r1"},{"id":"b","name":"B","profile":"somethingNew","metricsPath":"/tmp/b.json"}]"#
+        try store.ensureRoot()
+        try Data(legacy.utf8).write(to: store.root.appendingPathComponent("clients.json"))
+        let migrated = try XCTUnwrap(AutomationCenter.migratedLegacy(store))
+        XCTAssertEqual(migrated.map(\.id), ["a", "b"])
+        XCTAssertEqual(migrated[0].metrics.map(\.keyPath), ["derivedKpis.spend", "derivedKpis.paidTaggedForms", "derivedKpis.costPerForm", "derivedKpis.qualifiedMeetings"])
+        XCTAssertEqual(migrated[0].openPath, "/tmp/a.html")
+        XCTAssertEqual(migrated[0].automationID, "r1")
+        XCTAssertTrue(migrated[1].metrics.isEmpty)
+        XCTAssertNotNil(migrated[1].note)
+        XCTAssertTrue(store.hasTopFile("clients.json"))
     }
 
     func testAlertActionsRoute() {

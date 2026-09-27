@@ -268,7 +268,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         if demo {
             let shots: [(String, AnyView, NSSize)] = [
                 ("automations-approval", AnyView(AutomationsWindow.snapshotApproval()), NSSize(width: 760, height: 640)),
-                ("automations-editor", AnyView(AutomationsWindow.snapshotEditor(.metricsRefresh).frame(width: 720, height: 820)), NSSize(width: 720, height: 820))
+                ("automations-editor", AnyView(AutomationsWindow.snapshotEditor(.dataRefresh).frame(width: 720, height: 820)), NSSize(width: 720, height: 820))
             ]
             for (name, view, size) in shots {
                 steps.append((name, 1.2, { [weak self] in self?.automationSnapshotWindow?.contentView }, { [weak self] in

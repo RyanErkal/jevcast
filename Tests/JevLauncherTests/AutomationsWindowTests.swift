@@ -30,7 +30,7 @@ final class AutomationsWindowTests: XCTestCase {
             XCTAssertGreaterThan(view.fittingSize.height, 0, section.rawValue)
         }
         _ = render(AutomationsWindow.snapshotView(demo: false, section: .all), size: size, name: "empty-all")
-        for template in [AutomationTemplate.desktopTidy, .metricsRefresh] {
+        for template in [AutomationTemplate.desktopTidy, .dataRefresh] {
             let editor = render(AutomationsWindow.snapshotEditor(template), size: NSSize(width: 700, height: 760), name: "editor-" + template.rawValue)
             XCTAssertGreaterThan(editor.fittingSize.height, 0)
         }
@@ -61,7 +61,7 @@ final class AutomationPartsSnapshotTests: XCTestCase {
                 ProposalRow(item: item, checked: manifest.checked.first { $0.id == item.id }, refusal: manifest.refused[item.id], isOn: .constant(true), preview: {})
             }
         }, "proposal", width: 600)
-        save(HStack(alignment: .top) { ForEach(demo.clients) { ClientCard(model: model, entry: $0) } }, "clients", width: 760)
+        save(HStack(alignment: .top) { ForEach(demo.dashboards) { DashboardCard(model: model, entry: $0) } }, "dashboards", width: 760)
         save(VStack { ForEach(demo.codex) { CodexCard(model: model, item: $0) } }, "codex", width: 700)
         save(VStack { ForEach(demo.quillTasks) { QuillTaskRow(model: model, task: $0) } }, "quill", width: 700)
         save(RunnerStatusPopover(model: model, status: .needsApproval), "popover", width: 300)

@@ -5,7 +5,7 @@ import Foundation
 /// these rows to a normal search, so "calendar" still lists the Calendar app.
 public struct SourceQuery: Equatable, Sendable {
     public enum Kind: String, CaseIterable, Sendable {
-        case scheduled, automations, clients, calendar, reminders, contacts, tabs, history, mail, taskRuns, help, cleanup, dictation
+        case scheduled, automations, dashboards, calendar, reminders, contacts, tabs, history, mail, taskRuns, help, cleanup, dictation
     }
     public let kind: Kind
     /// Words after the keyword, such as "slack" in "tabs slack". Empty lists everything.
@@ -25,8 +25,8 @@ public struct SourceQuery: Equatable, Sendable {
         ("what can you do", .help, false), ("what can jevcast do", .help, false), ("help", .help, true), ("jevcast", .help, true),
         ("my automations", .automations, true), ("automations", .automations, true), ("automation", .automations, true),
         ("background tasks", .automations, true), ("needs you", .automations, false),
-        ("client metrics", .clients, true), ("meta ads", .clients, true), ("ad metrics", .clients, true),
-        ("clients", .clients, true), ("metrics", .clients, true),
+        ("dashboards", .dashboards, true), ("dashboard", .dashboards, true), ("client metrics", .dashboards, true),
+        ("clients", .dashboards, true), ("metrics", .dashboards, true),
         ("quill tasks", .scheduled, true), ("scheduled tasks", .scheduled, true), ("schedule", .scheduled, true), ("scheduled jobs", .scheduled, true),
         ("background items", .scheduled, true), ("launch agents", .scheduled, true), ("launch daemons", .scheduled, true),
         ("login items", .scheduled, true), ("cron jobs", .scheduled, true), ("what runs at login", .scheduled, false),

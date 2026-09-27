@@ -151,6 +151,6 @@ final class AutomationsWindow: NSWindowController, NSWindowDelegate {
     /// The editor for `--snapshot-ui`, filled from a template.
     static func snapshotEditor(_ template: AutomationTemplate = .desktopTidy) -> some View {
         let model = AutomationsViewModel(center: nil, quill: nil, demo: AutomationsDemoData.make())
-        return AutomationEditorView(model: model, draft: template.draft(bunPath: "/opt/homebrew/bin/bun"), dismiss: {})
+        return AutomationEditorView(model: model, draft: template.draft(), dismiss: {})
     }
 }

@@ -26,7 +26,7 @@ final class AutomationReviewTests: XCTestCase {
         let model = AutomationsViewModel(center: nil, quill: nil, demo: AutomationsDemoData.make())
         model.selectedAutomationID = model.automations.first?.id
         XCTAssertNotNil(model.runnableSelection)
-        model.section = .clients
+        model.section = .dashboards
         XCTAssertNil(model.runnableSelection)
         model.section = .history
         model.selectedRunID = model.allRuns.first?.id
@@ -125,11 +125,11 @@ final class AutomationReviewTests: XCTestCase {
         XCTAssertNil(ToolProbe.version(file.path))
     }
 
-    func testClientPathChangeDoesNotKeepAnotherFilesMetrics() throws {
-        var previous = try XCTUnwrap(AutomationsDemoData.make().clients.first)
-        previous.config.metricsPath = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+    func testDashboardPathChangeDoesNotKeepAnotherFilesNumbers() throws {
+        var previous = try XCTUnwrap(AutomationsDemoData.make().dashboards.first)
+        previous.config.filePath = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
         var changed = previous.config
-        changed.metricsPath += "-changed"
+        changed.filePath += "-changed"
         let entry = AutomationCenter.read(changed, previous: previous)
         XCTAssertNil(entry.snapshot)
         XCTAssertNotNil(entry.readError)

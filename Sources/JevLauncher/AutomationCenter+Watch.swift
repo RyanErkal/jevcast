@@ -45,7 +45,7 @@ struct AutomationReadout: Sendable {
     /// which changes every 30 seconds.
     static func fingerprint(_ store: AutomationStore) -> String {
         let names = ((try? FileManager.default.contentsOfDirectory(atPath: store.root.path)) ?? []).sorted()
-        let times = ["settings.json", "clients.json"].map { name -> String in
+        let times = ["settings.json", "dashboards.json"].map { name -> String in
             let date = (try? FileManager.default.attributesOfItem(atPath: store.root.appendingPathComponent(name).path))?[.modificationDate] as? Date
             return "\(date?.timeIntervalSinceReferenceDate ?? 0)"
         }

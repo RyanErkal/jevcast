@@ -31,8 +31,22 @@ enum MailActions {
         [mailbox.accountID, mailbox.path, String(message.rowID)]
     }
 
-    static func setRead(_ read: Bool, _ message: MailSummary, in mailbox: MailMailbox) async throws {
-        try await run(MailScripts.setRead, target(message, mailbox) + [read ? "true" : "false"])
+    /// Mail can miss a change in its first seconds after it starts, so a failed change is tried once
+    /// more, in `fallback` when given: the row's own mailbox, such as Gmail's All Mail for an Inbox row.
+    /// Read status belongs to the message, so either mailbox changes it on the server.
+    static func setRead(_ read: Bool, _ message: MailSummary, in mailbox: MailMailbox, fallback: MailMailbox? = nil) async throws {
+        let value = read ? "true" : "false"
+        do { try await run(MailScripts.setRead, target(message, mailbox) + [value]) }
+        catch let problem as SourceProblem { throw problem }
+        catch {
+            try await Task.sleep(nanoseconds: 1_500_000_000)
+            try await run(MailScripts.setRead, target(message, fallback ?? mailbox) + [value])
+        }
+    }
+    /// Asks Mail to send pending changes for these accounts to their servers. Does nothing when Mail is not running.
+    static func synchronize(accounts: [String]) async throws {
+        guard !accounts.isEmpty, AppleScript.isRunning(bundleID) else { return }
+        _ = try await AppleScript.run(MailScripts.synchronize, accounts, app: bundleID, name: "Mail", timeout: 30)
     }
     static func setFlagged(_ flagged: Bool, _ message: MailSummary, in mailbox: MailMailbox) async throws {
         try await run(MailScripts.setFlagged, target(message, mailbox) + [flagged ? "true" : "false"])

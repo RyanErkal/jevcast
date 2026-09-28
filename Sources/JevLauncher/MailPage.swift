@@ -58,7 +58,8 @@ final class MailPage: ObservableObject, LauncherPage {
         }
     }
 
-    /// The filter only narrows the list. A message the filter selects by itself is not marked read.
+    /// The filter only narrows the list. A message the filter selects by itself counts as read once
+    /// the filter stops changing, since its first match changes as you type.
     func filter(_ text: String) {
         guard let mail, mail.search != text else { return }
         mail.search = text

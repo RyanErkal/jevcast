@@ -2,6 +2,14 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Fixed
+
+- **Mail marks every message you see as read.** The top message when the inbox opens and the next message after a delete or archive now count as read, as in Apple Mail. A message on screen when you come back to the window counts too. A message you mark unread stays unread until you move away. The first match of a search waits until the search stops changing.
+- **Read messages stay read.** A refresh before Apple Mail writes its index no longer shows a read message as unread again. A read change that fails is tried once more.
+- **Your phone matches.** When Jevcast started Apple Mail, closing the inbox now asks Mail to sync the changed accounts and waits 15 seconds before it quits Mail, so read status reaches the server.
+
 ## [1.12.2] - 2026-09-27
 
 ### Changed

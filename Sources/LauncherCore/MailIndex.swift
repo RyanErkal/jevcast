@@ -198,6 +198,22 @@ public enum MailScripts {
     end run
     """
 
+    /// `argv`: account IDs. Asks Mail to send pending changes, such as read status, to each server now.
+    /// An account that cannot sync, such as one that is offline, does not stop the others.
+    public static let synchronize = """
+    on run argv
+      with timeout of 20 seconds
+        tell application id "com.apple.mail"
+          repeat with a in argv
+            try
+              synchronize with (first account whose id is (a as text))
+            end try
+          end repeat
+        end tell
+      end timeout
+    end run
+    """
+
     /// Opens the message in Mail itself.
     public static let open = onMessage("      open m\n      activate")
 }

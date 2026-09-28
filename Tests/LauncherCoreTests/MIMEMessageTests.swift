@@ -84,6 +84,8 @@ final class MIMEMessageTests: XCTestCase {
             XCTAssertTrue(script.contains("tell application id \"com.apple.mail\""))
         }
         XCTAssertTrue(MailScripts.send.contains("subject:(item 3 of argv), content:(item 4 of argv)"))
+        XCTAssertTrue(MailScripts.synchronize.contains("synchronize with (first account whose id is (a as text))"))
+        XCTAssertTrue(MailScripts.synchronize.contains("repeat with a in argv"))
     }
 }
 

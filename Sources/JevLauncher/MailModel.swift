@@ -33,7 +33,8 @@ final class MailModel: ObservableObject {
         didSet { UserDefaults.standard.set(loadsImages, forKey: "mailLoadsImages") }
     }
     /// True while the mail window has the keyboard, so a message counts as read only when seen.
-    var windowIsKey = false
+    /// Coming back to the window counts the message on screen.
+    var windowIsKey = false { didSet { if windowIsKey != oldValue { armRead() } } }
     /// True when Jevcast started Apple Mail for this session, so it can quit it again after.
     private var startedMail = false
     private var readTimer: Task<Void, Never>?
@@ -48,12 +49,26 @@ final class MailModel: ObservableObject {
     @Published private(set) var hasMore = false
     /// False when Apple Mail is not running, so new mail is not reaching its index.
     @Published private(set) var mailRunning = true
-    /// Setting this from the list or the keyboard marks the message read. The model's own
-    /// selections, after a reload, use `select(_:byUser:)` with false and change nothing.
+    /// The message on screen counts as read however it got there: from the list, the keyboard, or
+    /// the model's own selection after a reload or a delete. `select(_:byUser:)` with false marks
+    /// the model's own selections, which wait for a search to settle.
     @Published var selectedID: Int64? {
-        didSet { if oldValue != selectedID { loadSelected(markRead: !selectingQuietly) } }
+        didSet {
+            guard oldValue != selectedID else { return }
+            keptUnread = nil
+            loadSelected()
+            armRead(searchPick: selectingQuietly && !search.isEmpty)
+        }
     }
     private var selectingQuietly = false
+    /// The message you marked unread while it is on screen. It stays unread until you move away.
+    private var keptUnread: Int64?
+    /// Read changes made here, until Mail's index shows them. Mail writes the index a moment after
+    /// the change, so a refresh in between must not mark the row unread again.
+    private var readChanges: [Int64: (read: Bool, at: Date)] = [:]
+    /// Accounts changed while the window is open, so closing asks Mail to send the changes to the server.
+    private var changedAccounts: Set<String> = []
+    private let setReadAction: (Bool, MailSummary, MailMailbox, MailMailbox?) async throws -> Void
     /// A message to select once the list that holds it loads, such as one picked in the launcher.
     private var pending: MailSummary?
     private var pendingOpen: Int64?
@@ -106,8 +121,10 @@ final class MailModel: ObservableObject {
     /// Mail actions run one after another, so quick deletes never race each other.
     private var actionChain: Task<Void, Never>?
 
-    init(quill: @escaping (QuillRequest) async throws -> QuillReply, quillAllowed: @escaping () -> Bool, statusProvider: @escaping @Sendable () -> MailStore.Status = { MailStore.status() }) {
+    init(quill: @escaping (QuillRequest) async throws -> QuillReply, quillAllowed: @escaping () -> Bool, statusProvider: @escaping @Sendable () -> MailStore.Status = { MailStore.status() },
+         setRead: @escaping (Bool, MailSummary, MailMailbox, MailMailbox?) async throws -> Void = { try await MailActions.setRead($0, $1, in: $2, fallback: $3) }) {
         self.statusProvider = statusProvider
+        self.setReadAction = setRead
         self.quill = quill; self.quillAllowed = quillAllowed
         // Settings › Mail writes the same default; follow it while this window exists.
         defaultsObserver = NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
@@ -169,13 +186,18 @@ final class MailModel: ObservableObject {
         poll?.cancel(); poll = nil; readTimer?.cancel()
         statusWork?.cancel(); statusWork = nil
         openWork?.cancel(); openWork = nil; pendingOpen = nil
+        let accounts = Array(changedAccounts)
+        changedAccounts = []
         guard startedMail else { return }
         startedMail = false
         let pending = actionChain
         quit = Task { @MainActor [weak self] in
             await pending?.value
+            // Mail sends changes such as read status to the server after it makes them. Quitting
+            // first would leave your phone out of step until Mail runs again.
+            if !accounts.isEmpty { try? await MailActions.synchronize(accounts: accounts) }
             // An action that started after closing, or Mail opened by you, keeps it running.
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            try? await Task.sleep(nanoseconds: accounts.isEmpty ? 1_500_000_000 : 15_000_000_000)
             guard !Task.isCancelled else { return }
             self?.quit = nil
             guard let mail = NSRunningApplication.runningApplications(withBundleIdentifier: MailActions.bundleID).first,
@@ -300,6 +322,7 @@ final class MailModel: ObservableObject {
             // Removals older than two minutes are Mail's business again.
             self.removing = self.removing.filter { Date().timeIntervalSince($0.value) < 120 }
             self.mailboxes = boxes
+            self.confirmReads(page.messages.map { ($0.rowID, $0.read) } + states.map { ($0.key, $0.value.read) })
             let messages = page.messages.filter { self.removing[$0.rowID] == nil }
             self.top = page.first; self.bottom = page.last; self.hasMore = page.hasMore
             // A selected message on a later page stays listed, in date order, so the selection holds.
@@ -416,6 +439,7 @@ final class MailModel: ObservableObject {
             }
             self.mailboxes = boxes
             self.removing = self.removing.filter { Date().timeIntervalSince($0.value) < 120 }
+            self.confirmReads(states.map { ($0.key, $0.value.read) } + newer.map { ($0.rowID, $0.read) })
             let query = Self.query(place, search, boxes)
             let kept = Self.refreshed(self.messages, states: states, requested: Set(ids), query: query, selectedID: self.selectedID)
             let added = newer.filter { self.removing[$0.rowID] == nil }
@@ -460,15 +484,35 @@ final class MailModel: ObservableObject {
         return sorted
     }
 
-    private func install(_ rows: [MailSummary]) {
+    private func install(_ fresh: [MailSummary]) {
         let old = selected
+        let rows = withReadChanges(fresh)
         if messages != rows { messages = rows }
         if let selectedID, let current = rows.first(where: { $0.rowID == selectedID }) {
-            if old?.mailbox != current.mailbox || (detail == nil && !detailMissing && loadingID != selectedID) { loadSelected(markRead: false) }
+            if old?.mailbox != current.mailbox || (detail == nil && !detailMissing && loadingID != selectedID) { loadSelected() }
             return
         }
         let replacement = old.flatMap { old in rows.first { $0.messageKey == old.messageKey } }
         select(replacement?.rowID ?? rows.first?.rowID, byUser: false)
+    }
+
+    /// Rows with a read change Mail's index does not show yet keep that change, for up to a minute.
+    private func withReadChanges(_ rows: [MailSummary]) -> [MailSummary] {
+        readChanges = readChanges.filter { Date().timeIntervalSince($0.value.at) < 60 }
+        guard !readChanges.isEmpty else { return rows }
+        return rows.map { row in
+            guard let change = readChanges[row.rowID], change.read != row.read else { return row }
+            var row = row
+            row.read = change.read
+            return row
+        }
+    }
+
+    /// Drops read changes that rows fresh from Mail's index now show. After that the index decides,
+    /// so a change made on another device shows here too.
+    private func confirmReads(_ fresh: [(Int64, Bool)]) {
+        guard !readChanges.isEmpty else { return }
+        for (id, read) in fresh where readChanges[id]?.read == read { readChanges[id] = nil }
     }
 
     nonisolated static func query(_ place: Place, _ search: String, _ boxes: [MailMailbox]) -> MailStore.Query {
@@ -488,8 +532,11 @@ final class MailModel: ObservableObject {
         selectingQuietly = !byUser
         selectedID = rowID
         selectingQuietly = false
+        guard unchanged else { return }
         // The same row again, such as a message the list just inserted, still needs its body.
-        if unchanged, detail == nil, !detailMissing { loadSelected(markRead: byUser) }
+        if detail == nil, !detailMissing { loadSelected() }
+        // Picking the message on screen again, such as in the launcher, opens it.
+        if byUser { keptUnread = nil; armRead() }
     }
 
     /// Queues a launcher selection. The lookup runs off the main thread, including when access
@@ -516,17 +563,17 @@ final class MailModel: ObservableObject {
 
     private var loadingID: Int64?
 
-    private func loadSelected(markRead: Bool) {
+    /// Shows the selected message's body. Loading it again, such as after a refresh, leaves its
+    /// read timer alone.
+    private func loadSelected() {
         summary = nil
         guard let root, let message = selected, let box = mailbox(message.mailbox) else {
-            readTimer?.cancel(); loadingID = nil
+            loadingID = nil
             detail = nil; detailHTML = nil; detailMissing = false; return
         }
         let rowID = message.rowID
         let identity = indexIdentity
         loadingID = rowID
-        // A selection the model made, such as after a delete or a reload, never marks mail read.
-        if markRead, let target = actionBox(message) { markReadSoon(message, in: target) } else { readTimer?.cancel() }
         if let cached = bodies[rowID] {
             remember(cached, for: rowID)
             detail = cached.message; detailHTML = cached.html; detailMissing = false
@@ -546,18 +593,29 @@ final class MailModel: ObservableObject {
         }
     }
 
-    /// A message on screen for a second, in the window you are using, counts as read, as in Mail.
-    /// Moving past it quickly with ↓ leaves it unread.
-    private func markReadSoon(_ message: MailSummary, in box: MailMailbox) {
-        readTimer?.cancel()
+    /// The message on screen, in the window you are using, counts as read after the time set in
+    /// Settings › Mail. With a delay, moving past it quickly with ↓ leaves it unread.
+    /// `searchPick`: the model picked the first match of a search, which changes as you type.
+    private func armRead(searchPick: Bool = false) {
+        readTimer?.cancel(); readTimer = nil
         let delay = MailReading.markRead.rawValue
-        guard !message.read, delay >= 0 else { return }
+        guard delay >= 0, windowIsKey, let message = selected, !message.read, message.rowID != keptUnread else { return }
+        let wait = searchPick ? max(delay, 1.5) : delay
         readTimer = Task { @MainActor [weak self] in
-            if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
-            guard !Task.isCancelled, let self, self.windowIsKey, self.selectedID == message.rowID,
-                  self.selected?.read == false else { return }
-            self.perform("mark read") { try await MailActions.setRead(true, message, in: box) } update: { $0.read = true }
+            if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
+            guard !Task.isCancelled, let self, self.windowIsKey, let current = self.selected, current.rowID == message.rowID,
+                  !current.read, current.rowID != self.keptUnread else { return }
+            self.setRead(true, current)
         }
+    }
+
+    /// Changes read status through Mail. The row keeps the change until Mail's index shows it.
+    private func setRead(_ read: Bool, _ message: MailSummary) {
+        guard let box = actionBox(message) else { return }
+        let own = mailbox(message.mailbox).flatMap { $0.rowID == box.rowID ? nil : $0 }
+        readChanges[message.rowID] = (read, Date())
+        let action = setReadAction
+        perform(read ? "mark read" : "mark unread") { try await action(read, message, box, own) } update: { $0.read = read }
     }
 
     /// Parses the message and puts its inline images into the HTML, off the main thread.
@@ -596,11 +654,12 @@ final class MailModel: ObservableObject {
     /// Runs a Mail action. `update` changes the row at once; the index confirms it later.
     private func perform(_ name: String, removes: Bool = false, _ action: @escaping () async throws -> Void, update: ((inout MailSummary) -> Void)? = nil) {
         guard let message = selected else { return }
+        if let account = mailbox(message.mailbox)?.accountID { changedAccounts.insert(account) }
         let index = messages.firstIndex { $0.rowID == message.rowID }
         if removes, let index {
             removing[message.rowID] = Date()
             messages.remove(at: index)
-            // The next message shows but stays unread until you pick it.
+            // The next message shows and counts as read, as in Mail.
             select(messages.indices.contains(index) ? messages[index].rowID : messages.last?.rowID, byUser: false)
         } else if let index, let update { update(&messages[index]) }
         let previous = actionChain
@@ -608,7 +667,9 @@ final class MailModel: ObservableObject {
             await previous?.value
             do { try await action() }
             catch {
+                // After a failed change the index decides the row again.
                 self?.removing.removeValue(forKey: message.rowID)
+                self?.readChanges.removeValue(forKey: message.rowID)
                 self?.banner = "Could not \(name): \(error.localizedDescription)"
                 self?.reload(keepSelection: true)
             }
@@ -652,9 +713,11 @@ final class MailModel: ObservableObject {
         perform(flagged ? "flag" : "unflag") { try await MailActions.setFlagged(flagged, message, in: box) } update: { $0.flagged = flagged }
     }
     func toggleRead() {
-        guard let message = selected, let box = actionBox(message) else { return }
-        let read = !message.read
-        perform(read ? "mark read" : "mark unread") { try await MailActions.setRead(read, message, in: box) } update: { $0.read = read }
+        guard let message = selected, actionBox(message) != nil else { return }
+        readTimer?.cancel()
+        // Marked unread, the message stays unread while it stays on screen, also when you come back to the window.
+        keptUnread = message.read ? message.rowID : nil
+        setRead(!message.read, message)
     }
     func move(to destination: MailMailbox) {
         guard let message = selected, let box = actionBox(message) else { return }

@@ -25,14 +25,7 @@ struct MailRootView: View {
             MailList(model: model).frame(minWidth: 280, idealWidth: 340, maxWidth: 460)
             MailReader(model: model).frame(minWidth: 380, maxWidth: .infinity)
         }
-        .overlay(alignment: .bottom) {
-            if let banner = model.banner {
-                Text(banner).font(.callout).padding(.horizontal, 14).padding(.vertical, 8)
-                    .background(.regularMaterial, in: Capsule()).padding(.bottom, 14)
-                    .onTapGesture { model.banner = nil }
-                    .task(id: banner) { try? await Task.sleep(nanoseconds: 4_000_000_000); if model.banner == banner { model.banner = nil } }
-            }
-        }
+        .overlay(alignment: .bottom) { MailBanner(model: model).padding(.bottom, 14) }
     }
 }
 
@@ -268,58 +261,24 @@ struct MailReader: View {
     }
 }
 
-struct ComposeView: View {
+/// The note at the bottom of the mail views. While a sent message waits, it offers Undo;
+/// other notes go away after a few seconds or on a click.
+struct MailBanner: View {
     @ObservedObject var model: MailModel
-    @Environment(\.dismiss) private var dismiss
-    /// A reply starts in its text, so typing goes there and not to a search or filter field.
-    @FocusState private var bodyFocused: Bool
-    @FocusState private var toFocused: Bool
     var body: some View {
-        if let binding = Binding($model.draft) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(title(binding.wrappedValue.mode)).font(.headline)
-                if binding.wrappedValue.mode == .new || binding.wrappedValue.mode == .forward {
-                    TextField("To", text: binding.to).textFieldStyle(.roundedBorder).focused($toFocused)
-                }
-                if binding.wrappedValue.mode == .new {
-                    TextField("Cc", text: binding.cc).textFieldStyle(.roundedBorder)
-                    TextField("Subject", text: binding.subject).textFieldStyle(.roundedBorder)
-                } else {
-                    Text(binding.wrappedValue.subject).foregroundStyle(.secondary).lineLimit(1)
-                }
-                if model.canUseQuill {
-                    HStack {
-                        TextField("Tell Quill what to write, such as “yes, but next week”", text: binding.instruction)
-                            .textFieldStyle(.roundedBorder).onSubmit { model.draftWithQuill() }
-                        Button(model.quillBusy ? "Writing…" : "Draft with Quill") { model.draftWithQuill() }.disabled(model.quillBusy)
-                    }
-                }
-                TextEditor(text: binding.body).font(.system(size: 13)).frame(minHeight: 220).focused($bodyFocused)
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
-                if binding.wrappedValue.mode != .new {
-                    Text("Mail adds the original message below your text when it can.").font(.caption).foregroundStyle(.secondary)
-                }
-                HStack {
-                    Spacer()
-                    Button("Cancel") { model.draft = nil; dismiss() }.keyboardShortcut(.cancelAction)
-                    Button(model.sending ? "Sending…" : "Send") { model.send() }
-                        .keyboardShortcut(.return, modifiers: .command).disabled(model.sending)
-                }
+        if model.pendingSend != nil {
+            HStack(spacing: 10) {
+                ProgressView().controlSize(.small)
+                Text("Sending…")
+                Button("Undo") { model.undoSend() }.buttonStyle(.link).help("Undo (⌘Z)")
             }
-            .padding(18)
-            .frame(width: 560)
-            .onAppear {
-                // A reply starts in its text; a new message or a forward starts in To.
-                let reply = { if case .reply = binding.wrappedValue.mode { return true }; return false }()
-                DispatchQueue.main.async { if reply { bodyFocused = true } else { toFocused = true } }
-            }
-        }
-    }
-    private func title(_ mode: MailModel.Draft.Mode) -> String {
-        switch mode {
-        case .new: return "New Message"
-        case .reply(let all): return all ? "Reply All" : "Reply"
-        case .forward: return "Forward"
+            .font(.callout).padding(.horizontal, 14).padding(.vertical, 8)
+            .background(.regularMaterial, in: Capsule())
+        } else if let banner = model.banner {
+            Text(banner).font(.callout).padding(.horizontal, 14).padding(.vertical, 8)
+                .background(.regularMaterial, in: Capsule())
+                .onTapGesture { model.banner = nil }
+                .task(id: banner) { try? await Task.sleep(nanoseconds: 4_000_000_000); if model.banner == banner { model.banner = nil } }
         }
     }
 }

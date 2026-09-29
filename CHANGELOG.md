@@ -8,8 +8,16 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 - **Jevcast accounts.** Jevcast can now sync mail itself, without Apple Mail. Add Yahoo (including @yahoo.ie), iCloud, Gmail, or another IMAP account with an app password in Settings › Mail › Accounts. The mail window, the launcher's Mail view, and mail search work as before, new mail arrives within seconds through IMAP IDLE, and changes and sent mail go straight to the account's servers. On servers that offer UIDONLY, such as Yahoo, every message syncs, not only the newest thousand in each folder. Apple Mail is never started, and Full Disk Access is not needed. **Read mail from** switches back to Apple Mail.
 
+### Changed
+
+- **Replies keep the message in view.** In the launcher, a reply now opens under the message it answers, with who it goes to, a clear text area, and Send and Discard. New messages and forwards use the same editor, in the launcher and in the mail window.
+- **Undo Send.** A sent message waits 5 seconds. Click Undo, or press ⌘Z, to bring it back.
+
 ### Fixed
 
+- **No more blank replies.** Send stays dimmed until a reply has text, a forward has a recipient, or a new message has a recipient and a subject or text. Before it sends, Jevcast reads the text back from Apple Mail; when Mail did not keep it, nothing is sent and the reply comes back with the reason.
+- **Apple Mail stays out of sight.** Opening the inbox no longer shows Apple Mail's window behind Jevcast. Jevcast starts Mail once, even when several changes ask at the same time, and hides it after it starts.
+- A send that fails brings the draft back, with its text, instead of losing it.
 - A message saved with CRLF line ends now reads its last header correctly, so a base64 or quoted-printable body and a multipart boundary on that line are no longer missed.
 
 ## [1.12.3] - 2026-09-28

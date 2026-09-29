@@ -87,6 +87,20 @@ final class MIMEMessageTests: XCTestCase {
         XCTAssertTrue(MailScripts.synchronize.contains("synchronize with (first account whose id is (a as text))"))
         XCTAssertTrue(MailScripts.synchronize.contains("repeat with a in argv"))
     }
+
+    /// Mail can ignore text set on a message it has not shown. The scripts read it back first and
+    /// send nothing without it.
+    func testSendingScriptsCheckTheTextBeforeSending() throws {
+        for (script, argument, send) in [(MailScripts.reply, 6, "(send r)"), (MailScripts.forward, 6, "(send f)"), (MailScripts.send, 5, "(send o)")] {
+            let check = try XCTUnwrap(script.range(of: "if written does not contain (item \(argument) of argv) then"))
+            let sending = try XCTUnwrap(script.range(of: send))
+            XCTAssertLessThan(check.lowerBound, sending.lowerBound, "The check comes before the send")
+            XCTAssertTrue(script.contains("number 1003"))
+        }
+        XCTAssertEqual(MailScripts.checkText("\n   \n  Hello there  \nsecond line"), "Hello there")
+        XCTAssertEqual(MailScripts.checkText(" \n\t"), "")
+        XCTAssertEqual(MailScripts.checkText(String(repeating: "a", count: 100)).count, 60)
+    }
 }
 
 final class MIMEHostileTests: XCTestCase {

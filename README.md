@@ -165,7 +165,7 @@ Rows from these sources have their own actions. Return runs the first one, and �
 
 Jevcast reads the mail that Apple Mail keeps on this Mac, so Mail does not have to be open to read it. Changes go through Apple Mail, which starts hidden when it is not running: archive, delete, move, flag, read or unread, reply, reply all, forward, and new messages. Mail then applies your accounts, rules, and sync as usual. Mail shows in the Dock while it runs.
 
-Keys: ↑↓ or J K move, E archives, ⌫ deletes, R replies, Shift–R replies to all, F forwards, S flags, U marks read or unread, C writes a new message, and ⌘Return sends. HTML mail shows with scripts off, and every remote load is blocked, so tracking pixels and remote images do not load. Links open in your browser.
+Keys: ↑↓ or J K move, E archives, ⌫ deletes, R replies, Shift–R replies to all, F forwards, S flags, U marks read or unread, C writes a new message, and ⌘Return sends. A sent message waits 5 seconds; Undo or ⌘Z brings it back. Send stays dimmed until there is something to send, and a reply that Apple Mail did not take is not sent. HTML mail shows with scripts off, and every remote load is blocked, so tracking pixels and remote images do not load. Links open in your browser.
 
 Jevcast needs Full Disk Access to read Apple Mail. The mail window tells you how to allow it.
 

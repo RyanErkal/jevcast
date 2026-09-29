@@ -139,13 +139,46 @@ public enum MailScripts {
         """
     }
 
+    /// The first line of `text` that has words, trimmed and cut to 60 characters. The reply,
+    /// forward, and send scripts look for it in Mail's copy before they send.
+    public static func checkText(_ text: String) -> String {
+        let line = text.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty } ?? ""
+        return String(line.prefix(60))
+    }
+
+    /// Reads the text back from `message` and stops before sending when Mail did not keep it:
+    /// Mail can ignore text set on a message it has not shown. Argument `argument` holds
+    /// `checkText`; an empty one skips the check. The discarded message is never sent.
+    static func keepsText(_ message: String, argument: Int) -> String {
+        """
+              if (item \(argument) of argv) is not "" then
+                set written to ""
+                repeat 10 times
+                  set written to (content of \(message)) as text
+                  if written contains (item \(argument) of argv) then exit repeat
+                  delay 0.2
+                end repeat
+                if written does not contain (item \(argument) of argv) then
+                  try
+                    close \(message) saving no
+                  end try
+                  try
+                    delete \(message)
+                  end try
+                  error "Mail did not take the text, so nothing was sent." number 1003
+                end if
+              end if
+        """
+    }
+
     /// `argv` 4: "true" or "false".
     public static let setRead = onMessage("      set read status of m to ((item 4 of argv) is \"true\")")
     public static let setFlagged = onMessage("      set flagged status of m to ((item 4 of argv) is \"true\")")
     public static let delete = onMessage("      delete m")
     /// `argv` 4: the destination mailbox path in the same account.
     public static let move = onMessage("      move m to mailbox (item 4 of argv) of acct")
-    /// `argv` 4: the reply text; 5: "true" to reply to all. The quoted original stays below the text.
+    /// `argv` 4: the reply text; 5: "true" to reply to all; 6: `checkText` of the reply. The quoted
+    /// original stays below the text.
     public static let reply = onMessage("""
           set r to reply m opening window false reply to all ((item 5 of argv) is "true")
           set quoted to ""
@@ -159,9 +192,11 @@ public enum MailScripts {
           else
             set content of r to (item 4 of argv) & return & return & quoted
           end if
+    \(keepsText("r", argument: 6))
           if not (send r) then error "Mail did not send the message." number 1002
     """)
-    /// `argv` 4: the text above the forwarded message; 5: recipient addresses, one per line.
+    /// `argv` 4: the text above the forwarded message; 5: recipient addresses, one per line;
+    /// 6: `checkText` of the text.
     public static let forward = onMessage("""
           set f to forward m opening window false
           delay 0.5
@@ -173,10 +208,11 @@ public enum MailScripts {
             set quoted to content of f
             set content of f to (item 4 of argv) & return & return & quoted
           end if
+    \(keepsText("f", argument: 6))
           if not (send f) then error "Mail did not send the message." number 1002
     """)
 
-    /// `argv`: to (one per line), cc (one per line), subject, body.
+    /// `argv`: to (one per line), cc (one per line), subject, body, `checkText` of the body.
     public static let send = """
     on run argv
       with timeout of 20 seconds
@@ -188,6 +224,7 @@ public enum MailScripts {
           repeat with a in paragraphs of (item 2 of argv)
             if (a as text) is not "" then make new cc recipient at end of cc recipients of o with properties {address:(a as text)}
           end repeat
+    \(keepsText("o", argument: 5))
           if not (send o) then error "Mail did not send the message." number 1002
         end tell
       end timeout

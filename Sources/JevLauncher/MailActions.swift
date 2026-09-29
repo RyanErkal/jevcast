@@ -17,18 +17,36 @@ enum MailActions {
         return engine
     }
 
+    /// The launch in progress. Callers that arrive meanwhile wait for it instead of opening Mail
+    /// again: a second open reaches a Mail that is still starting, and Mail answers it by showing
+    /// its window.
+    @MainActor private static var launch: Task<Void, Error>?
+
     /// Starts Mail hidden, without taking focus, and waits until it answers.
     static func ensureRunning() async throws {
-        if NativeMailCenter.isActive || AppleScript.isRunning(bundleID) { return }
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
-            throw LauncherError("Apple Mail is not installed.")
+        if NativeMailCenter.isActive { return }
+        try await launchOnce()
+    }
+
+    @MainActor private static func launchOnce() async throws {
+        if let launch { return try await launch.value }
+        if AppleScript.isRunning(bundleID) { return }
+        let task = Task { @MainActor in
+            guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+                throw LauncherError("Apple Mail is not installed.")
+            }
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = false; config.hides = true; config.addsToRecentItems = false
+            let app = try await NSWorkspace.shared.openApplication(at: url, configuration: config)
+            for _ in 0..<40 where !AppleScript.isRunning(bundleID) { try await Task.sleep(nanoseconds: 100_000_000) }
+            // Mail answers scripts a moment after it launches.
+            try await Task.sleep(nanoseconds: 800_000_000)
+            // Mail can restore its last window while it starts. The Mail that Jevcast started stays out of sight.
+            _ = app.hide()
         }
-        let config = NSWorkspace.OpenConfiguration()
-        config.activates = false; config.hides = true; config.addsToRecentItems = false
-        _ = try await NSWorkspace.shared.openApplication(at: url, configuration: config)
-        for _ in 0..<40 where !AppleScript.isRunning(bundleID) { try await Task.sleep(nanoseconds: 100_000_000) }
-        // Mail answers scripts a moment after it launches.
-        try await Task.sleep(nanoseconds: 800_000_000)
+        launch = task
+        defer { launch = nil }
+        try await task.value
     }
 
     static func run(_ script: String, _ arguments: [String]) async throws {
@@ -73,16 +91,16 @@ enum MailActions {
     }
     static func reply(_ message: MailSummary, in mailbox: MailMailbox, text: String, all: Bool) async throws {
         if let engine = try native() { return try await engine.reply(to: message.rowID, text: text, all: all) }
-        try await run(MailScripts.reply, target(message, mailbox) + [text, all ? "true" : "false"])
+        try await run(MailScripts.reply, target(message, mailbox) + [text, all ? "true" : "false", MailScripts.checkText(text)])
     }
     static func forward(_ message: MailSummary, in mailbox: MailMailbox, text: String, to recipients: [String]) async throws {
         if let engine = try native() { return try await engine.forward(message.rowID, text: text, to: recipients) }
-        try await run(MailScripts.forward, target(message, mailbox) + [text, recipients.joined(separator: "\n")])
+        try await run(MailScripts.forward, target(message, mailbox) + [text, recipients.joined(separator: "\n"), MailScripts.checkText(text)])
     }
     static func send(to: [String], cc: [String], subject: String, body: String) async throws {
         guard !to.isEmpty else { throw LauncherError("Add at least one recipient.") }
         if let engine = try native() { return try await engine.send(to: to, cc: cc, subject: subject, body: body) }
-        try await run(MailScripts.send, [to.joined(separator: "\n"), cc.joined(separator: "\n"), subject, body])
+        try await run(MailScripts.send, [to.joined(separator: "\n"), cc.joined(separator: "\n"), subject, body, MailScripts.checkText(body)])
     }
     static func checkForNewMail() async throws {
         if let engine = try native() { return await engine.sync(.inboxOnly) }

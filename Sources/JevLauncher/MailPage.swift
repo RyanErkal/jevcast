@@ -81,6 +81,7 @@ final class MailPage: ObservableObject, LauncherPage {
     func handleEvent(_ event: NSEvent) -> Bool {
         guard let mail, !isTyping else { return false }
         let flags = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        if flags == .command, event.keyCode == 6, mail.pendingSend != nil { mail.undoSend(); return true } // ⌘Z
         if event.keyCode == 49, flags.isEmpty, mail.search.isEmpty, mail.selected != nil {
             expanded.toggle()
             return true
@@ -120,16 +121,23 @@ private struct MailPageView: View {
         Group {
             if !ready {
                 MailSetupView(model: mail, needsAccess: needsAccess)
-            } else if mail.draft != nil && !page.draftHidden {
-                ScrollView { ComposeView(model: mail).frame(maxWidth: .infinity) }
+            } else if composing && mail.draft?.mode == .new {
+                ComposeView(model: mail, docked: true)
             } else {
                 GeometryReader { geo in
                     HStack(spacing: 0) {
-                        if !(page.expanded && mail.selected != nil) {
+                        // A reply keeps its message in view; the list steps aside for the room.
+                        if !composing && !(page.expanded && mail.selected != nil) {
                             list.frame(width: geo.size.width * split.listFraction)
                             Divider()
                         }
-                        MailReader(model: mail, expanded: $page.expanded).frame(maxWidth: .infinity, maxHeight: .infinity)
+                        VStack(spacing: 0) {
+                            MailReader(model: mail, expanded: composing ? nil : $page.expanded).frame(maxWidth: .infinity, maxHeight: .infinity)
+                            if composing {
+                                Divider()
+                                ComposeView(model: mail, docked: true).frame(height: max(230, geo.size.height * 0.46))
+                            }
+                        }
                     }
                 }
             }
@@ -137,15 +145,11 @@ private struct MailPageView: View {
         // A new reply, such as from the reader's Reply button, shows at once.
         .onChange(of: mail.draft?.mode) { _, _ in page.draftHidden = false }
         .onChange(of: mail.draft?.body) { _, _ in page.discardArmed = false }
-        .overlay(alignment: .bottom) {
-            if let banner = mail.banner {
-                Text(banner).font(.callout).padding(.horizontal, 14).padding(.vertical, 8)
-                    .background(.regularMaterial, in: Capsule()).padding(.bottom, 12)
-                    .onTapGesture { mail.banner = nil }
-                    .task(id: banner) { try? await Task.sleep(nanoseconds: 4_000_000_000); if mail.banner == banner { mail.banner = nil } }
-            }
-        }
+        // Above the composer's footer while one is open, so the note never covers Send.
+        .overlay(alignment: .bottom) { MailBanner(model: mail).padding(.bottom, composing ? 58 : 12) }
     }
+
+    private var composing: Bool { mail.draft != nil && !page.draftHidden }
 
     private var ready: Bool { if snapshot { return true }; if case .ready = mail.status { return true }; return false }
     private var needsAccess: Bool { if case .needsFullDiskAccess = mail.status { return true }; return false }

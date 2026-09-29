@@ -20,6 +20,21 @@ final class MailModel: ObservableObject {
         var instruction = ""
         /// The message a reply or forward answers.
         var original: MailSummary?
+
+        /// What stops sending, or nil when the draft can go. Send and ⌘Return both check it, so an
+        /// empty reply never goes out. A forward may have no text; Mail sends the original.
+        var sendProblem: String? {
+            let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
+            let recipients = to.trimmingCharacters(in: .whitespacesAndNewlines)
+            switch mode {
+            case .reply: return text.isEmpty ? "Write your reply first." : nil
+            case .forward: return recipients.isEmpty ? "Add who to forward it to." : nil
+            case .new:
+                if recipients.isEmpty { return "Add a recipient first." }
+                return text.isEmpty && subject.trimmingCharacters(in: .whitespaces).isEmpty ? "Write a subject or a message first." : nil
+            }
+        }
+        var canSend: Bool { sendProblem == nil }
     }
 
     @Published private(set) var status: MailStore.Status = .noMail
@@ -78,6 +93,12 @@ final class MailModel: ObservableObject {
     @Published var banner: String?
     @Published var draft: Draft?
     @Published private(set) var sending = false
+    /// A sent draft during its undo time. Undo brings it back; after the time it goes to Mail.
+    @Published private(set) var pendingSend: Draft?
+    private var sendTask: Task<Void, Never>?
+    private let sendDraft: (Draft, MailMailbox?) async throws -> Void
+    /// Seconds a sent message waits, so Undo can stop it.
+    private let undoDelay: TimeInterval
     @Published private(set) var summary: String?
     @Published private(set) var quillBusy = false
 
@@ -122,9 +143,12 @@ final class MailModel: ObservableObject {
     private var actionChain: Task<Void, Never>?
 
     init(quill: @escaping (QuillRequest) async throws -> QuillReply, quillAllowed: @escaping () -> Bool, statusProvider: @escaping @Sendable () -> MailStore.Status = { MailStore.status() },
-         setRead: @escaping (Bool, MailSummary, MailMailbox, MailMailbox?) async throws -> Void = { try await MailActions.setRead($0, $1, in: $2, fallback: $3) }) {
+         setRead: @escaping (Bool, MailSummary, MailMailbox, MailMailbox?) async throws -> Void = { try await MailActions.setRead($0, $1, in: $2, fallback: $3) },
+         sendDraft: @escaping (Draft, MailMailbox?) async throws -> Void = { try await MailModel.deliver($0, $1) }, undoDelay: TimeInterval = 5) {
         self.statusProvider = statusProvider
         self.setReadAction = setRead
+        self.sendDraft = sendDraft
+        self.undoDelay = undoDelay
         self.quill = quill; self.quillAllowed = quillAllowed
         // Settings › Mail writes the same default; follow it while this window exists.
         defaultsObserver = NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
@@ -199,9 +223,11 @@ final class MailModel: ObservableObject {
         changedAccounts = []
         guard startedMail else { return }
         startedMail = false
-        let pending = actionChain
+        let pending = actionChain, sendingNow = sendTask
         quit = Task { @MainActor [weak self] in
             await pending?.value
+            // A message in its undo time still goes out through Mail before Mail quits.
+            await sendingNow?.value
             // Mail sends changes such as read status to the server after it makes them. Quitting
             // first would leave your phone out of step until Mail runs again.
             if !accounts.isEmpty { try? await MailActions.synchronize(accounts: accounts) }
@@ -777,28 +803,77 @@ final class MailModel: ObservableObject {
         draft = Draft(mode: .forward, subject: subject, original: message)
     }
 
+    /// Checks the draft, then sends it after the undo time. The draft leaves the screen at once;
+    /// Undo, or a send that fails, brings it back with its text.
     func send() {
-        guard let draft, !sending else { return }
-        sending = true
-        Task { @MainActor [weak self] in
-            defer { self?.sending = false }
-            do {
-                switch draft.mode {
-                case .new:
-                    try await MailActions.send(to: MailActions.addresses(draft.to), cc: MailActions.addresses(draft.cc), subject: draft.subject, body: draft.body)
-                case .reply(let all):
-                    guard let original = draft.original, let box = self?.actionBox(original) else { return }
-                    try await MailActions.reply(original, in: box, text: draft.body, all: all)
-                case .forward:
-                    guard let original = draft.original, let box = self?.actionBox(original) else { return }
-                    try await MailActions.forward(original, in: box, text: draft.body, to: MailActions.addresses(draft.to))
-                }
-                self?.draft = nil
-                self?.banner = "Sent."
-            } catch {
-                self?.banner = "Not sent: " + error.localizedDescription
-            }
+        guard let draft, !sending, pendingSend == nil else { return }
+        if let problem = draft.sendProblem { banner = problem; return }
+        // Mail picks a reply's addresses itself; a new message or a forward uses the typed ones.
+        let isReply: Bool = { if case .reply = draft.mode { return true }; return false }()
+        do {
+            if !isReply { _ = try MailActions.addresses(draft.to) }
+            if draft.mode == .new { _ = try MailActions.addresses(draft.cc) }
+        } catch {
+            banner = error.localizedDescription
+            return
         }
+        let box = draft.original.flatMap(actionBox)
+        if draft.mode != .new, box == nil { banner = "The message to answer is no longer in the list."; return }
+        pendingSend = draft
+        self.draft = nil
+        banner = nil
+        let action = sendDraft, delay = undoDelay
+        sendTask = Task { @MainActor [weak self] in
+            if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
+            guard let self, !Task.isCancelled, self.pendingSend != nil else { return }
+            self.pendingSend = nil
+            self.sending = true
+            do {
+                try await action(draft, box)
+                self.banner = "Sent."
+            } catch {
+                // Nothing typed is lost: the draft comes back with the reason.
+                if self.draft == nil { self.draft = draft }
+                self.banner = "Not sent: " + error.localizedDescription
+            }
+            self.sending = false
+            self.sendTask = nil
+        }
+    }
+
+    /// Stops a send during its undo time and brings the draft back.
+    func undoSend() {
+        guard let pending = pendingSend else { return }
+        sendTask?.cancel()
+        sendTask = nil
+        pendingSend = nil
+        if draft == nil { draft = pending }
+        banner = "Not sent. Your message is back."
+    }
+
+    /// Sends a draft through Apple Mail, or through Jevcast's own accounts when they are the mail source.
+    nonisolated static func deliver(_ draft: Draft, _ box: MailMailbox?) async throws {
+        switch draft.mode {
+        case .new:
+            try await MailActions.send(to: MailActions.addresses(draft.to), cc: MailActions.addresses(draft.cc), subject: draft.subject, body: draft.body)
+        case .reply(let all):
+            guard let original = draft.original, let box else { throw LauncherError("The message to answer is no longer in the list.") }
+            try await MailActions.reply(original, in: box, text: draft.body, all: all)
+        case .forward:
+            guard let original = draft.original, let box else { throw LauncherError("The message to answer is no longer in the list.") }
+            try await MailActions.forward(original, in: box, text: draft.body, to: MailActions.addresses(draft.to))
+        }
+    }
+
+    /// Who a reply goes to, for the composer: the Reply-To address or the sender. Apple Mail
+    /// picks the exact list when it sends; Reply All also goes to everyone else on the message.
+    func replySummary(for draft: Draft) -> String {
+        guard case .reply(let all) = draft.mode, let original = draft.original else { return draft.to }
+        var primary = original.senderName.isEmpty ? original.senderAddress : "\(original.senderName) <\(original.senderAddress)>"
+        if selectedID == original.rowID, let replyTo = detail?.header("Reply-To").flatMap({ MailAddress.list($0).first }), !replyTo.address.isEmpty {
+            primary = replyTo.name.isEmpty ? replyTo.address : "\(replyTo.name) <\(replyTo.address)>"
+        }
+        return all ? primary + " and everyone else on the message" : primary
     }
 
     // MARK: Quill

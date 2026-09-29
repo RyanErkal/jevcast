@@ -78,12 +78,12 @@ final class QuillTaskCenter: ObservableObject {
             }
         }
         // After waking, the network needs a moment, so the check waits 20 seconds.
+        // A plain Task statement: inside `MainActor.assumeIsolated` it was the closure's generic
+        // result, which Swift 6.3 (Xcode 26.6) cannot resolve between Task's two initialisers.
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                Task { @MainActor [weak self] in
-                    try? await Task.sleep(nanoseconds: 20_000_000_000)
-                    self?.runDue()
-                }
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 20_000_000_000)
+                self?.runDue()
             }
         }
     }

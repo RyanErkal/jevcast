@@ -115,6 +115,25 @@ final class MailComposeTests: XCTestCase {
         XCTAssertTrue(model.replySummary(for: all).hasSuffix("and everyone else on the message"))
     }
 
+    @MainActor func testRRepliesInTheLauncherWhileTheFilterIsEmpty() async throws {
+        let model = try await readyModel(Outbox(), delay: 0)
+        let page = MailPage(mail: model, popOut: nil)
+        func r(_ flags: NSEvent.ModifierFlags = []) -> NSEvent {
+            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
+                             characters: flags.contains(.shift) ? "R" : "r", charactersIgnoringModifiers: "r", isARepeat: false, keyCode: 15)!
+        }
+        XCTAssertTrue(page.handleEvent(r()))
+        XCTAssertEqual(model.draft?.mode, .reply(all: false))
+        XCTAssertFalse(page.handleEvent(r()), "While writing, R types in the reply")
+        model.draft = nil
+        XCTAssertTrue(page.handleEvent(r(.shift)))
+        XCTAssertEqual(model.draft?.mode, .reply(all: true))
+        model.draft = nil
+        model.search = "re"
+        XCTAssertFalse(page.handleEvent(r()), "With text in the filter, R types")
+        XCTAssertNil(model.draft)
+    }
+
     // MARK: Helpers
 
     @MainActor private func readyModel(_ outbox: Outbox, delay: TimeInterval) async throws -> MailModel {

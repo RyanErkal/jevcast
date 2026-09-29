@@ -77,7 +77,8 @@ final class MailPage: ObservableObject, LauncherPage {
         return true
     }
 
-    /// Space expands or restores the message while the filter is empty.
+    /// Space expands or restores the message, and R replies (Shift–R to all), while the filter is
+    /// empty. With text in the filter, both keys type.
     func handleEvent(_ event: NSEvent) -> Bool {
         guard let mail, !isTyping else { return false }
         let flags = event.modifierFlags.intersection([.command, .control, .option, .shift])
@@ -86,10 +87,16 @@ final class MailPage: ObservableObject, LauncherPage {
             expanded.toggle()
             return true
         }
+        if event.keyCode == 15, flags.isEmpty || flags == .shift, mail.search.isEmpty, mail.selected != nil { // R
+            mail.reply(all: flags == .shift)
+            return true
+        }
         return false
     }
 
-    var footerHints: [(title: String, key: String)] { mail?.selected == nil ? [] : [(expanded ? "List" : "Expand", "Space")] }
+    var footerHints: [(title: String, key: String)] {
+        mail?.selected == nil || isTyping ? [] : [("Reply", "R"), (expanded ? "List" : "Expand", "Space")]
+    }
 
     func back() -> Bool {
         if let mail, let draft = mail.draft, !draftHidden {

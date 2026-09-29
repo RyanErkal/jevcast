@@ -11,6 +11,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 ### Changed
 
 - **Replies keep the message in view.** In the launcher, a reply now opens under the message it answers, with who it goes to, a clear text area, and Send and Discard. New messages and forwards use the same editor, in the launcher and in the mail window.
+- **R replies in the launcher's Mail view**, and Shift–R replies to all, while the filter is empty.
 - **Undo Send.** A sent message waits 5 seconds. Click Undo, or press ⌘Z, to bring it back.
 
 ### Fixed

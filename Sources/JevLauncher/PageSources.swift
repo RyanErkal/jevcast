@@ -51,7 +51,7 @@ enum LauncherPages {
     static func make(_ id: ViewID, model: LauncherModel, links: Links, snapshot: Bool) -> LauncherPage? {
         switch id {
         case .mail:
-            return MailPage(mail: snapshot ? nil : links.mail?(), popOut: links.mailWindow)
+            return MailPage(mail: snapshot ? nil : links.mail?(), popOut: links.mailWindow, focusFilter: { [weak model] in model?.focusInput() })
         case .calendar:
             let list = SourcePage(.calendar, source: snapshot ? nil : CalendarSource(), model: model, scope: "week", hasDetail: true,
                                   emptyText: "Nothing in the next seven days.",

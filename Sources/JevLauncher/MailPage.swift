@@ -1,10 +1,12 @@
 import AppKit
+import Combine
 import SwiftUI
 import LauncherCore
 
 /// Mail in the launcher panel: the inbox list on the left and the selected message on the right.
 /// It uses the mail window's model and views. ↑↓ move and preview, a previewed message is marked
-/// read, Return opens it in Mail, ⌫ deletes, and ⌘O moves to the mail window.
+/// read, Return opens it in Mail, ⌫ deletes, and ⌘O moves to the mail window. Letters always type
+/// in the filter, so replies use Apple Mail's keys: ⌘R, ⇧⌘R, and ⇧⌘F to forward.
 /// A reply is written in the panel: the panel is the key window, so text boxes take typing
 /// without activating the app.
 @MainActor
@@ -13,16 +15,26 @@ final class MailPage: ObservableObject, LauncherPage {
     /// Nil for snapshot runs, which show the empty inbox and never read Mail.
     let mail: MailModel?
     private let popOutAction: ((Int64?) -> Void)?
-    /// A kept reply stays in the model but steps aside while a message picked in the search shows.
+    /// Gives the keys back to the filter field, such as after the composer closes.
+    let focusFilter: (() -> Void)?
+    /// A kept draft stays in the model but steps aside while a message picked in the search shows.
     @Published var draftHidden = false
-    /// A reply with text needs a second Escape before it is discarded.
-    var discardArmed = false
     /// The message fills the panel and the list hides. Escape returns to two panes first.
     @Published var expanded = false
     /// An empty model for snapshot runs, which never read Mail.
     private lazy var empty = MailModel(quill: { _ in throw CancellationError() }, quillAllowed: { false })
 
-    init(mail: MailModel?, popOut: ((Int64?) -> Void)?) { self.mail = mail; self.popOutAction = popOut }
+    private var draftWatch: AnyCancellable?
+
+    init(mail: MailModel?, popOut: ((Int64?) -> Void)?, focusFilter: (() -> Void)? = nil) {
+        self.mail = mail; self.popOutAction = popOut; self.focusFilter = focusFilter
+        // A new draft, such as from the reader's Reply button, shows at once. So does the open
+        // draft when a new one was refused.
+        guard let mail else { return }
+        let newDraft = mail.$draft.map { $0?.id }.removeDuplicates().dropFirst().map { _ in () }
+        draftWatch = newDraft.merge(with: mail.$draftNudge.dropFirst().map { _ in () })
+            .sink { [weak self] in MainActor.assumeIsolated { self?.draftHidden = false } }
+    }
 
     private var model: MailModel { mail ?? empty }
     var isTyping: Bool { mail?.draft != nil && !draftHidden }
@@ -41,7 +53,7 @@ final class MailPage: ObservableObject, LauncherPage {
     func closed(handingOff: Bool) {
         guard let mail else { return }
         mail.windowIsKey = false
-        discardArmed = false
+        if mail.discardArmed { mail.discardArmed = false; mail.composeNote = nil }
         expanded = false
         // An open reply stays in the model, so the mail window or the next visit shows it.
         if !handingOff { mail.stop() }
@@ -52,9 +64,9 @@ final class MailPage: ObservableObject, LauncherPage {
     func show(_ rowID: Int64) {
         guard let mail, mail.open(rowID) else { return }
         mail.windowIsKey = true
-        if mail.draft != nil {
+        if let draft = mail.draft {
             draftHidden = true
-            mail.banner = "Your unsent reply is kept. Press Escape to go back to it."
+            mail.banner = "Your unsent \(draft.noun) is kept. Press Escape to go back to it."
         }
     }
 
@@ -77,36 +89,45 @@ final class MailPage: ObservableObject, LauncherPage {
         return true
     }
 
-    /// Space expands or restores the message, and R replies (Shift–R to all), while the filter is
-    /// empty. With text in the filter, both keys type.
+    /// Space expands or restores the message while the filter is empty. ⌘R replies, ⇧⌘R replies
+    /// to all, and ⇧⌘F forwards, as in Apple Mail; plain letters always type in the filter. Keys
+    /// are read as characters, so they match the key caps on every keyboard layout.
     func handleEvent(_ event: NSEvent) -> Bool {
         guard let mail, !isTyping else { return false }
         let flags = event.modifierFlags.intersection([.command, .control, .option, .shift])
-        if flags == .command, event.keyCode == 6, mail.pendingSend != nil { mail.undoSend(); return true } // ⌘Z
-        if event.keyCode == 49, flags.isEmpty, mail.search.isEmpty, mail.selected != nil {
+        let key = event.charactersIgnoringModifiers?.lowercased()
+        if flags == .command, key == "z", mail.pendingSend != nil { mail.undoSend(); return true }
+        guard mail.selected != nil else { return false }
+        if key == " ", flags.isEmpty, mail.search.isEmpty {
             expanded.toggle()
             return true
         }
-        if event.keyCode == 15, flags.isEmpty || flags == .shift, mail.search.isEmpty, mail.selected != nil { // R
-            mail.reply(all: flags == .shift)
-            return true
+        switch (key, flags) {
+        case ("r", .command): mail.reply(all: false)
+        case ("r", [.command, .shift]): mail.reply(all: true)
+        case ("f", [.command, .shift]): mail.forward()
+        default: return false
         }
-        return false
+        return true
     }
 
     var footerHints: [(title: String, key: String)] {
-        mail?.selected == nil || isTyping ? [] : [("Reply", "R"), (expanded ? "List" : "Expand", "Space")]
+        if isTyping { return [("Send", "⌘↩")] }
+        guard mail?.selected != nil else { return [] }
+        return [("Reply", "⌘R"), ("Forward", "⇧⌘F"), (expanded ? "List" : "Expand", "Space")]
+    }
+    var backTitle: String? { isTyping ? "Discard" : nil }
+    var footerChanges: AnyPublisher<Void, Never> {
+        let own = objectWillChange.map { _ in () }
+        guard let mail else { return own.eraseToAnyPublisher() }
+        return own.merge(with: mail.objectWillChange.map { _ in () }).eraseToAnyPublisher()
     }
 
+    /// Escape: discards the open draft (twice when it has text), then shows a kept one, then
+    /// leaves the expanded message.
     func back() -> Bool {
-        if let mail, let draft = mail.draft, !draftHidden {
-            if !draft.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !discardArmed {
-                discardArmed = true
-                mail.banner = "Press Escape again to discard this reply."
-                return true
-            }
-            discardArmed = false
-            mail.draft = nil
+        if let mail, mail.draft != nil, !draftHidden {
+            mail.discardDraft()
             return true
         }
         if draftHidden { draftHidden = false; return true }
@@ -129,7 +150,7 @@ private struct MailPageView: View {
             if !ready {
                 MailSetupView(model: mail, needsAccess: needsAccess)
             } else if composing && mail.draft?.mode == .new {
-                ComposeView(model: mail, docked: true)
+                ComposeView(model: mail, docked: true).id(mail.draft?.id)
             } else {
                 GeometryReader { geo in
                     HStack(spacing: 0) {
@@ -139,19 +160,19 @@ private struct MailPageView: View {
                             Divider()
                         }
                         VStack(spacing: 0) {
-                            MailReader(model: mail, expanded: composing ? nil : $page.expanded).frame(maxWidth: .infinity, maxHeight: .infinity)
+                            MailReader(model: mail, expanded: composing ? nil : $page.expanded, draft: composing ? mail.draft : nil, inPanel: true)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
                             if composing {
                                 Divider()
-                                ComposeView(model: mail, docked: true).frame(height: max(230, geo.size.height * 0.46))
+                                ComposeView(model: mail, docked: true).id(mail.draft?.id).frame(height: max(230, geo.size.height * 0.46))
                             }
                         }
                     }
                 }
             }
         }
-        // A new reply, such as from the reader's Reply button, shows at once.
-        .onChange(of: mail.draft?.mode) { _, _ in page.draftHidden = false }
-        .onChange(of: mail.draft?.body) { _, _ in page.discardArmed = false }
+        // The filter takes the keys again once the composer closes or steps aside.
+        .onChange(of: composing) { _, now in if !now { DispatchQueue.main.async { page.focusFilter?() } } }
         // Above the composer's footer while one is open, so the note never covers Send.
         .overlay(alignment: .bottom) { MailBanner(model: mail).padding(.bottom, composing ? 58 : 12) }
     }

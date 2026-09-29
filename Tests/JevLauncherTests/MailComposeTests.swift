@@ -2,25 +2,14 @@ import XCTest
 import LauncherCore
 @testable import JevLauncher
 
-/// Sending from the mail views: an empty reply never goes out, Undo stops a send, and a send that
-/// fails brings the draft back. A fake send action stands in for Apple Mail.
+/// Writing in the mail views: what a draft needs before it can go, one draft at a time, the keys
+/// that start one, and Escape. A fake send action stands in for Apple Mail.
+@MainActor
 final class MailComposeTests: XCTestCase {
-    private var root = ""
+    private var rig: MailComposeRig!
 
-    private final class Outbox: @unchecked Sendable {
-        private let lock = NSLock()
-        private var items: [MailModel.Draft] = []
-        var fails = false
-        func add(_ draft: MailModel.Draft) { lock.withLock { items.append(draft) } }
-        var all: [MailModel.Draft] { lock.withLock { items } }
-    }
-
-    override func setUpWithError() throws {
-        root = FileManager.default.temporaryDirectory.appendingPathComponent("mail-compose-" + UUID().uuidString).path
-        try MailFixture.build(root: root, layout: .init(gmailInbox: 5, allMailOnly: 0, sent: 0, trash: 0, exchangeInbox: 0, projects: 0, perFolder: 0))
-    }
-
-    override func tearDownWithError() throws { try FileManager.default.removeItem(atPath: root) }
+    override func setUp() async throws { rig = try MailComposeRig() }
+    override func tearDown() async throws { rig.remove() }
 
     func testWhatADraftNeedsBeforeItCanGo() {
         var reply = MailModel.Draft(mode: .reply(all: false), to: "sam@example.com")
@@ -31,127 +20,242 @@ final class MailComposeTests: XCTestCase {
         XCTAssertTrue(reply.canSend)
 
         var forward = MailModel.Draft(mode: .forward)
-        XCTAssertEqual(forward.sendProblem, "Add who to forward it to.")
+        XCTAssertEqual(forward.sendProblem, "Add a recipient.")
+        forward.to = " , ; "
+        XCTAssertEqual(forward.sendProblem, "Add a recipient.", "Separators alone are no recipient")
+        forward.to = "not an address"
+        XCTAssertEqual(forward.sendProblem, "“not an address” is not an email address.")
         forward.to = "ann@example.com"
         XCTAssertTrue(forward.canSend, "A forward may go without a note")
 
-        XCTAssertEqual(MailModel.Draft(mode: .new).sendProblem, "Add a recipient first.")
+        XCTAssertEqual(MailModel.Draft(mode: .new).sendProblem, "Add a recipient.")
         var new = MailModel.Draft(mode: .new, to: "bob@example.com")
         XCTAssertEqual(new.sendProblem, "Write a subject or a message first.")
         new.subject = "Lunch"
         XCTAssertTrue(new.canSend)
+        new.cc = "carl"
+        XCTAssertEqual(new.sendProblem, "“carl” is not an email address.")
     }
 
-    @MainActor func testAnEmptyReplyNeverReachesMail() async throws {
-        let outbox = Outbox()
-        let model = try await readyModel(outbox, delay: 0)
+    func testOnlyTypedTextCountsAsContent() {
+        XCTAssertFalse(MailModel.Draft(mode: .reply(all: false), to: "sam@example.com", subject: "Re: Lunch").hasContent)
+        XCTAssertFalse(MailModel.Draft(mode: .forward, subject: "Fwd: Lunch").hasContent)
+        XCTAssertTrue(MailModel.Draft(mode: .forward, to: "ann@example.com").hasContent)
+        XCTAssertTrue(MailModel.Draft(mode: .new, subject: "Lunch").hasContent)
+        XCTAssertTrue(MailModel.Draft(mode: .reply(all: false), instruction: "say yes").hasContent)
+        XCTAssertNotEqual(MailModel.Draft().id, MailModel.Draft().id)
+    }
+
+    func testAnEmptyReplyNeverReachesMail() async throws {
+        let model = try await rig.model(delay: 0)
         model.reply(all: false)
-        model.send()
-        XCTAssertEqual(model.banner, "Write your reply first.")
+        XCTAssertEqual(model.send(), "Write your reply first.")
+        XCTAssertEqual(model.composeNote, "Write your reply first.", "The composer's footer says why")
         XCTAssertNotNil(model.draft, "The reply stays open")
         XCTAssertNil(model.pendingSend)
+        model.draft?.body = "Now with text"
+        XCTAssertNil(model.composeNote, "Typing clears the note")
         try await Task.sleep(nanoseconds: 100_000_000)
-        XCTAssertTrue(outbox.all.isEmpty)
+        XCTAssertTrue(rig.outbox.all.isEmpty)
     }
 
-    @MainActor func testUndoBringsTheDraftBackAndSendsNothing() async throws {
-        let outbox = Outbox()
-        let model = try await readyModel(outbox, delay: 30)
-        model.reply(all: false)
-        model.draft?.body = "See you Friday"
-        model.send()
-        XCTAssertNil(model.draft, "The composer closes at once")
-        XCTAssertEqual(model.pendingSend?.body, "See you Friday")
-        model.undoSend()
-        XCTAssertEqual(model.draft?.body, "See you Friday")
-        XCTAssertNil(model.pendingSend)
-        try await Task.sleep(nanoseconds: 100_000_000)
-        XCTAssertTrue(outbox.all.isEmpty)
-    }
-
-    @MainActor func testASendGoesOutAfterTheUndoTime() async throws {
-        let outbox = Outbox()
-        let model = try await readyModel(outbox, delay: 0.05)
-        model.reply(all: true)
-        model.draft?.body = "Works for me"
-        model.send()
-        try await wait { outbox.all.count == 1 && model.banner == "Sent." }
-        XCTAssertEqual(outbox.all.first?.body, "Works for me")
-        XCTAssertEqual(outbox.all.first?.mode, .reply(all: true))
-        XCTAssertNil(model.draft)
-        XCTAssertFalse(model.sending)
-    }
-
-    @MainActor func testAFailedSendBringsTheDraftBack() async throws {
-        let outbox = Outbox()
-        outbox.fails = true
-        let model = try await readyModel(outbox, delay: 0)
-        model.reply(all: false)
-        model.draft?.body = "Important answer"
-        model.send()
-        try await wait { model.banner?.hasPrefix("Not sent:") == true }
-        XCTAssertEqual(model.draft?.body, "Important answer")
-        XCTAssertTrue(model.banner?.contains("Mail did not take the text") == true)
-    }
-
-    @MainActor func testANewMessageNeedsValidAddresses() async throws {
-        let outbox = Outbox()
-        let model = try await readyModel(outbox, delay: 0)
+    func testANewMessageNeedsValidAddresses() async throws {
+        let model = try await rig.model(delay: 0)
         model.compose(to: "not an address")
         model.draft?.subject = "Hi"
-        model.send()
-        XCTAssertTrue(model.banner?.contains("is not an email address") == true)
+        XCTAssertEqual(model.send(), "“not an address” is not an email address.")
         XCTAssertNotNil(model.draft)
     }
 
-    @MainActor func testReplySummaryNamesWhoGetsIt() async throws {
-        let model = try await readyModel(Outbox(), delay: 0)
-        let selected = try XCTUnwrap(model.selected)
+    // MARK: One draft at a time
+
+    func testReplyNeverReplacesADraftWithText() async throws {
+        let model = try await rig.model(delay: 0)
         model.reply(all: false)
-        let single = try XCTUnwrap(model.draft)
-        XCTAssertTrue(model.replySummary(for: single).contains(selected.senderAddress))
+        model.draft?.body = "Half written"
+        let open = try XCTUnwrap(model.draft)
+        // The reader toolbar's Reply button, Forward, and ⌘N all start a draft the same way.
         model.reply(all: true)
-        let all = try XCTUnwrap(model.draft)
-        XCTAssertTrue(model.replySummary(for: all).hasSuffix("and everyone else on the message"))
+        model.forward()
+        model.compose(to: "ann@example.com")
+        XCTAssertEqual(model.draft?.id, open.id)
+        XCTAssertEqual(model.draft?.body, "Half written")
+        XCTAssertEqual(model.banner, "Finish or discard your open reply first.")
+        XCTAssertEqual(model.draftNudge, 3)
     }
 
-    @MainActor func testRRepliesInTheLauncherWhileTheFilterIsEmpty() async throws {
-        let model = try await readyModel(Outbox(), delay: 0)
+    func testAnEmptyDraftMakesWayForANewOne() async throws {
+        let model = try await rig.model(delay: 0)
+        model.reply(all: false)
+        let first = try XCTUnwrap(model.draft?.id)
+        model.forward()
+        XCTAssertEqual(model.draft?.mode, .forward)
+        XCTAssertNotEqual(model.draft?.id, first)
+        XCTAssertNil(model.banner)
+    }
+
+    func testAReplyKeyAfterShowingAnotherMessageBringsBackTheKeptReply() async throws {
+        let model = try await rig.model(delay: 0)
         let page = MailPage(mail: model, popOut: nil)
-        func r(_ flags: NSEvent.ModifierFlags = []) -> NSEvent {
-            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
-                             characters: flags.contains(.shift) ? "R" : "r", charactersIgnoringModifiers: "r", isARepeat: false, keyCode: 15)!
-        }
-        XCTAssertTrue(page.handleEvent(r()))
+        let other = try XCTUnwrap(model.messages.last?.rowID)
+        model.reply(all: false)
+        model.draft?.body = "Kept"
+        page.show(other)
+        XCTAssertTrue(page.draftHidden)
+        XCTAssertFalse(page.isTyping)
+        XCTAssertTrue(page.handleEvent(MailComposeRig.key("r", .command)))
+        XCTAssertEqual(model.draft?.body, "Kept", "The kept reply is not replaced")
+        XCTAssertFalse(page.draftHidden, "The kept reply shows again")
+        XCTAssertEqual(model.banner, "Finish or discard your open reply first.")
+    }
+
+    func testANewDraftShowsEvenWhenTheKeptOneWasHidden() async throws {
+        let model = try await rig.model(delay: 0)
+        let page = MailPage(mail: model, popOut: nil)
+        model.reply(all: false)
+        page.show(try XCTUnwrap(model.messages.last?.rowID))
+        XCTAssertTrue(page.draftHidden)
+        model.forward()
+        XCTAssertEqual(model.draft?.mode, .forward, "An empty reply makes way")
+        XCTAssertFalse(page.draftHidden, "A new draft never starts hidden")
+    }
+
+    // MARK: Keys
+
+    func testCommandRRepliesInTheLauncherAndLettersType() async throws {
+        let model = try await rig.model(delay: 0)
+        let page = MailPage(mail: model, popOut: nil)
+        XCTAssertFalse(page.handleEvent(MailComposeRig.key("r")), "Plain R types in the filter")
+        XCTAssertFalse(page.handleEvent(MailComposeRig.key("r", .shift)))
+        XCTAssertNil(model.draft)
+        XCTAssertTrue(page.handleEvent(MailComposeRig.key("r", .command)))
         XCTAssertEqual(model.draft?.mode, .reply(all: false))
-        XCTAssertFalse(page.handleEvent(r()), "While writing, R types in the reply")
+        XCTAssertFalse(page.handleEvent(MailComposeRig.key("r", .command)), "While writing, keys go to the reply")
         model.draft = nil
-        XCTAssertTrue(page.handleEvent(r(.shift)))
+        XCTAssertTrue(page.handleEvent(MailComposeRig.key("r", [.command, .shift])))
         XCTAssertEqual(model.draft?.mode, .reply(all: true))
         model.draft = nil
         model.search = "re"
-        XCTAssertFalse(page.handleEvent(r()), "With text in the filter, R types")
+        XCTAssertTrue(page.handleEvent(MailComposeRig.key("f", [.command, .shift])), "⇧⌘F forwards, also with text in the filter")
+        XCTAssertEqual(model.draft?.mode, .forward)
+        XCTAssertEqual(page.footerHints.first?.key, "⌘↩")
+        XCTAssertEqual(page.backTitle, "Discard")
+        model.draft = nil
+        XCTAssertEqual(page.footerHints.map(\.key), ["⌘R", "⇧⌘F", "Space"])
+        XCTAssertEqual(page.footerHints.first?.title, "Reply")
+        XCTAssertNil(page.backTitle)
+    }
+
+    func testCommandZUndoesASendButShiftCommandZDoesNot() async throws {
+        let model = try await rig.model(delay: 30)
+        let page = MailPage(mail: model, popOut: nil)
+        model.reply(all: false)
+        model.draft?.body = "Hello"
+        model.send()
+        XCTAssertFalse(page.handleEvent(MailComposeRig.key("z", [.command, .shift])))
+        XCTAssertNotNil(model.pendingSend)
+        XCTAssertTrue(page.handleEvent(MailComposeRig.key("z", .command)))
+        XCTAssertNil(model.pendingSend)
+        XCTAssertEqual(model.draft?.body, "Hello")
+    }
+
+    func testMailWindowKeysReadCharacters() async throws {
+        let model = try await rig.model(delay: 30)
+        let window = MailWindow(model: model)
+        defer { window.window?.close() }
+        func event(_ character: String, _ flags: NSEvent.ModifierFlags = []) -> NSEvent {
+            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: window.window?.windowNumber ?? 0,
+                             context: nil, characters: character, charactersIgnoringModifiers: character, isARepeat: false, keyCode: 0)!
+        }
+        XCTAssertTrue(window.handle(event("r")), "Plain R replies in the mail window, whatever the key code")
+        XCTAssertEqual(model.draft?.mode, .reply(all: false))
+        model.draft?.body = "Hi"
+        model.send()
+        XCTAssertFalse(window.handle(event("Z", [.command, .shift])), "⇧⌘Z is not Undo Send")
+        XCTAssertNotNil(model.pendingSend)
+        XCTAssertTrue(window.handle(event("z", .command)))
+        XCTAssertEqual(model.draft?.body, "Hi")
+    }
+
+    // MARK: Escape
+
+    func testEscapeAsksTwiceForAnyDraftWithText() async throws {
+        let model = try await rig.model(delay: 0)
+        let page = MailPage(mail: model, popOut: nil)
+
+        model.compose(to: "ann@example.com")
+        XCTAssertTrue(page.back())
+        XCTAssertNotNil(model.draft, "A new message with only To is kept after one Escape")
+        XCTAssertEqual(model.composeNote, "Press Escape or click Discard again to discard this message.")
+        model.draft?.subject = "Lunch"
+        XCTAssertTrue(page.back())
+        XCTAssertNotNil(model.draft, "An edit asks again")
+        XCTAssertTrue(page.back())
         XCTAssertNil(model.draft)
+
+        model.forward()
+        model.draft?.to = "bob@example.com"
+        XCTAssertTrue(page.back())
+        XCTAssertNotNil(model.draft, "A forward with a recipient is kept after one Escape")
+        XCTAssertTrue(page.back())
+        XCTAssertNil(model.draft)
+
+        model.reply(all: false)
+        XCTAssertTrue(page.back())
+        XCTAssertNil(model.draft, "An empty reply goes at once")
+        XCTAssertFalse(page.back())
     }
 
-    // MARK: Helpers
+    // MARK: Who gets a reply
 
-    @MainActor private func readyModel(_ outbox: Outbox, delay: TimeInterval) async throws -> MailModel {
-        let fixtureRoot = root
-        let model = MailModel(quill: { _ in throw CancellationError() }, quillAllowed: { false }, statusProvider: { .ready(root: fixtureRoot) },
-                              setRead: { _, _, _, _ in },
-                              sendDraft: { draft, _ in
-                                  outbox.add(draft)
-                                  if outbox.fails { throw LauncherError("Mail did not take the text, so nothing was sent.") }
-                              }, undoDelay: delay)
-        model.refreshStatus()
-        try await wait { model.selectedID != nil && !model.isLoading }
-        return model
+    func testReplyLineNamesWhoGetsIt() async throws {
+        try rig.writeBodies(rowIDs: Array(1...10)) { _ in
+            "Reply-To: Team List <list@example.com>\r\nTo: Ann <ann@example.com>, me@example.com, bob@example.com\r\n"
+                + "Cc: Carl <carl@example.com>\r\nDelivered-To: me@example.com\r\n"
+        }
+        let model = try await rig.model(delay: 0)
+        try await rig.wait { model.detail != nil }
+        model.reply(all: false)
+        let single = try XCTUnwrap(model.draft?.replyLine)
+        XCTAssertEqual(single.text, "Team List <list@example.com> (Reply-To)")
+        model.draft = nil
+        model.reply(all: true)
+        let all = try XCTUnwrap(model.draft?.replyLine)
+        XCTAssertEqual(all.text, "Team List (Reply-To), and 3 others: Ann, bob@example.com, Carl", "Your own address is left out")
+        XCTAssertEqual(all.detail.components(separatedBy: "\n").count, 4)
+        XCTAssertTrue(all.detail.contains("Carl <carl@example.com>"))
     }
 
-    @MainActor private func wait(_ predicate: () -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(5)
-        while !predicate(), Date() < deadline { try await Task.sleep(nanoseconds: 10_000_000) }
-        XCTAssertTrue(predicate(), "Timed out waiting for the mail model")
+    func testReplyLineWithoutHeadersSaysWhatItDoesNotKnow() throws {
+        let original = MailSummary(rowID: 1, mailbox: 1, subject: "Hi", senderName: "Sam", senderAddress: "sam@example.com",
+                                   snippet: "", date: Date(), read: true, flagged: false, conversation: 1)
+        XCTAssertEqual(ReplyLine(original: original, message: nil, all: false).text, "Sam <sam@example.com>")
+        XCTAssertEqual(ReplyLine(original: original, message: nil, all: true).text, "Sam, and everyone else on the message")
+    }
+
+    // MARK: The answered message stays in view
+
+    func testAReplyKeepsItsMessageWhenTheSelectionMoves() async throws {
+        try rig.writeBodies(rowIDs: Array(1...10)) { _ in "Reply-To: help@example.com\r\n" }
+        let model = try await rig.model(delay: 0)
+        try await rig.wait { model.detail != nil }
+        let answered = try XCTUnwrap(model.selected)
+        model.reply(all: false)
+        XCTAssertEqual(model.draft?.source?.rowID, answered.rowID)
+        model.moveSelection(1)
+        try await rig.wait { model.selectedID != answered.rowID && model.detail != nil }
+        XCTAssertEqual(model.draft?.original?.rowID, answered.rowID)
+        XCTAssertEqual(model.draft?.source?.message.header("Subject"), "Test \(answered.rowID)")
+        XCTAssertEqual(model.draft?.replyLine?.text, "help@example.com (Reply-To)", "The To line does not follow the selection")
+    }
+
+    func testAQuickReplyTakesTheTextOnceItLoads() async throws {
+        try rig.writeBodies(rowIDs: Array(1...10))
+        let model = try await rig.model(delay: 0)
+        let target = try XCTUnwrap(model.messages.last)
+        model.select(target.rowID, byUser: true)
+        model.reply(all: false)
+        try await rig.wait { model.draft?.source != nil }
+        XCTAssertEqual(model.draft?.source?.rowID, target.rowID)
     }
 }

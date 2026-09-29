@@ -88,18 +88,44 @@ final class MIMEMessageTests: XCTestCase {
         XCTAssertTrue(MailScripts.synchronize.contains("repeat with a in argv"))
     }
 
+    /// The scripts that send, their message variable, and how many `argv` items they read. The last
+    /// item is `checkText`.
+    private let sendingScripts = [(MailScripts.reply, "r", 6), (MailScripts.forward, "f", 6), (MailScripts.send, "o", 5)]
+
     /// Mail can ignore text set on a message it has not shown. The scripts read it back first and
-    /// send nothing without it.
+    /// send nothing without it. Mail's copy must start with the text, so a quoted original that
+    /// contains the same words, such as "Thanks,", does not pass the check.
     func testSendingScriptsCheckTheTextBeforeSending() throws {
-        for (script, argument, send) in [(MailScripts.reply, 6, "(send r)"), (MailScripts.forward, 6, "(send f)"), (MailScripts.send, 5, "(send o)")] {
-            let check = try XCTUnwrap(script.range(of: "if written does not contain (item \(argument) of argv) then"))
-            let sending = try XCTUnwrap(script.range(of: send))
+        for (script, message, argument) in sendingScripts {
+            let rules = try XCTUnwrap(script.range(of: "considering case but ignoring white space"))
+            let check = try XCTUnwrap(script.range(of: "set kept to written starts with (item \(argument) of argv)"))
+            let sending = try XCTUnwrap(script.range(of: "(send \(message))"))
+            XCTAssertLessThan(rules.lowerBound, check.lowerBound)
             XCTAssertLessThan(check.lowerBound, sending.lowerBound, "The check comes before the send")
-            XCTAssertTrue(script.contains("number 1003"))
+            XCTAssertTrue(script.contains("set written to (content of \(message)) as text"))
+            XCTAssertFalse(script.contains(" contains (item"), "Text anywhere in the message does not count")
+            XCTAssertTrue(script.contains("error \"Mail did not take the text, so nothing was sent.\" number 1003"))
+            let items = script.components(separatedBy: "(item ").dropFirst().compactMap { Int($0.prefix { $0.isNumber }) }
+            XCTAssertEqual(items.max(), argument, "The check text is the last argument")
         }
-        XCTAssertEqual(MailScripts.checkText("\n   \n  Hello there  \nsecond line"), "Hello there")
+        // Mail's own text that already starts with the reply, such as a signature, does not count as the reply.
+        for script in [MailScripts.reply, MailScripts.forward] {
+            XCTAssertTrue(script.contains("if kept and quoted starts with (item 6 of argv) then set kept to written does not start with quoted"))
+        }
+        XCTAssertTrue(MailScripts.reply.contains("set content of r to (item 4 of argv) & return & return & quoted"), "The reply text comes first")
+        XCTAssertTrue(MailScripts.forward.contains("set content of f to (item 4 of argv) & return & return & quoted"), "The note comes first")
+    }
+
+    /// The text that goes to Mail loses its leading white space, and the check is its first 200 characters.
+    func testCheckTextIsTheStartOfTheSentText() {
+        XCTAssertEqual(MailScripts.sendingText("\n \t\n\u{00A0} Hello there  \nsecond"), "Hello there  \nsecond")
+        XCTAssertEqual(MailScripts.sendingText("Hi\n"), "Hi\n", "Only leading white space goes")
+        XCTAssertEqual(MailScripts.checkText("\r\n   \n  Thanks,\nsee you then."), "Thanks,\nsee you then.", "More than the first line")
         XCTAssertEqual(MailScripts.checkText(" \n\t"), "")
-        XCTAssertEqual(MailScripts.checkText(String(repeating: "a", count: 100)).count, 60)
+        XCTAssertEqual(MailScripts.checkText(String(repeating: "a", count: 300)), String(repeating: "a", count: 200))
+        XCTAssertEqual(MailScripts.checkText(String(repeating: "👍🏽", count: 250)).count, 200, "Whole characters")
+        let body = "\n\n" + String(repeating: "word ", count: 100)
+        XCTAssertTrue(MailScripts.sendingText(body).hasPrefix(MailScripts.checkText(body)))
     }
 }
 

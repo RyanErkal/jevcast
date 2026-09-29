@@ -89,17 +89,21 @@ enum MailActions {
         if let engine = try native() { return try await engine.move(message.rowID, to: destination.rowID) }
         try await run(MailScripts.move, target(message, mailbox) + [destination.path])
     }
+    /// Apple Mail gets the text without leading white space, so Mail's copy starts with `checkText`.
     static func reply(_ message: MailSummary, in mailbox: MailMailbox, text: String, all: Bool) async throws {
         if let engine = try native() { return try await engine.reply(to: message.rowID, text: text, all: all) }
+        let text = MailScripts.sendingText(text)
         try await run(MailScripts.reply, target(message, mailbox) + [text, all ? "true" : "false", MailScripts.checkText(text)])
     }
     static func forward(_ message: MailSummary, in mailbox: MailMailbox, text: String, to recipients: [String]) async throws {
         if let engine = try native() { return try await engine.forward(message.rowID, text: text, to: recipients) }
+        let text = MailScripts.sendingText(text)
         try await run(MailScripts.forward, target(message, mailbox) + [text, recipients.joined(separator: "\n"), MailScripts.checkText(text)])
     }
     static func send(to: [String], cc: [String], subject: String, body: String) async throws {
         guard !to.isEmpty else { throw LauncherError("Add at least one recipient.") }
         if let engine = try native() { return try await engine.send(to: to, cc: cc, subject: subject, body: body) }
+        let body = MailScripts.sendingText(body)
         try await run(MailScripts.send, [to.joined(separator: "\n"), cc.joined(separator: "\n"), subject, body, MailScripts.checkText(body)])
     }
     static func checkForNewMail() async throws {

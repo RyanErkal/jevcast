@@ -122,6 +122,40 @@ final class NativeMailSyncTests: XCTestCase {
         await sync.stop()
     }
 
+    /// Yahoo shows only the newest thousand messages of a folder unless the client turns on UIDONLY.
+    func testUIDOnlyReachesMailBeyondTheServersDefaultView() async throws {
+        server.visibleLimit = 3
+        server.capabilities.append("UIDONLY")
+        for n in 1...6 { server.deliver(to: "INBOX", subject: "Mail \(n)") }
+        var policy = MailSyncPolicy()
+        policy.firstInbox = 4; policy.backfillBatch = 10
+        let sync = makeSync(policy)
+        await pass(sync, .everything)
+        await pass(sync, MailSyncRequest(backfill: true))
+        XCTAssertEqual(try subjects("INBOX"), (1...6).map { "Mail \($0)" })
+        let client = await sync.syncClient
+        let uidOnly = await client.uidOnly
+        XCTAssertTrue(uidOnly)
+        // New mail and changes still work with UIDs only.
+        let uid = server.deliver(to: "INBOX", subject: "Mail 7")
+        server.setFlags(["\\Seen"], uid: 1, in: "INBOX")
+        await pass(sync, .inboxOnly)
+        XCTAssertEqual(try subjects("INBOX").last, "Mail 7")
+        XCTAssertEqual(try value("SELECT read FROM messages WHERE ROWID = ?", [.int(try row("Mail 1"))]), 1)
+        XCTAssertEqual(uid, 7)
+        XCTAssertEqual(server.commands("FETCH"), 0, "No message numbers with UIDONLY")
+        await sync.stop()
+    }
+
+    func testWithoutUIDOnlyOnlyTheServersViewSyncs() async throws {
+        server.visibleLimit = 3
+        for n in 1...6 { server.deliver(to: "INBOX", subject: "Mail \(n)") }
+        let sync = makeSync()
+        await pass(sync, .everything)
+        XCTAssertEqual(try subjects("INBOX"), ["Mail 4", "Mail 5", "Mail 6"])
+        await sync.stop()
+    }
+
     func testRenumberedMailboxIsReadAgain() async throws {
         server.deliver(to: "INBOX", subject: "Before")
         let sync = makeSync()

@@ -17,6 +17,8 @@ final class FakeIMAPServer: @unchecked Sendable {
     var mailboxes: [Mailbox] = []
     var password = "app-password"
     var modSeq: UInt64 = 100
+    /// Like Yahoo: without UIDONLY a mailbox shows only its newest this-many messages.
+    var visibleLimit: Int?
     /// Command names in order, such as "UID FETCH", for asserting what the client did.
     private(set) var log: [String] = []
     private(set) var connections = 0
@@ -90,6 +92,7 @@ final class FakeIMAPTransport: MailTransport, @unchecked Sendable {
     private var selected: FakeIMAPServer.Mailbox?
     private var idleTag: String?
     private var sentGoAhead = false
+    private var uidOnly = false
     private var lock: NSLock { server.lock }
 
     init(server: FakeIMAPServer) {
@@ -188,7 +191,10 @@ final class FakeIMAPTransport: MailTransport, @unchecked Sendable {
         server.record(name)
         switch name {
         case "CAPABILITY": send("* CAPABILITY \(server.capabilities.joined(separator: " "))\r\n\(tag) OK done\r\n")
-        case "ENABLE": send("* ENABLED CONDSTORE\r\n\(tag) OK enabled\r\n")
+        case "ENABLE":
+            let asked = args.compactMap(\.text).map { $0.uppercased() }.filter(server.capabilities.contains)
+            if asked.contains("UIDONLY") { uidOnly = true }
+            send("* ENABLED \(asked.joined(separator: " "))\r\n\(tag) OK enabled\r\n")
         case "NOOP": send("\(tag) OK noop\r\n")
         case "LOGOUT": send("* BYE bye\r\n\(tag) OK logout\r\n")
         case "AUTHENTICATE":
@@ -207,7 +213,7 @@ final class FakeIMAPTransport: MailTransport, @unchecked Sendable {
             guard let name = args.first?.text, let box = server.mailbox(name) else { send("\(tag) NO no such mailbox\r\n"); return }
             selected = box
             let highest = box.messages.map(\.modSeq).max() ?? server.modSeq
-            send("* \(box.messages.count) EXISTS\r\n* OK [UIDVALIDITY \(box.uidValidity)] ok\r\n* OK [UIDNEXT \(box.nextUID)] ok\r\n")
+            send("* \(visible(box).count) EXISTS\r\n* OK [UIDVALIDITY \(box.uidValidity)] ok\r\n* OK [UIDNEXT \(box.nextUID)] ok\r\n")
             if server.capabilities.contains("CONDSTORE") { send("* OK [HIGHESTMODSEQ \(highest)] ok\r\n") }
             send("\(tag) OK [READ-WRITE] selected\r\n")
         case "IDLE":
@@ -228,21 +234,32 @@ final class FakeIMAPTransport: MailTransport, @unchecked Sendable {
         }
     }
 
+    /// The messages this connection may see: all with UIDONLY or no limit, else the newest few.
+    private func visible(_ box: FakeIMAPServer.Mailbox) -> [FakeIMAPServer.Message] {
+        guard let limit = server.visibleLimit, !uidOnly else { return box.messages }
+        return Array(box.messages.suffix(limit))
+    }
+
     private func uids(_ text: String, in box: FakeIMAPServer.Mailbox) -> [UInt32] {
-        let highest = box.messages.map(\.uid).max() ?? 0
+        let shown = visible(box)
+        let highest = shown.map(\.uid).max() ?? 0
         var result: [UInt32] = []
         for part in text.split(separator: ",") {
             let ends = part.split(separator: ":").map { $0 == "*" ? highest : UInt32($0) ?? 0 }
             let low = min(ends[0], ends.last!), high = max(ends[0], ends.last!)
-            result += box.messages.map(\.uid).filter { $0 >= low && $0 <= high }
+            result += shown.map(\.uid).filter { $0 >= low && $0 <= high }
         }
         return result
     }
 
     private func mailboxCommand(_ name: String, tag: String, args: [IMAPValue], box: FakeIMAPServer.Mailbox) {
+        if uidOnly, name == "FETCH" || (args.first?.text?.contains("*") ?? false) {
+            send("\(tag) BAD [UIDREQUIRED] Message numbers are not allowed once UIDONLY is enabled\r\n")
+            return
+        }
         switch name {
         case "UID SEARCH":
-            var found = box.messages.map(\.uid)
+            var found = visible(box).map(\.uid)
             if let index = args.firstIndex(where: { $0.text?.uppercased() == "UID" }), index + 1 < args.count, let set = args[index + 1].text {
                 found = uids(set, in: box)
             }
@@ -261,7 +278,8 @@ final class FakeIMAPTransport: MailTransport, @unchecked Sendable {
             let chosen: [UInt32]
             if name == "FETCH" {
                 let ends = setText.split(separator: ":").compactMap { Int($0) }
-                chosen = (ends[0]...ends.last!).compactMap { $0 >= 1 && $0 <= box.messages.count ? box.messages[$0 - 1].uid : nil }
+                let shown = visible(box)
+                chosen = (ends[0]...ends.last!).compactMap { $0 >= 1 && $0 <= shown.count ? shown[$0 - 1].uid : nil }
             } else {
                 chosen = uids(setText, in: box)
             }
@@ -279,7 +297,7 @@ final class FakeIMAPTransport: MailTransport, @unchecked Sendable {
                     parts.append("BODY[] {\(message.raw.count)}")
                     literal = message.raw
                 }
-                send("* \(index + 1) FETCH (" + parts.joined(separator: " "))
+                send(uidOnly ? "* \(message.uid) UIDFETCH (" + parts.joined(separator: " ") : "* \(index + 1) FETCH (" + parts.joined(separator: " "))
                 if let literal { send("\r\n"); output += Array(literal) }
                 send(")\r\n")
             }
@@ -305,15 +323,19 @@ final class FakeIMAPTransport: MailTransport, @unchecked Sendable {
             }
             if name == "UID MOVE" {
                 for uid in targets {
-                    if let index = box.messages.firstIndex(where: { $0.uid == uid }) { box.messages.remove(at: index); send("* \(index + 1) EXPUNGE\r\n") }
+                    if let index = box.messages.firstIndex(where: { $0.uid == uid }) {
+                        box.messages.remove(at: index)
+                        send(uidOnly ? "* VANISHED \(uid)\r\n" : "* \(index + 1) EXPUNGE\r\n")
+                    }
                 }
             }
             send("\(tag) OK done\r\n")
         case "UID EXPUNGE", "EXPUNGE":
             let targets = name == "EXPUNGE" ? box.messages.map(\.uid) : uids(args.first?.text ?? "", in: box)
             while let index = box.messages.firstIndex(where: { targets.contains($0.uid) && $0.flags.contains("\\Deleted") }) {
+                let uid = box.messages[index].uid
                 box.messages.remove(at: index)
-                send("* \(index + 1) EXPUNGE\r\n")
+                send(uidOnly ? "* VANISHED \(uid)\r\n" : "* \(index + 1) EXPUNGE\r\n")
             }
             send("\(tag) OK expunged\r\n")
         default: send("\(tag) BAD\r\n")

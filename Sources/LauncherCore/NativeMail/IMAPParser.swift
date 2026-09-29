@@ -56,6 +56,12 @@ public struct IMAPParser {
             case "FETCH":
                 try expect(Byte.space)
                 return .fetch(sequence: number, try fetch())
+            case "UIDFETCH":
+                // UIDONLY (RFC 9586): the number is the UID, and there is no message number.
+                try expect(Byte.space)
+                var data = try fetch()
+                if data.uid == nil { data.uid = number }
+                return .fetch(sequence: 0, data)
             default: return .other(kind)
             }
         }

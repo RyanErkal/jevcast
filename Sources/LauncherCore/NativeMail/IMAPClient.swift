@@ -34,6 +34,9 @@ public actor IMAPClient {
     var framer = IMAPFramer()
     private var tagNumber = 0
     public private(set) var capabilities: Set<String> = []
+    /// True once the server turned on UIDONLY (RFC 9586): commands then name messages only by UID,
+    /// and a server such as Yahoo shows every message, not only the newest thousand.
+    public private(set) var uidOnly = false
     var selected: MailboxInfo?
     private var busy = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
@@ -101,6 +104,7 @@ public actor IMAPClient {
         transport?.close()
         transport = nil
         selected = nil
+        uidOnly = false
         framer = IMAPFramer()
     }
 
@@ -131,7 +135,10 @@ public actor IMAPClient {
                 capabilities = Self.capabilities(from: reply.status.code) ?? []
                 if capabilities.isEmpty { try await refreshCapabilities() }
             }
-            if has("ENABLE"), has("CONDSTORE") { _ = try? await execute(IMAPCommand("ENABLE").raw("CONDSTORE")) }
+            let wanted = ["CONDSTORE", "UIDONLY"].filter(has)
+            if has("ENABLE"), !wanted.isEmpty, let reply = try? await execute(IMAPCommand("ENABLE").raw(wanted.joined(separator: " "))) {
+                for case .enabled(let list) in reply.untagged where list.contains(where: { $0.uppercased() == "UIDONLY" }) { uidOnly = true }
+            }
         } catch {
             disconnect()
             throw error
@@ -227,6 +234,7 @@ public actor IMAPClient {
         switch data {
         case .exists(let count): selected?.exists = count
         case .expunge: if let count = selected?.exists, count > 0 { selected?.exists = count - 1 }
+        case .vanished(let earlier, let set): if !earlier, let count = selected?.exists { selected?.exists = count - UInt32(min(Int(count), set.count)) }
         case .capability(let list): capabilities = Set(list.map { $0.uppercased() })
         default: break
         }

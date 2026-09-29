@@ -6,7 +6,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
-- **Jevcast accounts.** Jevcast can now sync mail itself, without Apple Mail. Add Yahoo (including @yahoo.ie), iCloud, Gmail, or another IMAP account with an app password in Settings › Mail › Accounts. The mail window, the launcher's Mail view, and mail search work as before, new mail arrives within seconds through IMAP IDLE, and changes and sent mail go straight to the account's servers. Apple Mail is never started, and Full Disk Access is not needed. **Read mail from** switches back to Apple Mail.
+- **Jevcast accounts.** Jevcast can now sync mail itself, without Apple Mail. Add Yahoo (including @yahoo.ie), iCloud, Gmail, or another IMAP account with an app password in Settings › Mail › Accounts. The mail window, the launcher's Mail view, and mail search work as before, new mail arrives within seconds through IMAP IDLE, and changes and sent mail go straight to the account's servers. On servers that offer UIDONLY, such as Yahoo, every message syncs, not only the newest thousand in each folder. Apple Mail is never started, and Full Disk Access is not needed. **Read mail from** switches back to Apple Mail.
 
 ### Fixed
 

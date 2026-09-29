@@ -88,6 +88,16 @@ final class IMAPProtocolTests: XCTestCase {
         XCTAssertEqual(quoted.sections["TEXT"], Data("say \"hi\"".utf8))
     }
 
+    func testUIDOnlyReplies() throws {
+        guard case .untagged(.fetch(let sequence, let data)) = try parse("* 25997 UIDFETCH (FLAGS (\\Flagged \\Answered))\r\n") else { return XCTFail() }
+        XCTAssertEqual(sequence, 0)
+        XCTAssertEqual(data.uid, 25997)
+        XCTAssertEqual(data.flags, ["\\Flagged", "\\Answered"])
+        guard case .untagged(.vanished(let earlier, let set)) = try parse("* VANISHED 405,407\r\n") else { return XCTFail() }
+        XCTAssertFalse(earlier)
+        XCTAssertEqual(set.numbers, [405, 407])
+    }
+
     func testSearchReplies() throws {
         XCTAssertEqual(try parse("* SEARCH 2 84 882\r\n"), .untagged(.search([2, 84, 882], modSeq: nil)))
         XCTAssertEqual(try parse("* SEARCH\r\n"), .untagged(.search([], modSeq: nil)))

@@ -70,10 +70,12 @@ extension IMAPClient {
     }
 
     /// UIDs from `first` up, for new mail: `first:*`, keeping only UIDs at or above `first`.
+    /// With UIDONLY the top is the highest possible UID, since RFC 9586 leaves `*` unclear there.
     public func fetch(from first: UInt32, items: String, in mailbox: String, validity: UInt32?) async throws -> [IMAPFetch] {
         let fetched = try await exclusive {
             try await ensureSelected(mailbox, validity: validity)
-            return try await execute(IMAPCommand("UID FETCH").raw("\(first):*").raw(items)).untagged
+            let top = uidOnly ? String(UInt32.max) : "*"
+            return try await execute(IMAPCommand("UID FETCH").raw("\(first):\(top)").raw(items)).untagged
         }
         return fetched.compactMap { if case .fetch(_, let data) = $0, let uid = data.uid, uid >= first { return data }; return nil }
     }
@@ -82,6 +84,7 @@ extension IMAPClient {
     public func fetch(sequence range: ClosedRange<UInt32>, items: String, in mailbox: String, validity: UInt32?) async throws -> [IMAPFetch] {
         let fetched = try await exclusive {
             try await ensureSelected(mailbox, validity: validity)
+            guard !uidOnly else { throw MailError.unexpected("a message number with UIDONLY on") }
             return try await execute(IMAPCommand("FETCH").raw("\(range.lowerBound):\(range.upperBound)").raw(items)).untagged
         }
         return fetched.compactMap { if case .fetch(_, let data) = $0, data.uid != nil { return data }; return nil }

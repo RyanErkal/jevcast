@@ -11,14 +11,22 @@ All notable changes to this project are listed here. The format follows [Keep a 
 ### Changed
 
 - **Replies keep the message in view.** In the launcher, a reply now opens under the message it answers, with who it goes to, a clear text area, and Send and Discard. New messages and forwards use the same editor, in the launcher and in the mail window.
-- **R replies in the launcher's Mail view**, and Shift–R replies to all, while the filter is empty.
-- **Undo Send.** A sent message waits 5 seconds. Click Undo, or press ⌘Z, to bring it back.
+- **⌘R replies in the launcher's Mail view**, ⇧⌘R replies to all, and ⇧⌘F forwards, as in Apple Mail. Letters always type in the filter, so you can search for "receipt" or "Ryan". The footer shows the keys, and Send ⌘↩ and Discard esc while you write.
+- **Undo Send.** A sent message waits 5 seconds, and the note counts down. Click Undo, or press ⌘Z, to bring it back. A new message, or Send on another one, sends a waiting message at once. Quitting Jevcast also sends it first, and waits for Mail to take it.
+- The reply's To line lists who gets it, such as "Sam, and 5 others: Ann, Bob, …", marks a Reply-To address, and shows every address when you point to it. Apple Mail sets the final list when it sends.
+- The composer's top has its own shade, and its title names the person, such as "Reply to Sam". Labels, values, and text line up.
 
 ### Fixed
 
-- **No more blank replies.** Send stays dimmed until a reply has text, a forward has a recipient, or a new message has a recipient and a subject or text. Before it sends, Jevcast reads the text back from Apple Mail; when Mail did not keep it, nothing is sent and the reply comes back with the reason.
+- **No more blank replies.** Send looks dimmed until a reply has text, a forward has a recipient, or a new message has a recipient and a subject or text. If you press it before that, the composer says what is missing. A lone comma is not a recipient. Before it sends, Jevcast reads the text back from Apple Mail; when Mail did not keep it, nothing is sent and the reply comes back with the reason.
 - **Apple Mail stays out of sight.** Opening the inbox no longer shows Apple Mail's window behind Jevcast. Jevcast starts Mail once, even when several changes ask at the same time, and hides it after it starts.
-- A send that fails brings the draft back, with its text, instead of losing it.
+- A send that fails brings the draft back, with its text, instead of losing it. While another message with text is open, the failed one waits, and the note offers Show. A failure while no mail view is open shows in the launcher. When Mail may have sent the message, the note says to check Sent, so you do not send it twice.
+- **Typed text is safe.** Reply, Forward, and New Message never replace a message you started. The open one comes back with "Finish or discard your open reply first." While you write in the launcher, the reader hides Reply, Delete, and Archive, and keeps the message you answer on screen, also when the list changes. Undo never loses text either.
+- **Escape asks twice** before it discards a new message, forward, or reply with text, in the launcher and in the mail window. The note shows in the composer's footer, not over your text.
+- Quill's draft goes only into the message it was written for, and not over text you changed while it wrote. Send waits until Quill finishes.
+- "Sending…" shows while a message goes to Mail.
+- The filter has the keys again after the composer closes, and the list comes back scrolled to your message.
+- Mail keys follow the key caps on QWERTZ, Dvorak, and other layouts. ⇧⌘Z no longer undoes a send.
 - A message saved with CRLF line ends now reads its last header correctly, so a base64 or quoted-printable body and a multipart boundary on that line are no longer missed.
 
 ## [1.13.0] - 2026-09-29

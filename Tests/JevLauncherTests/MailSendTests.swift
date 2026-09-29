@@ -2,51 +2,191 @@ import XCTest
 import LauncherCore
 @testable import JevLauncher
 
-/// What a failed send through Apple Mail means. Only a failure during or after Mail's `send`, or one
-/// at a point Jevcast cannot know, may have sent the message. Nothing here talks to Mail.
-final class MailSendFailureTests: XCTestCase {
-    private func failure(_ text: String) -> Error { CommandRunner.Failure(text: text) }
+/// Sending from the mail views: Undo stops a send, a new draft or Send sends a waiting message at
+/// once, a failed send never loses text, and Quill writes only into its own draft. A fake send
+/// action stands in for Apple Mail.
+@MainActor
+final class MailSendTests: XCTestCase {
+    private var rig: MailComposeRig!
 
-    func testOnlyFailuresDuringOrAfterSendMayHaveSent() {
-        let maybe = [
-            "0:1402: execution error: Mail stopped while it sent the message. (1005)",
-            "0:1402: execution error: Mail got an error: AppleEvent timed out. (-1712)",
-            "osascript took too long and was stopped."
-        ]
-        for text in maybe { XCTAssertTrue(MailActions.sendFailure(failure(text)) is MailMaybeSentError, text) }
-        XCTAssertTrue(MailActions.sendFailure(CancellationError()) is MailMaybeSentError, "A cancel stops the script at an unknown point")
+    override func setUp() async throws { rig = try MailComposeRig() }
+    override func tearDown() async throws { rig.remove() }
 
-        let notSent = [
-            "0:1402: execution error: Mail got an error: AppleEvent timed out. (1004)",
-            "0:1402: execution error: Mail did not take the text, so nothing was sent. (1003)",
-            "0:1402: execution error: Mail did not send the message. (1002)",
-            "0:1402: execution error: Mail got an error: Can’t get account id \"A\". (-1728)",
-            "osascript failed with code 1.",
-            "osascript could not start."
-        ]
-        for text in notSent {
-            let error = MailActions.sendFailure(failure(text))
-            XCTAssertFalse(error is MailMaybeSentError, text)
-            XCTAssertEqual(error.localizedDescription, text, "The error stays as it was")
-        }
-        XCTAssertFalse(MailActions.sendFailure(LauncherError("Apple Mail is not installed.")) is MailMaybeSentError)
-        XCTAssertEqual(MailMaybeSentError().localizedDescription, "Mail may have sent this message. Check Sent before you send it again.")
+    private func replyWith(_ text: String, in model: MailModel) {
+        model.reply(all: false)
+        model.draft?.body = text
     }
 
-    func testErrorNumberIsTheLastNumberInParentheses() {
-        XCTAssertEqual(MailActions.errorNumber("0:12: execution error: Mail stopped (really) while it sent the message. (1005)"), 1005)
-        XCTAssertEqual(MailActions.errorNumber("0:12: execution error: Mail got an error: AppleEvent timed out. (-1712)"), -1712)
-        XCTAssertNil(MailActions.errorNumber("osascript took too long and was stopped."))
-        XCTAssertNil(MailActions.errorNumber("Mail got an error (see Console)"))
+    // MARK: Undo and the send queue
+
+    func testUndoBringsTheDraftBackAndSendsNothing() async throws {
+        let model = try await rig.model(delay: 30)
+        replyWith("See you Friday", in: model)
+        model.send()
+        XCTAssertNil(model.draft, "The composer closes at once")
+        XCTAssertEqual(model.pendingSend?.body, "See you Friday")
+        XCTAssertTrue(model.sending)
+        model.undoSend()
+        XCTAssertEqual(model.draft?.body, "See you Friday")
+        XCTAssertEqual(model.banner, "Not sent. Your message is back.")
+        XCTAssertNil(model.pendingSend)
+        XCTAssertFalse(model.sending)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(rig.outbox.all.isEmpty)
     }
 
-    /// `CommandRunner` writes the time-limit text; a real stopped process shows that both agree.
-    func testTheTimeLimitOfARealProcessMayHaveSent() async {
-        do {
-            _ = try await CommandRunner.capture(["/bin/sleep", "5"], timeout: 0.2)
-            XCTFail("The time limit stops the process")
-        } catch {
-            XCTAssertTrue(MailActions.sendFailure(error) is MailMaybeSentError, error.localizedDescription)
-        }
+    func testASendGoesOutAfterTheUndoTime() async throws {
+        let model = try await rig.model(delay: 0.05)
+        model.reply(all: true)
+        model.draft?.body = "Works for me"
+        model.send()
+        try await rig.wait { rig.outbox.all.count == 1 && model.banner == "Sent." }
+        XCTAssertEqual(rig.outbox.all.first?.body, "Works for me")
+        XCTAssertEqual(rig.outbox.all.first?.mode, .reply(all: true))
+        XCTAssertNil(model.draft)
+        XCTAssertFalse(model.sending)
+    }
+
+    func testANewDraftSendsTheWaitingMessageAtOnce() async throws {
+        let model = try await rig.model(delay: 30)
+        replyWith("First", in: model)
+        model.send()
+        model.compose(to: "ann@example.com")
+        XCTAssertNil(model.pendingSend, "Undo is no longer offered")
+        try await rig.wait { rig.outbox.all.map(\.body) == ["First"] }
+        XCTAssertEqual(model.draft?.mode, .new)
+    }
+
+    func testSendWhileAMessageWaitsSendsTheWaitingOneFirst() async throws {
+        let model = try await rig.model(delay: 30)
+        replyWith("First", in: model)
+        model.send()
+        model.draft = MailModel.Draft(mode: .new, to: "ann@example.com", subject: "Second")
+        model.send()
+        XCTAssertEqual(model.pendingSend?.subject, "Second", "The new message waits for Undo")
+        try await rig.wait { rig.outbox.all.map(\.body) == ["First"] }
+        model.undoSend()
+        XCTAssertEqual(model.draft?.subject, "Second")
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(rig.outbox.all.count, 1)
+    }
+
+    func testUndoWhileAnotherDraftIsOpenKeepsBoth() async throws {
+        let model = try await rig.model(delay: 30)
+        replyWith("Undone reply", in: model)
+        model.send()
+        // A draft set directly, as a restore could, while the reply waits.
+        model.draft = MailModel.Draft(mode: .new, to: "ann@example.com", body: "Open draft")
+        model.undoSend()
+        XCTAssertEqual(model.draft?.body, "Open draft", "The open draft stays")
+        XCTAssertNotEqual(model.banner, "Not sent. Your message is back.")
+        XCTAssertEqual(model.unsent.map(\.draft.body), ["Undone reply"], "The undone reply is kept, not lost")
+        model.showUnsent()
+        XCTAssertEqual(model.draft?.body, "Open draft", "Show does not replace a draft with text")
+        XCTAssertEqual(model.banner, "Finish or discard your open message first.")
+        model.draft = nil
+        model.showUnsent()
+        XCTAssertEqual(model.draft?.body, "Undone reply")
+        XCTAssertTrue(model.unsent.isEmpty)
+    }
+
+    // MARK: Failed sends
+
+    func testAFailedSendBringsTheDraftBack() async throws {
+        rig.outbox.failing(with: LauncherError("Mail did not take the text, so nothing was sent."))
+        let model = try await rig.model(delay: 0)
+        var reported: [String] = []
+        model.onSendFailure = { reported.append($0) }
+        replyWith("Important answer", in: model)
+        model.send()
+        try await rig.wait { model.banner?.hasPrefix("Not sent:") == true }
+        XCTAssertEqual(model.draft?.body, "Important answer")
+        XCTAssertTrue(model.banner?.contains("Mail did not take the text") == true)
+        XCTAssertEqual(reported.count, 1, "The app hears of it, to show it when no mail view is on screen")
+        XCTAssertTrue(reported.first?.contains("Open Mail in Jevcast") == true)
+    }
+
+    func testAFailedSendWhileAnotherDraftIsOpenIsKept() async throws {
+        rig.outbox.failing(with: LauncherError("Mail is not responding."))
+        let model = try await rig.model(delay: 30)
+        replyWith("Will fail", in: model)
+        model.send()
+        // Starting a new draft sends the waiting reply now; it fails while the new one has text.
+        model.compose(to: "ann@example.com")
+        model.draft?.body = "Newer message"
+        try await rig.wait { !model.unsent.isEmpty }
+        XCTAssertEqual(model.draft?.body, "Newer message")
+        XCTAssertEqual(model.unsent.first?.draft.body, "Will fail")
+        XCTAssertEqual(model.unsent.first?.reason, "Not sent: Mail is not responding.")
+    }
+
+    func testASendMailMayHaveMadeKeepsTheDraftAndSaysToCheckSent() async throws {
+        rig.outbox.failing(with: MailMaybeSentError())
+        let model = try await rig.model(delay: 0)
+        replyWith("Maybe sent", in: model)
+        model.send()
+        try await rig.wait { model.draft != nil }
+        XCTAssertEqual(model.draft?.body, "Maybe sent")
+        XCTAssertEqual(model.banner, MailMaybeSentError().errorDescription)
+        XCTAssertFalse(model.banner?.hasPrefix("Not sent") == true)
+    }
+
+    // MARK: Quitting
+
+    func testFinishSendsSendsAWaitingMessageNow() async throws {
+        let model = try await rig.model(delay: 30)
+        replyWith("Before quitting", in: model)
+        model.send()
+        await model.finishSends()
+        XCTAssertEqual(rig.outbox.all.map(\.body), ["Before quitting"])
+        XCTAssertFalse(model.sending)
+    }
+
+    // MARK: Quill
+
+    func testQuillWritesOnlyIntoItsOwnUnchangedDraft() async throws {
+        let gate = QuillGate()
+        let model = try await rig.model(delay: 0) { _ in try await gate.reply() }
+
+        // Applied: the same draft, unchanged.
+        model.reply(all: false)
+        model.draft?.instruction = "say yes"
+        model.draftWithQuill()
+        XCTAssertTrue(model.quillBusy)
+        XCTAssertEqual(model.send(), "Wait until Quill finishes writing.", "No send while Quill writes")
+        gate.open()
+        try await rig.wait { !model.quillBusy }
+        XCTAssertEqual(model.draft?.body, "Quill text")
+
+        // Dropped: the body changed meanwhile.
+        gate.reset()
+        model.draftWithQuill()
+        model.draft?.body = "My own words"
+        gate.open()
+        try await rig.wait { !model.quillBusy }
+        XCTAssertEqual(model.draft?.body, "My own words")
+        XCTAssertEqual(model.composeNote, "Quill's text was not used because you changed the message.")
+
+        // Dropped: another draft took its place.
+        gate.reset()
+        model.draftWithQuill()
+        model.draft = nil
+        model.forward()
+        gate.open()
+        try await rig.wait { !model.quillBusy }
+        XCTAssertEqual(model.draft?.mode, .forward)
+        XCTAssertEqual(model.draft?.body, "", "Quill's text for the reply never lands in the forward")
+    }
+}
+
+/// Holds Quill's answer until the test opens it.
+private final class QuillGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isOpen = false
+    func open() { lock.withLock { isOpen = true } }
+    func reset() { lock.withLock { isOpen = false } }
+    func reply() async throws -> QuillReply {
+        while !lock.withLock({ isOpen }) { try await Task.sleep(nanoseconds: 5_000_000) }
+        return QuillReply(text: "Quill text", inputTokens: 0, outputTokens: 0, cost: nil)
     }
 }

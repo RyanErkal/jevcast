@@ -33,8 +33,8 @@ final class MailWindow: NSWindowController, NSWindowDelegate {
         // The launcher's Mail view may have left a filter or another mailbox; show them plainly.
         model.searching = !model.search.isEmpty
         if let rowID { model.open(rowID) } else { model.place = .inbox }
-        // An open draft is kept; a contact's address fills a new one only when none is open.
-        if let address, model.draft == nil { model.compose(to: address) }
+        // An open draft with text is kept, with a note; otherwise a contact's address fills a new one.
+        if let address { model.compose(to: address) }
         guard let window else { return }
         // On the display with the pointer, in front of the app you were using.
         let pointer = NSEvent.mouseLocation
@@ -65,12 +65,16 @@ final class MailWindow: NSWindowController, NSWindowDelegate {
         keyMonitor = nil
     }
 
-    /// Keys for checking mail. Typing in the search field or a reply keeps its own keys.
-    private func handle(_ event: NSEvent) -> Bool {
+    /// Keys for checking mail. Typing in the search field or a reply keeps its own keys. Keys are
+    /// read as characters, so they match the key caps on every keyboard layout.
+    func handle(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection([.command, .control, .option])
-        if flags == .command, event.charactersIgnoringModifiers == "f" { model.searching = true; return true }
-        if flags == .command, event.charactersIgnoringModifiers == "z", model.pendingSend != nil, model.draft == nil { model.undoSend(); return true }
-        if flags == .command, event.charactersIgnoringModifiers == "n", model.draft == nil { model.compose(); return true }
+        // ⌘F, ⌘Z, and ⌘N only without Shift: ⇧⌘Z is Redo.
+        let command = flags == .command && !event.modifierFlags.contains(.shift)
+        let key = event.charactersIgnoringModifiers?.lowercased()
+        if command, key == "f" { model.searching = true; return true }
+        if command, key == "z", model.pendingSend != nil, model.draft == nil { model.undoSend(); return true }
+        if command, key == "n" { model.compose(); return true }
         let typing = window?.firstResponder is NSTextView || model.draft != nil
         if event.keyCode == 53 { // Escape: leave the search, then close.
             if model.searching || !model.search.isEmpty { model.search = ""; model.searching = false; window?.makeFirstResponder(nil); return true }
@@ -85,7 +89,7 @@ final class MailWindow: NSWindowController, NSWindowDelegate {
         case 36, 76: model.openInMail(); return true            // Return
         default: break
         }
-        switch event.charactersIgnoringModifiers?.lowercased() {
+        switch key {
         case "j": model.moveSelection(1)
         case "k": model.moveSelection(-1)
         case "e": model.archive()

@@ -67,9 +67,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     private var mail: MailWindow?
     /// The shell behind the Terminal view. It keeps running while the launcher is closed.
     private var terminal: TerminalView?
-    /// One mail model for the Mail view and the mail window, so ⌘O keeps your place.
-    private lazy var mailModel = MailModel(quill: { [unowned self] in try await self.model.sendQuill($0) },
-                                           quillAllowed: { [unowned self] in self.model.allowedQuillContext.contains(.mailMessage) })
+    /// One mail model for the Mail view and the mail window, so ⌘O keeps your place. Made on first use.
+    private var madeMailModel: MailModel?
+    /// Set once quitting starts, while a message in its undo time still goes to Mail.
+    private var quitting = false
+    private var mailModel: MailModel {
+        if let madeMailModel { return madeMailModel }
+        let made = MailModel(quill: { [unowned self] in try await self.model.sendQuill($0) },
+                             quillAllowed: { [unowned self] in self.model.allowedQuillContext.contains(.mailMessage) })
+        made.onSendFailure = { [weak self] text in self?.mailSendFailed(text) }
+        madeMailModel = made
+        return made
+    }
     private var viewSizeWatch: AnyCancellable?
     private var resultWindow: QuillResultWindow?
     private var statusMenu: StatusMenu?
@@ -586,6 +595,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         [.banner, .list, .sound]
     }
+    /// A send that fails while no mail view is on screen, such as after the panel closed, shows
+    /// in the launcher like any other failure. A mail view on screen shows it in its banner.
+    private func mailSendFailed(_ text: String) {
+        // While Jevcast quits there is nothing left to show it in.
+        guard !quitting else { return }
+        let inPanel = wasVisible && model.page?.id == .mail
+        let inWindow = mail?.isOpen == true && mail?.window?.isVisible == true && mail?.window?.isMiniaturized == false
+        guard !inPanel, !inWindow else { return }
+        model.showFailure(text)
+    }
     /// The Jevcast mail window, made on first use.
     func showMail(select rowID: Int64? = nil, compose address: String? = nil) {
         hide(restoreFocus: false)
@@ -680,6 +699,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         if UISnapshots.directory != nil { return .terminateNow }
         // Save pending clipboard work, but never let a stalled save block quitting. While AppKit waits for
         // the reply it runs the loop in modal mode, so the reply is scheduled in that mode too; 2 s at most.
+        // A message in its undo time goes to Mail now, and quitting waits for it: 40 s at most, longer
+        // than the 30 s limit of one Mail script.
+        let sends = madeMailModel.flatMap { $0.sending ? $0 : nil }
+        quitting = true
+        sends?.sendPendingNow()
         var replied = false
         let reply = {
             guard !replied else { return }
@@ -689,9 +713,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         let modes: [RunLoop.Mode] = [.common, .modalPanel, .default]
         Task { @MainActor in
             await model.clipboard.prepareForQuit()
+            await sends?.finishSends()
             RunLoop.main.perform(inModes: modes) { MainActor.assumeIsolated { reply() } }
         }
-        let timer = Timer(timeInterval: 2, repeats: false) { _ in MainActor.assumeIsolated { reply() } }
+        let timer = Timer(timeInterval: sends == nil ? 2 : 40, repeats: false) { _ in MainActor.assumeIsolated { reply() } }
         for mode in modes { RunLoop.main.add(timer, forMode: mode) }
         return .terminateLater
     }

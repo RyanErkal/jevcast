@@ -221,7 +221,7 @@ public actor NativeMailStore {
     }
 
     /// Account IDs are UUIDs; anything else is never used as a folder name.
-    nonisolated static func isSafeName(_ name: String) -> Bool {
+    public nonisolated static func isSafeName(_ name: String) -> Bool {
         !name.isEmpty && name.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }
     }
 

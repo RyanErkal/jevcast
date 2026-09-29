@@ -52,7 +52,8 @@ final class NativeMailCenter: ObservableObject {
 
     nonisolated static func loadAccounts() -> [NativeMailAccount] {
         guard let data = try? Data(contentsOf: accountsFile) else { return [] }
-        return (try? JSONDecoder().decode([NativeMailAccount].self, from: data)) ?? []
+        // An account ID names a folder, so an edited file cannot point outside the mail folder.
+        return ((try? JSONDecoder().decode([NativeMailAccount].self, from: data)) ?? []).filter { NativeMailStore.isSafeName($0.id) }
     }
 
     nonisolated static func keychainAccount(_ id: String) -> String { "mail-" + id }

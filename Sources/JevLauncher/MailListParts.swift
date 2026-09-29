@@ -46,6 +46,11 @@ struct MailMessageList: View {
                 }
             }
             .onChange(of: model.selectedID) { _, id in if scrollsToSelection, let id { proxy.scrollTo(id) } }
+            // The list comes back after a reply in the panel, scrolled to the message it left.
+            .onAppear {
+                guard scrollsToSelection, let id = model.selectedID else { return }
+                DispatchQueue.main.async { proxy.scrollTo(id) }
+            }
         }
     }
 }

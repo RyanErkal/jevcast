@@ -137,8 +137,9 @@ public actor MailAccountSync {
         } catch is CancellationError {
             return .cancelled
         } catch MailError.uidValidityChanged {
-            // The next pass reads the mailbox again from the start.
+            // A full pass selects the mailbox again, sees the new UIDVALIDITY, and reads it from the start.
             listedAt = nil
+            await signal.post(.everything)
             return .done(more: true)
         } catch let error as MailError {
             if case .signInFailed = error { setState(.failed(error.localizedDescription, signIn: true)); return .signIn }
@@ -195,7 +196,7 @@ public actor MailAccountSync {
         var firstSync = false
 
         if let maxUID = before.maxUID {
-            if info.uidNext.map({ $0 > maxUID + 1 }) ?? true {
+            if maxUID < UInt32.max, info.uidNext.map({ $0 > maxUID + 1 }) ?? true {
                 let fetched = try await syncClient.fetch(from: maxUID + 1, items: items, in: box.name, validity: validity)
                 try await store.upsert(fetched.compactMap(SyncedMessage.init(fetch:)), into: box.rowID)
             }

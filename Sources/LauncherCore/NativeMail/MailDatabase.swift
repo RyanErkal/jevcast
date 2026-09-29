@@ -50,6 +50,8 @@ final class MailDatabase {
         guard sqlite3_prepare_v3(db, sql, -1, UInt32(SQLITE_PREPARE_PERSISTENT), &statement, nil) == SQLITE_OK else {
             throw Failure(text: "Mail store query failed: " + String(cString: sqlite3_errmsg(db)))
         }
+        // Lists of different lengths make different SQL, so the cache has a size limit.
+        if statements.count >= 64, let (oldSQL, old) = statements.first { sqlite3_finalize(old); statements.removeValue(forKey: oldSQL) }
         statements[sql] = statement
         return statement
     }

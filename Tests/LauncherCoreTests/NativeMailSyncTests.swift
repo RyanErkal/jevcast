@@ -136,6 +136,21 @@ final class NativeMailSyncTests: XCTestCase {
         await sync.stop()
     }
 
+    func testChangeAfterRenumberingUsesTheNewNumbers() async throws {
+        let uid = server.deliver(to: "INBOX", subject: "Keep")
+        let engine = makeEngine()
+        await engine.setAccounts([account])
+        try await waitUntil("the first sync") { try self.subjects("INBOX") == ["Keep"] }
+        // The action connection selects INBOX with the first numbering.
+        try await engine.setFlagged(try row("Keep"), true)
+        server.mailbox("INBOX")!.uidValidity = 7000
+        await engine.sync(.inboxOnly)
+        try await waitUntil("the reset") { try self.value("SELECT uid_validity FROM mailboxes WHERE name = 'INBOX'") == 7000 && self.subjects("INBOX") == ["Keep"] }
+        try await engine.setRead(try row("Keep"), true)
+        XCTAssertTrue(server.mailbox("INBOX")!.messages.first { $0.uid == uid }!.flags.contains("\\Seen"))
+        await engine.stopAll()
+    }
+
     func testWrongPasswordStopsAndSaysSo() async throws {
         let sync = makeSync(password: "wrong")
         guard case .signIn = await sync.pass(.everything) else { return XCTFail("A refused sign-in must stop sync") }

@@ -19,7 +19,8 @@ extension IMAPClient {
     @discardableResult
     func ensureSelected(_ mailbox: String, validity: UInt32?, fresh: Bool = false) async throws -> MailboxInfo {
         if !fresh, let selected, selected.name == mailbox {
-            if let validity, selected.uidValidity != validity { throw MailError.uidValidityChanged(mailbox: mailbox) }
+            // A selection made before sync saw the new numbering is checked again before it fails.
+            if let validity, selected.uidValidity != validity { return try await ensureSelected(mailbox, validity: validity, fresh: true) }
             return selected
         }
         selected = nil

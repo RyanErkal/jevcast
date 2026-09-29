@@ -106,7 +106,7 @@ final class MailRegressionTests: XCTestCase {
     }
 
     @MainActor func testLauncherSelectionWaitsForInitialStatus() async throws {
-        let model = makeModel()
+        let model = try makeModel()
         model.refreshStatus()
         XCTAssertTrue(model.open(2), "An opening selection is queued while access is checked.")
         try await wait { model.selectedID == 2 && model.place == .mailbox(2) && !model.isLoading }
@@ -121,7 +121,7 @@ final class MailRegressionTests: XCTestCase {
     }
 
     @MainActor func testReloadDuringNextPageDoesNotBlockFuturePaging() async throws {
-        let model = makeModel()
+        let model = try makeModel()
         model.refreshStatus()
         try await wait { model.messages.count == 200 && !model.isLoading }
         let selected = model.messages[100].rowID
@@ -144,7 +144,7 @@ final class MailRegressionTests: XCTestCase {
     }
 
     @MainActor func testRefreshOverTwoHundredRowsKeepsAllLoadedPagesAndSelection() async throws {
-        let model = makeModel()
+        let model = try makeModel()
         model.refreshStatus()
         try await wait { model.messages.count == 200 && !model.isLoading }
         model.loadNextPage()
@@ -164,7 +164,7 @@ final class MailRegressionTests: XCTestCase {
     }
 
     @MainActor func testLaterSelectionStaysSortedAfterReloadAndPaging() async throws {
-        let model = makeModel()
+        let model = try makeModel()
         model.refreshStatus()
         try await wait { model.messages.count == 200 && !model.isLoading }
         model.loadNextPage()
@@ -185,7 +185,7 @@ final class MailRegressionTests: XCTestCase {
     }
 
     @MainActor func testNewSearchCannotAcceptAnOldPageDuringDebounce() async throws {
-        let model = makeModel()
+        let model = try makeModel()
         model.refreshStatus()
         try await wait { model.messages.count == 200 && !model.isLoading }
         model.loadNextPage()
@@ -200,7 +200,8 @@ final class MailRegressionTests: XCTestCase {
                     read: false, flagged: false, conversation: id, messageKey: key)
     }
 
-    @MainActor private func makeModel() -> MailModel {
+    @MainActor private func makeModel() throws -> MailModel {
+        try skipLiveMailModelOnCI()
         let fixtureRoot = root
         return MailModel(quill: { _ in throw CancellationError() }, quillAllowed: { false }, statusProvider: { .ready(root: fixtureRoot) })
     }

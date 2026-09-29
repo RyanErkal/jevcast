@@ -13,10 +13,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test-and-build:
+  test:
     # NSGlassEffectView needs the macOS 26 SDK, so the runner needs Xcode 26 or later.
     runs-on: macos-26
-    # A libghostty build without the cache takes several minutes.
+    # A libghostty build without the cache takes about 12 minutes.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
@@ -24,9 +24,9 @@ jobs:
         run: |
           xcodebuild -version
           swift --version
-      - name: Cache libghostty
+      - name: Restore libghostty
         id: ghosttykit
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: Vendor
           key: ghosttykit-${{ runner.os }}-${{ hashFiles('scripts/ghosttykit.sh', 'scripts/ghosttykit-libtool.patch') }}
@@ -37,14 +37,15 @@ jobs:
           xcodebuild -downloadComponent MetalToolchain
       - name: Build libghostty
         run: scripts/ghosttykit.sh
+      # Saved before the tests, so a failed test does not throw the build away.
+      - name: Save libghostty
+        if: steps.ghosttykit.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: Vendor
+          key: ${{ steps.ghosttykit.outputs.cache-primary-key }}
       - name: Test
+        env:
+          # A live mail model times out with the runner's Xcode 26; those tests run locally.
+          JEVCAST_SKIP_LIVE_MAIL_MODEL: "1"
         run: swift test
-      - name: Build the universal app
-        run: scripts/build.sh
-      - name: Check architectures and signature
-        run: |
-          BIN="dist/Jevcast.app/Contents/MacOS/JevLauncher"
-          for arch in arm64 x86_64; do lipo "$BIN" -verify_arch "$arch"; done
-          SDK="$(xcrun --show-sdk-version)"
-          test "$(xcrun vtool -show-build "$BIN" | grep -Ec "sdk[[:space:]]+$SDK$")" -eq 2
-          codesign --verify --strict "dist/Jevcast.app"

@@ -131,6 +131,7 @@ final class MailLabelTests: XCTestCase {
     }
 
     @MainActor func testRefreshFindsOlderNewLabelMembersWithoutLosingPages() async throws {
+        try skipLiveMailModelOnCI()
         let root = try make(.init(gmail: 1_500, yahooInbox: 0, yahooArchive: 0))
         let model = MailModel(quill: { _ in throw CancellationError() }, quillAllowed: { false }, statusProvider: { .ready(root: root) })
         model.refreshStatus()
@@ -162,6 +163,7 @@ final class MailLabelTests: XCTestCase {
     }
 
     @MainActor func testRefreshRestartsBodySearchForNewLabelMembers() async throws {
+        try skipLiveMailModelOnCI()
         let root = try make(.init(gmail: 12, yahooInbox: 0, yahooArchive: 0))
         try write(root, """
             INSERT INTO summaries VALUES (1, 'body-only-token');

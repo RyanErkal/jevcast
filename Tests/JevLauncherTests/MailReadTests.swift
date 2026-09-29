@@ -32,7 +32,7 @@ final class MailReadTests: XCTestCase {
 
     @MainActor func testMessageShownOnOpenCountsAsRead() async throws {
         let calls = Calls()
-        let model = makeModel(calls)
+        let model = try makeModel(calls)
         model.windowIsKey = true
         model.refreshStatus()
         try await wait { model.selectedID != nil && !model.isLoading }
@@ -43,7 +43,7 @@ final class MailReadTests: XCTestCase {
 
     @MainActor func testMessageCountsAsReadOnlyOnceTheWindowIsInUse() async throws {
         let calls = Calls()
-        let model = makeModel(calls)
+        let model = try makeModel(calls)
         model.refreshStatus()
         try await wait { model.selectedID != nil && !model.isLoading }
         try await Task.sleep(nanoseconds: 100_000_000)
@@ -55,7 +55,7 @@ final class MailReadTests: XCTestCase {
 
     @MainActor func testReadChangeSurvivesRefreshUntilIndexShowsIt() async throws {
         let calls = Calls()
-        let model = makeModel(calls)
+        let model = try makeModel(calls)
         model.windowIsKey = true
         model.refreshStatus()
         try await wait { model.selectedID != nil && !model.isLoading }
@@ -79,7 +79,7 @@ final class MailReadTests: XCTestCase {
 
     @MainActor func testMarkedUnreadStaysUnreadUntilYouMoveAway() async throws {
         let calls = Calls()
-        let model = makeModel(calls)
+        let model = try makeModel(calls)
         model.windowIsKey = true
         model.refreshStatus()
         try await wait { model.selectedID != nil && !model.isLoading }
@@ -101,7 +101,7 @@ final class MailReadTests: XCTestCase {
 
     @MainActor func testSearchPickCountsAsReadOnceTheSearchSettles() async throws {
         let calls = Calls()
-        let model = makeModel(calls)
+        let model = try makeModel(calls)
         model.windowIsKey = true
         model.refreshStatus()
         try await wait { model.selectedID != nil && !model.isLoading }
@@ -117,7 +117,7 @@ final class MailReadTests: XCTestCase {
     @MainActor func testFailedChangeShowsIndexState() async throws {
         let calls = Calls()
         calls.fails = true
-        let model = makeModel(calls)
+        let model = try makeModel(calls)
         model.windowIsKey = true
         model.refreshStatus()
         try await wait { model.selectedID != nil && !model.isLoading }
@@ -128,7 +128,8 @@ final class MailReadTests: XCTestCase {
 
     // MARK: Helpers
 
-    @MainActor private func makeModel(_ calls: Calls) -> MailModel {
+    @MainActor private func makeModel(_ calls: Calls) throws -> MailModel {
+        try skipLiveMailModelOnCI()
         let fixtureRoot = root
         return MailModel(quill: { _ in throw CancellationError() }, quillAllowed: { false }, statusProvider: { .ready(root: fixtureRoot) },
                          setRead: { read, message, _, _ in

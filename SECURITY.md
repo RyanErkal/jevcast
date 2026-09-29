@@ -16,6 +16,8 @@ Only the newest release gets security fixes. Update from **Check for Updates…*
 - Leaks of file paths, clipboard contents, audio, or the TypeSafe API key.
 - Misuse of the Accessibility permission, for example moving or reading windows the user did not target.
 - Update checks that could make the app download or open something the user did not choose.
+- Leaks of mail account passwords, or mail sent to a server other than the account's own, or without TLS.
+- Server replies that crash the app or make it write outside its mail folder.
 
 ## Design limits
 

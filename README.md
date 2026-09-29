@@ -169,22 +169,31 @@ Keys: ↑↓ or J K move, E archives, ⌫ deletes, R replies, Shift–R replies 
 
 Jevcast needs Full Disk Access to read Apple Mail. The mail window tells you how to allow it.
 
+#### Jevcast accounts
+
+Jevcast can also sync mail itself, without Apple Mail. In Settings › Mail › Accounts, click **Add Account…**, choose Yahoo (including regional addresses such as @yahoo.ie), iCloud, Gmail, or another IMAP service, and enter an app password. Jevcast checks the servers and the password before it saves the account. The first account makes **Jevcast accounts** the mail source; switch back to Apple Mail with **Read mail from** at any time.
+
+With Jevcast accounts, the mail window, the launcher's Mail view, and `mail <words>` work as before, and Apple Mail is never started. Jevcast keeps one connection per account waiting for new mail (IMAP IDLE), so new mail shows within seconds. The newest mail comes first; older mail and message bodies follow in the background. Every change shows at once and goes to the server right after; a change the server refuses is undone. Sent mail goes out through the account's SMTP server, and a copy is filed in Sent where the server does not do that itself. Return does not open Apple Mail, which does not have these messages.
+
+Mail is kept in `~/Library/Application Support/Jevcast/Mail`, readable only by you. Passwords are kept in the Keychain. Removing an account deletes its mail from this Mac; the mail stays on the server. Outlook.com accepts only OAuth sign-in, which Jevcast does not offer yet.
+
 ### Jev memory and usage
 
 When you choose a result for a request, Jevcast remembers it on this Mac, and the same request then needs no Jev call. Press ⌘Z on a Jev or remembered pick to undo it and forget it. A whole-name match, a sum, a URL, a timer, or a port lookup never asks Jev. Settings › AI › Usage shows requests, tokens, and cost for 7 days, 30 days, and all time.
 
 ## Privacy
 
-The app has no account, no analytics, and no crash reporting. It connects to the internet for four things only:
+The app has no account, no analytics, and no crash reporting. It connects to the internet for these things only:
 
 | When                                                                             | Where                                | What is sent                                                                                                                                                                                                          |
 | -------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Once a day, if **Check for updates automatically** is on (default: on)           | `api.github.com`                     | A request for the newest release, with the app version. GitHub sees your IP address, as with any web request. Nothing is downloaded.                                                                                  |
 | After each pause in typing or speech, if natural-language matching is on (default: off) | `api.typesafe.ai`, or `openrouter.ai` with an OpenRouter key | The text you typed or said and a short list of candidate names: apps, settings panes, window actions, commands, workflows, Shortcuts, snippet names, menu item names, search sites, files, and folders. Jevcast does not add file or folder paths, command text, snippet text, clipboard text, or audio. A path you type yourself is included in the query. Jev can only choose one of the supplied candidates. |
 | When you ask Luna, if Luna is on (default: off)                                  | `openrouter.ai`                      | What you typed after `ask`, or your instruction. Selected text and mail messages only when you turn on each one in Settings › AI › Luna. Never file paths, clipboard history, or audio. |
+| While Jevcast accounts are the mail source and you have added an account         | That account's IMAP and SMTP servers, over TLS | Your user name and app password to sign in, requests for your mail, the changes you make, and the messages you send. Nothing else, and nothing to any other server. |
 | When you open a web search or a URL                                              | Your default browser                 | Whatever you chose to open.                                                                                                                                                                                           |
 
-Everything else stays on your Mac. Clipboard history is kept in memory only, holds plain text only, and skips items that password managers mark as concealed. The app writes one file of its own: a cache of your app list in `~/Library/Caches/JevLauncher`. A browser history search copies each history database to a temporary folder and deletes it after the search. Mail, Calendar, Reminders, Contacts, tabs, and selected text are read on this Mac and are not stored by Jevcast.
+Everything else stays on your Mac. Clipboard history is kept in memory only, holds plain text only, and skips items that password managers mark as concealed. The app writes one file of its own: a cache of your app list in `~/Library/Caches/JevLauncher`. A browser history search copies each history database to a temporary folder and deletes it after the search. Mail, Calendar, Reminders, Contacts, tabs, and selected text are read on this Mac and are not stored by Jevcast. The exception is mail for Jevcast accounts, which Jevcast keeps in `~/Library/Application Support/Jevcast/Mail`.
 
 ## Permissions
 
@@ -194,7 +203,7 @@ Everything else stays on your Mac. Clipboard history is kept in memory only, hol
 | Microphone and Speech Recognition | Voice input                 | Only for voice          |
 | Calendars, Reminders, Contacts    | Events, reminders, people   | Only for those rows     |
 | Automation (Apple Events)         | Browser tabs, Finder selection, and changes to mail | Only for those features |
-| Full Disk Access                  | Reading Apple Mail and Safari history | Only for mail and Safari history |
+| Full Disk Access                  | Reading Apple Mail and Safari history | Only for Apple Mail and Safari history; not for Jevcast accounts |
 
 Allow each one from the welcome window, Settings, or the **Permissions** menu in the menu bar. Each item opens the matching page of System Settings.
 

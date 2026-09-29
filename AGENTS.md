@@ -10,7 +10,8 @@ Reasoning effort and Fast are separate settings. Effort is one of the model's le
 
 ## Network
 
-Direct service requests are limited to the daily GitHub update check, opt-in Jev matching, and opt-in Quill through OpenRouter. Mail resource loading is the separate exception described below. Never automatically attach filesystem paths, clipboard text, or audio to model requests. Automation prompts may contain paths the user explicitly supplies or approves.
+Direct service requests are limited to the daily GitHub update check, opt-in Jev matching, opt-in Quill through OpenRouter, and the IMAP and SMTP servers of mail accounts the user adds in Settings › Mail. Mail resource loading is the separate exception described below.
+Mail accounts connect only to the servers the user chose, always over TLS (implicit or STARTTLS; never plain text). App passwords and tokens live only in the Keychain; never in files, logs, or errors. Jevcast's mail store (`~/Library/Application Support/Jevcast/Mail`) is owner-only. A server's refusal of a sign-in stops sync instead of retrying, so the account is not locked. Never automatically attach filesystem paths, clipboard text, or audio to model requests. Automation prompts may contain paths the user explicitly supplies or approves.
 Selected text, mail content, and dictation transcripts go to Quill only when the user turns on that kind in Settings › AI › Quill. Code checks each request against those switches, and every send is logged without its text.
 Automations run CLIs the user installed and signed in to (`claude`, `codex`) or commands the user wrote. Jevcast passes the approved prompt and context to those processes. The CLIs send them to their providers under the user's account. Verify subscription authentication; do not inherit an API-key billing route silently. Quill still uses opt-in OpenRouter access.
 
@@ -28,7 +29,7 @@ Quill tasks that read Calendar, Reminders, or Mail run in the app process, which
 ## Safety
 
 Do not execute shell text inferred by a model. Jev may only select known action IDs, and code validates any value it fills. Quill only writes text; it never picks or runs actions. Script tasks run only argv the user typed or approved.
-Apple Events use fixed script text; values reach scripts only as arguments. Changes to mail go through Apple Mail. Mail HTML never runs scripts; it loads web images, fonts, and style sheets unless the user turns that off in the mail window (on by default, at the user's request).
+Apple Events use fixed script text; values reach scripts only as arguments. Changes to mail go through Apple Mail, or, for Jevcast's own accounts, through the account's IMAP and SMTP servers. The native store keeps Apple Mail's index layout so one reader serves both. Mail HTML never runs scripts; it loads web images, fonts, and style sheets unless the user turns that off in the mail window (on by default, at the user's request).
 Preserve user apps and settings. Do not change Spotlight, Raycast, or Rectangle shortcuts automatically.
 
 ## Checks and release

@@ -2,6 +2,16 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+
+- **Jevcast accounts.** Jevcast can now sync mail itself, without Apple Mail. Add Yahoo (including @yahoo.ie), iCloud, Gmail, or another IMAP account with an app password in Settings › Mail › Accounts. The mail window, the launcher's Mail view, and mail search work as before, new mail arrives within seconds through IMAP IDLE, and changes and sent mail go straight to the account's servers. Apple Mail is never started, and Full Disk Access is not needed. **Read mail from** switches back to Apple Mail.
+
+### Fixed
+
+- A message saved with CRLF line ends now reads its last header correctly, so a base64 or quoted-printable body and a multipart boundary on that line are no longer missed.
+
 ## [1.12.3] - 2026-09-28
 
 ### Fixed

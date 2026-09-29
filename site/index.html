@@ -644,7 +644,8 @@
           <h2 id="privacy-title">Your stuff stays on your Mac.</h2>
           <p class="privacy-lead">
             No account. No analytics. No crash reports. The app goes online for
-            four things only. Automations run the command-line tools you signed
+            a few things only, and mail accounts you add talk only to their own
+            servers, over TLS. Automations run the command-line tools you signed
             in to yourself; Jevcast adds no network calls of its own.
           </p>
           <ul class="net">
@@ -678,6 +679,17 @@
               <a
                 class="net-link"
                 href="https://github.com/RyanErkal/jevcast/blob/main/Sources/JevLauncher/LauncherModel%2BQuill.swift"
+                >Read the code<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25" /></svg></a
+              >
+            </li>
+            <li>
+              <span class="net-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" /></svg></span>
+              <h3>Mail accounts</h3>
+              <code>your mail servers</code>
+              <p>Only for accounts you add in Settings › Mail. Talks to that account's own IMAP and SMTP servers over TLS, and nothing else.</p>
+              <a
+                class="net-link"
+                href="https://github.com/RyanErkal/jevcast/tree/main/Sources/LauncherCore/NativeMail"
                 >Read the code<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25" /></svg></a
               >
             </li>

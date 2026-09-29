@@ -24,16 +24,7 @@ struct LauncherView: View {
             Divider()
             page.content().id(page.id).frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider()
-            HStack(spacing: 10) {
-                Spacer(minLength: 10)
-                ForEach(page.footerHints, id: \.key) { hint in KeyHint(hint.title, hint.key) }
-                if page.hasFilter { KeyHint(page.openTitle, "↩") }
-                KeyHint(model.escapeClosesLauncher ? "Close" : "Back", "esc")
-                if page.canPopOut { KeyHint("Open Window", "⌘O") }
-            }
-            .font(.system(size: 12))
-            .padding(.horizontal, LauncherMetrics.gutter)
-            .frame(height: LauncherMetrics.footerHeight)
+            PageFooter(page: page, escapeClosesLauncher: model.escapeClosesLauncher)
         }
         .frame(height: LauncherPanel.viewSize(for: page.id).height - LauncherMetrics.searchBarHeight)
     }

@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 /// A view that fills the launcher panel in place of the results, such as Mail.
@@ -46,6 +47,10 @@ protocol LauncherPage: AnyObject {
     var openTitle: String { get }
     /// More keys for the footer, before Return.
     var footerHints: [(title: String, key: String)] { get }
+    /// What Escape does, when the view names it, such as "Discard" while writing. Nil shows Back or Close.
+    var backTitle: String? { get }
+    /// Fires when the footer's keys may have changed, so the footer draws them again.
+    var footerChanges: AnyPublisher<Void, Never> { get }
     func handle(_ key: PageKey) -> Bool
     /// Keys a view reads before the plain keys, such as ⌘P or ⇧↓. True when used.
     func handleEvent(_ event: NSEvent) -> Bool
@@ -70,6 +75,8 @@ extension LauncherPage {
     var canPopOut: Bool { false }
     var openTitle: String { "Open" }
     var footerHints: [(title: String, key: String)] { [] }
+    var backTitle: String? { nil }
+    var footerChanges: AnyPublisher<Void, Never> { Empty().eraseToAnyPublisher() }
     func handleEvent(_ event: NSEvent) -> Bool { false }
     func popOut() {}
     func opened() {}

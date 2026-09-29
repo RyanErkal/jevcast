@@ -152,7 +152,7 @@ final class Preferences: ObservableObject {
         automationQuietHours = d.bool(forKey: "automationQuietHours")
         automationQuietStart = d.object(forKey: "automationQuietStart") as? Int ?? 22 * 60
         automationQuietEnd = d.object(forKey: "automationQuietEnd") as? Int ?? 7 * 60
-        automationHideNames = d.bool(forKey: "automationHideNames")
+        automationHideNames = d.object(forKey: "automationHideNames") as? Bool ?? true
         automationFailureSeconds = min(max(d.object(forKey: "automationFailureSeconds") as? Double ?? 8, 4), 30)
         automationLiveIndicator = d.bool(forKey: "automationLiveIndicator")
         automationRunner = d.string(forKey: "automationRunner").flatMap(AgentRunner.init(rawValue:)) ?? .codex

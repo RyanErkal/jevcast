@@ -1,5 +1,6 @@
 .build/
 dist/
+Vendor/
 .DS_Store
 .swiftpm/
 .vercel/

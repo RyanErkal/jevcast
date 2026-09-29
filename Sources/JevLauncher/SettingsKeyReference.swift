@@ -22,7 +22,12 @@ struct KeyReference: View {
         }
         Section {
             row(["↩"], "Open the selected item")
+            row(["⇧", "↩"], "Paste instead of copy", note: "Answers, emoji, snippets, clipboard items, and Quill answers.")
             row(["⌘", "K"], "Show actions")
+            row(["⌘", "Y"], "Quick Look", note: "Files, folders, and apps.")
+            row(["⌘", "R"], "Show in Finder")
+            row(["⌘", "⇧", "C"], "Copy the path")
+            row(["⌘", "Z"], "Undo a Jev or remembered pick", note: "Jevcast forgets that answer.")
             row(["⎋"], "Go back, or close")
             row(["⌘", "O"], "Open a view in its own window")
             row(["Space"], "Expand mail, or Quick Look a clip", note: "Mail and Clipboard views.")

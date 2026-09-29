@@ -3,7 +3,7 @@ import SwiftUI
 
 /// A view that fills the launcher panel in place of the results, such as Mail.
 enum ViewID: String, CaseIterable {
-    case mail, calendar, tasks, clipboard, cleanup
+    case mail, calendar, tasks, clipboard, cleanup, terminal
     var title: String {
         switch self {
         case .mail: return "Mail"
@@ -11,6 +11,7 @@ enum ViewID: String, CaseIterable {
         case .tasks: return "Tasks"
         case .clipboard: return "Clipboard"
         case .cleanup: return "Clean Up"
+        case .terminal: return "Terminal"
         }
     }
     var symbol: String {
@@ -20,6 +21,7 @@ enum ViewID: String, CaseIterable {
         case .tasks: return "clock"
         case .clipboard: return "doc.on.clipboard"
         case .cleanup: return "leaf"
+        case .terminal: return "terminal"
         }
     }
 }
@@ -55,6 +57,12 @@ protocol LauncherPage: AnyObject {
     /// `handingOff` is true when the view moves to its own window and must keep its data running.
     func closed(handingOff: Bool)
     func content() -> AnyView
+    /// A view that takes the keys in place of the search field, such as the terminal.
+    var inputView: NSView? { get }
+    /// False for a view the search field cannot filter, such as the terminal. The field and the
+    /// Return hint are hidden, and `header()` shows in the field's place.
+    var hasFilter: Bool { get }
+    func header() -> AnyView?
 }
 
 extension LauncherPage {
@@ -66,6 +74,9 @@ extension LauncherPage {
     func popOut() {}
     func opened() {}
     func closed(handingOff: Bool) {}
+    var inputView: NSView? { nil }
+    var hasFilter: Bool { true }
+    func header() -> AnyView? { nil }
 }
 
 extension LauncherModel {
@@ -115,7 +126,13 @@ extension LauncherModel {
 
     /// The field is made again when the panel changes, so focus waits for the next turn.
     private func refocusSoon() {
-        DispatchQueue.main.async { [weak self] in self?.focusSearch?() }
+        DispatchQueue.main.async { [weak self] in self?.focusInput() }
+    }
+
+    /// Gives the keys to the view's own input, such as the terminal, or else to the search field.
+    func focusInput() {
+        guard let input = page?.inputView else { focusSearch?(); return }
+        if let window = input.window, window.firstResponder !== input { window.makeFirstResponder(input) }
     }
 
     /// A row that opens a view, above a source's rows: "Open Calendar", "Open Clipboard".

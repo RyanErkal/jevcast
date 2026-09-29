@@ -6,7 +6,7 @@ public struct CreateQuery: Equatable, Sendable {
     public enum Kind: Sendable { case reminder, event }
     public let kind: Kind
     public let title: String
-    /// Nil for a reminder with no date. An event with no date starts at the next full hour.
+    /// Nil for a reminder with no date. An event always has one: "add event" text with no day or time is not an event.
     public let date: Date?
     /// False when the text named a day but no time, such as "tomorrow".
     public let hasTime: Bool

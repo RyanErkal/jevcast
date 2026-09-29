@@ -14,7 +14,7 @@ For loose requests such as “make this window bigger,” Jevcast can use **Jev 
 
 ## Install with your agent
 
-Copy this prompt into a coding agent on the Mac where you want Jevcast. The Mac needs Xcode 26 or later to build it.
+Copy this prompt into a coding agent on the Mac where you want Jevcast. The Mac needs Xcode 26 or later and Homebrew to build it.
 
 ```
 Install Jevcast from the official source repository:
@@ -23,8 +23,10 @@ https://github.com/RyanErkal/jevcast
 First check that this Mac can run Xcode 26 or later and has it installed. If
 not, report the requirement and stop. Clone the repository and check out its
 latest published release tag. If there is no release tag, stop. Verify that `git remote get-url origin`
-resolves exactly to `https://github.com/RyanErkal/jevcast.git`. Run `swift test`
-and `scripts/build.sh`. Verify the built app code signature with
+resolves exactly to `https://github.com/RyanErkal/jevcast.git`. If the checkout
+has `scripts/ghosttykit.sh`, install Homebrew's `zig@0.15` and Xcode's Metal
+Toolchain (`xcodebuild -downloadComponent MetalToolchain`), then run
+`scripts/ghosttykit.sh`. Run `swift test` and `scripts/build.sh`. Verify the built app code signature with
 `codesign --verify --deep --strict --verbose=2 "dist/Jevcast.app"` and report
 the result. After those checks pass, quit any running Jev Launcher or Jevcast.
 Back up an existing `/Applications/Jevcast.app` before replacing it, and keep
@@ -38,38 +40,40 @@ Open the app from Applications. A welcome window helps you choose a shortcut and
 
 Press **Option–Space** and type. If another app already uses that shortcut, choose a different one in the welcome window or in Settings.
 
-| Type                                                       | What happens                                                             |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `safari`                                                   | Opens Safari. Aliases you add in Settings › Search also work.            |
-| `left half`, `top right`, `middle third`, `next monitor`   | Moves the window you were using.                                         |
-| `12 * (8 + 2)`, `100 + 10%`                                | Shows the answer. Return copies it.                                      |
-| `10 km in mi`, `20 c in f`                                 | Converts length, mass, temperature, time, data, volume, speed, and area. |
-| `invoice`, `kind:pdf in:downloads`, `files modified today` | Finds files by name, kind, folder, and date.                             |
-| `gh swiftui`, `yt piano`, `maps cafes`, `wiki moon`        | Searches a site. Add your own keywords in Settings › Search.             |
-| `clip`                                                     | Shows the last 50 text items you copied. Return copies one again.        |
-| `wi-fi settings`                                           | Opens that System Settings pane.                                         |
-| `port 3000`, `kill 5173`, `ports`                          | Lists what listens on a local port. ⌫ twice stops it.                    |
-| `dark mode`, `caffeinate`, `empty trash`, `my ip`          | Runs a built-in command. Disruptive ones ask for a second Return.        |
-| The name of your own command                               | Runs a command you added in Settings › Library.                         |
-| `notes left half`                                          | Opens Notes, then arranges its window.                                   |
-| `search github for swift ui`                               | Searches that site with the rest of your words.                          |
-| `5m tea`, `timer 10 min`                                   | Starts a timer with a notification. `timers` lists them.                 |
-| `:tada`, `emoji party`                                     | Finds an emoji or symbol. Return copies, Shift–Return pastes.            |
-| `ans * 2`                                                  | Uses the last answer. `history` lists recent answers.                    |
-| A menu item, Shortcut, workflow, or snippet name           | Runs it. Menu items come from the app you were using.                    |
-| `scheduled tasks`, `what runs at login`, `cron`            | Lists launch agents, daemons, crontab lines, and timers, in plain words. |
-| `calendar`, `my day`, `reminders`                          | Lists events and reminders. Join calls, complete, or move them.          |
-| `remind me to call mum at 5pm`, `add event lunch friday 1pm` | Adds a reminder or an event.                                           |
-| `contact sam`                                              | Finds a person to email, message, or call.                               |
-| `tabs`, `tabs docs`, `history swift`                       | Finds open tabs and browser history. Switch, close, or copy.             |
-| `this`, `copy link`                                        | Acts on the page, Finder selection, or selected text in front.           |
-| `mail`, `inbox`, `mail invoice`                            | Opens the Jevcast mail window, or searches your mail.                    |
-| `ask what is a p-value`                                    | Luna answers in the panel. Needs Luna on.                                |
-| `every weekday at 8am brief me on my meetings`             | Schedules a Luna task. Its result arrives as a notification.             |
-| `task results`                                             | Lists what scheduled tasks wrote.                                        |
-| `cleanup`, `cool down`                                     | Lists idle servers, leftover processes, and simulators to stop.          |
-| `/`, `/cal`                                                | Lists only functions and your library, in groups. Tab completes the name.       |
-| `$`, `$deploy`                                             | Lists only your own commands, workflows, and snippets.                   |
+| Type                                                         | What happens                                                                                                                                          |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `safari`                                                     | Opens Safari. Aliases you add in Settings › Search also work.                                                                                         |
+| `left half`, `top right`, `middle third`, `next monitor`     | Moves the window you were using.                                                                                                                      |
+| `12 * (8 + 2)`, `100 + 10%`                                  | Shows the answer. Return copies it.                                                                                                                   |
+| `10 km in mi`, `20 c in f`                                   | Converts length, mass, temperature, time, data, volume, speed, and area.                                                                              |
+| `invoice`, `kind:pdf in:downloads`, `files modified today`   | Finds files by name, kind, folder, and date.                                                                                                          |
+| `gh swiftui`, `yt piano`, `maps cafes`, `wiki moon`          | Searches a site. Add your own keywords in Settings › Search.                                                                                          |
+| `clip`, `clip links`                                         | Shows what you copied: text, images, files, links, and more. Return copies one again, Shift–Return pastes it. The first row opens the Clipboard view. |
+| `wi-fi settings`                                             | Opens that System Settings pane.                                                                                                                      |
+| `port 3000`, `kill 5173`, `ports`                            | Lists what listens on a local port. ⌫ twice stops it.                                                                                                 |
+| `dark mode`, `caffeinate`, `empty trash`, `my ip`            | Runs a built-in command. Disruptive ones ask for a second Return.                                                                                     |
+| The name of your own command                                 | Runs a command you added in Settings › Library.                                                                                                       |
+| `notes left half`                                            | Opens Notes, then arranges its window.                                                                                                                |
+| `search github for swift ui`                                 | Searches that site with the rest of your words.                                                                                                       |
+| `5m tea`, `timer 10 min`                                     | Starts a timer with a notification. `timers` lists them.                                                                                              |
+| `:tada`, `emoji party`                                       | Finds an emoji or symbol. Return copies, Shift–Return pastes.                                                                                         |
+| `ans * 2`                                                    | Uses the last answer. `history` lists recent answers.                                                                                                 |
+| A menu item, Shortcut, workflow, or snippet name             | Runs it. Menu items come from the app you were using.                                                                                                 |
+| `scheduled tasks`, `what runs at login`, `cron`              | Lists launch agents, daemons, crontab lines, timers, Quill tasks, and automations, in plain words.                                                    |
+| `calendar`, `my day`, `reminders`                            | Lists events and reminders. Join calls, complete, or move them.                                                                                       |
+| `remind me to call mum at 5pm`, `add event lunch friday 1pm` | Adds a reminder or an event.                                                                                                                          |
+| `contact sam`                                                | Finds a person to email, message, or call.                                                                                                            |
+| `tabs`, `tabs docs`, `history swift`                         | Finds open tabs and browser history. Switch, close, or copy.                                                                                          |
+| `this`, `copy link`                                          | Acts on the page, Finder selection, or selected text in front.                                                                                        |
+| `inbox`, `show mail`, `mail invoice`                         | Opens Mail in the launcher, or searches your mail.                                                                                                    |
+| `ask what is a p-value`                                      | Quill answers in the panel. Needs Quill on.                                                                                                           |
+| `every weekday at 8am brief me on my meetings`               | Schedules a Quill task. `task results` lists what it wrote.                                                                                           |
+| `task results`                                               | Lists what scheduled tasks wrote.                                                                                                                     |
+| `automations`                                                | Lists your automations and anything that needs you.                                                                                                   |
+| `dictation history`                                          | Lists what you dictated. Return pastes it again.                                                                                                      |
+| `cleanup`, `cool down`                                       | Lists idle servers, leftover processes, and simulators to stop.                                                                                       |
+| `/`, `/cal`                                                  | Lists only functions and your library, in groups. Tab completes the name.                                                                             |
+| `$`, `$deploy`                                               | Lists only your own commands, workflows, and snippets.                                                                                                |
 
 **Move a window** by typing a layout:
 
@@ -87,32 +91,33 @@ Jevcast finds apps, files, and actions locally. To match a loose request to one 
 
 Jev reads each request after a short pause, typed or spoken. It receives that text and a short list of candidate names: apps, System Settings panes, window actions, built-in commands, your own commands, workflows, Shortcuts, and snippets by name, menu item names from the app you were using, sites, files, and folders. It can only choose from that list or return no match. It never writes a command. A whole-name match you typed stays first. Jevcast does not add file or folder paths, clipboard text, or audio to the request. Any path you type yourself is part of the text sent. See [Privacy](#privacy) for the full network details.
 
-## Optional: Luna
+## Optional: Quill
 
-Jev decides what a request means. Luna does the writing when a request needs it. Luna is GPT-6 Luna, run through [OpenRouter](https://openrouter.ai) with your own OpenRouter key. Turn it on in Settings › AI › Luna and choose Fast, High, or Max effort.
+Jev decides what a request means. Quill does the writing when a request needs it. Quill sends the request through [OpenRouter](https://openrouter.ai) to the model you pick, such as GPT-6 Luna, with your own OpenRouter key. Turn it on in Settings › AI › Quill. Choose a reasoning effort from Low to Max, and turn **Fast** on for the faster service tier. Fast is a separate switch, not an effort level.
 
-- `ask …`, `? …`, or `luna …` answers in the panel. Return copies the answer, and Shift–Return pastes it.
-- With text selected in any app, the launcher offers Fix Spelling and Grammar, Make Shorter, Make More Formal, Make Friendlier, Summarise, Explain, and Translate to English. Type your own instruction, such as `translate to turkish`, for anything else. Return replaces the selection with Luna's text. A question about the text is copied instead.
-- In the mail window, Luna summarises a message or drafts a reply from a short instruction, such as "yes, but next week".
+- `ask …` or `? …` answers in the panel. Return copies the answer, and Shift–Return pastes it.
+- With text selected in any app, the launcher offers Fix Spelling and Grammar, Make Shorter, Make More Formal, Make Friendlier, Summarise, Explain, and Translate to English. Type your own instruction, such as `translate to turkish`, for anything else. Return replaces the selection with Quill's text. A question about the text is copied instead.
+- In Mail, Quill summarises a message or drafts a reply from a short instruction, such as "yes, but next week".
 
-**Scheduled tasks.** Type a schedule and a request, such as `every weekday at 8am brief me on my meetings and unread email`, `summarise my reminders every evening at 7`, or `every 2 hours check my unread mail`. Return schedules it. At that time, Jevcast reads only the data the request names and you allow: today's and tomorrow's events, reminders due soon, or unread inbox mail (senders, subjects, and previews). Luna writes the result, and a notification shows its first lines. Click the notification to read it all. Every result is also saved as a Markdown file in `~/Library/Application Support/Jevcast/Luna Tasks`. `scheduled tasks` lists your tasks with Run Now, Pause, and Delete, and `task results` lists past runs. Tasks run while Jevcast is open. A run missed by more than three hours, for example while the Mac slept, is skipped and noted.
+**Scheduled tasks.** Type a schedule and a request, such as `every weekday at 8am brief me on my meetings and unread email`, `summarise my reminders every evening at 7`, or `every 2 hours check my unread mail`. Return schedules it, and the launcher shows it in the scheduled tasks list. At that time, Jevcast reads only the data the request names and you allow: today's and tomorrow's events, reminders due soon, or unread inbox mail (senders, subjects, and previews). Quill writes the result. A successful run is silent: `task results` lists past runs, and every result is also saved as a Markdown file in `~/Library/Application Support/Jevcast/Luna Tasks`. A failed run shows a notch alert. `scheduled tasks` lists your tasks with Run Now, Pause, and Delete. Tasks run while Jevcast is open. A run missed by more than three hours, for example while the Mac slept, is skipped and noted.
 
-Luna reads only what you allow. What you type after `ask` is sent once Luna is on. Selected text, mail messages, calendar and reminders, and the unread mail list each have their own switch, and all are off at first. Jevcast checks every request against those switches before it sends it. Settings › AI › Luna lists each request with what kind of context it carried and its cost, without the text. Luna never runs an action.
+Quill reads only what you allow. What you type after `ask` is sent once Quill is on. Selected text, mail messages, calendar and reminders, the unread mail list, and dictation transcripts each have their own switch, and all are off at first. Jevcast checks every request against those switches before it sends it. Settings › AI › Quill lists each request with what kind of context it carried and its cost, without the text. Quill never runs an action.
 
 ## Use
 
 Keys in the launcher:
 
-| Keys            | Action                               |
-| --------------- | ------------------------------------ |
-| Return          | Run the selected result              |
-| Up, Down        | Select another result                |
-| Escape          | Close                                |
-| Tab             | After `/` or `$`, complete the name  |
-| Command–K       | More actions for the selected result |
-| Command–Y       | Quick Look                           |
-| Command–R       | Show in Finder                       |
-| Command–Shift–C | Copy the path                        |
+| Keys            | Action                                                                                                  |
+| --------------- | ------------------------------------------------------------------------------------------------------- |
+| Return          | Run the selected result                                                                                 |
+| Up, Down        | Select another result                                                                                   |
+| Escape          | Close                                                                                                   |
+| Tab             | After `/` or `$`, complete the name                                                                     |
+| Shift–Return    | Paste instead of copy, where a row copies: answers, emoji, snippets, clipboard items, and Quill answers |
+| Command–K       | More actions for the selected result                                                                    |
+| Command–Y       | Quick Look                                                                                              |
+| Command–R       | Show in Finder                                                                                          |
+| Command–Shift–C | Copy the path                                                                                           |
 
 Results learn from use. Things you pick often and recently move up, and favourites rank higher. Right-click an app to add it to your favourites. With nothing typed, the launcher is the search bar alone. Click a row to run it, or move the pointer over the rows to pick one, then press Return.
 
@@ -153,7 +158,7 @@ Type `port 3000` to see what listens on that port. Pick a row and press ⌫ twic
 
 Rows from these sources have their own actions. Return runs the first one, and ⌘K lists all of them.
 
-- **Scheduled tasks.** `scheduled tasks` lists launch agents in `~/Library/LaunchAgents` and `/Library/LaunchAgents`, daemons in `/Library/LaunchDaemons`, your crontab, and Jevcast timers. Each row gives the schedule in plain words, such as "Every day at 09:30", the next run, whether it runs now or its last run failed, and a warning when its program is missing or in an unusual folder. Apple's own jobs are hidden; add `apple` to see them. `scheduled tasks failing` lists failed jobs only. An agent can run now, turn off, or turn on. For a daemon, ⌘K copies the `sudo` command, because it needs an administrator.
+- **Scheduled tasks.** `scheduled tasks` lists launch agents in `~/Library/LaunchAgents` and `/Library/LaunchAgents`, daemons in `/Library/LaunchDaemons`, your crontab, Jevcast timers, Quill tasks, Jevcast automations, and, read only, your Codex automations. Each row gives the schedule in plain words, such as "Every day at 09:30", the next run, whether it runs now or its last run failed, and a warning when its program is missing or in an unusual folder. Apple's own jobs are hidden; add `apple` to see them. `scheduled tasks failing` lists failed jobs only. An agent can run now, turn off, or turn on. For a daemon, ⌘K copies the `sudo` command, because it needs an administrator.
 - **Calendar and Reminders.** `calendar` lists today and tomorrow, `calendar week` the next seven days, and `calendar <words>` finds events. Join Call opens Zoom, Meet, and Teams links. Your own events move 15 minutes or an hour later. `reminders` lists open reminders, overdue first. `remind me to …` and `add event …` read the date and time from your words, including `in 20 minutes`, `at 9`, and `friday 1pm`.
 - **Contacts.** `contact <name, email, or number>` finds a person. Email opens the Jevcast mail window. Message and Call open Messages and FaceTime.
 - **Tabs and history.** `tabs` lists open tabs in Safari, Chrome, Arc, Brave, Edge, and Vivaldi. Jevcast never starts a browser to read them. `history <words>` searches a private copy of browser history, which Jevcast deletes after each search. Safari history needs Full Disk Access.
@@ -161,11 +166,13 @@ Rows from these sources have their own actions. Return runs the first one, and �
 
 ### Mail
 
-`mail` or `inbox` opens the Jevcast mail window: Inbox, Unread, Flagged, and each account's mailboxes on the left, messages in the middle, and the message on the right. `mail <words>` searches from the launcher.
+`inbox` or `show mail` opens Mail in the launcher, in two panes: the message list on the left and the message on the right. A menu above the list picks Inbox, All Mail, Unread, Flagged, or one mailbox of an account. `mail` lists unread inbox mail below the Mail app, and `mail <words>` searches your mail. **Mail** in the menu-bar menu and Hyper–M open the same view. ⌘O moves it to its own mail window.
 
-Jevcast reads the mail that Apple Mail keeps on this Mac, so Mail does not have to be open to read it. Changes go through Apple Mail, which starts hidden when it is not running: archive, delete, move, flag, read or unread, reply, reply all, forward, and new messages. Mail then applies your accounts, rules, and sync as usual. Mail shows in the Dock while it runs.
+Jevcast reads the mail that Apple Mail keeps on this Mac, so Mail does not have to be open to read it. Changes go through Apple Mail, which starts hidden when it is not running: archive, delete, move, flag, read or unread, reply, reply all, forward, and new messages. Forward, Flag, and Move To are in the ⋯ menu above a message. Mail then applies your accounts, rules, and sync as usual. Mail shows in the Dock while it runs.
 
-Keys: ↑↓ or J K move, E archives, ⌫ deletes, R replies, Shift–R replies to all, F forwards, S flags, U marks read or unread, C writes a new message, and ⌘Return sends. A sent message waits 5 seconds; Undo or ⌘Z brings it back. Send stays dimmed until there is something to send, and a reply that Apple Mail did not take is not sent. HTML mail shows with scripts off, and every remote load is blocked, so tracking pixels and remote images do not load. Links open in your browser.
+Keys in the mail window: ↑↓ or J K move, Return opens the message in Apple Mail, E archives, ⌫ deletes, R replies, Shift–R replies to all, F forwards, S flags, U marks read or unread, C or ⌘N writes a new message, / or ⌘F searches, and ⌘Return sends. In the launcher's Mail view, letters type in the filter, so the keys are ↑↓, Return, ⌫, Space to expand the message, R to reply (Shift–R to all) while the filter is empty, and ⌘O. A sent message waits 5 seconds; Undo or ⌘Z brings it back. Send stays dimmed until there is something to send, and a reply that Apple Mail did not take is not sent.
+
+HTML mail shows with scripts off. By default it loads the web images, fonts, and style sheets the message names, as Apple Mail does, so a sender can see when you open a message. To stop this, turn off **Load Images from the Web** in the ⋯ menu above a message. Jevcast keeps that choice. Links open in your browser.
 
 Jevcast needs Full Disk Access to read Apple Mail. The mail window tells you how to allow it.
 
@@ -177,43 +184,82 @@ With Jevcast accounts, the mail window, the launcher's Mail view, and `mail <wor
 
 Mail is kept in `~/Library/Application Support/Jevcast/Mail`, readable only by you. Passwords are kept in the Keychain. Removing an account deletes its mail from this Mac; the mail stays on the server. Outlook.com accepts only OAuth sign-in, which Jevcast does not offer yet.
 
+### Clipboard view
+
+`clip` shows your clipboard history in the launcher, and Return on its first row opens the Clipboard view: filter chips and the list on the left, and a large preview on the right. Hyper–V opens it too. It keeps text, rich text, images, screenshots, files, videos, links, colours, and code, and it finds text inside images on this Mac. ↑↓ move, Shift–↑↓ select more, ← → change the chip while the filter is empty, Space is Quick Look, ⌘K shows actions, and ⌫ deletes (⌘Z brings it back). Return copies the selection and closes the launcher. The view does not paste.
+
+History is saved in `~/Library/Application Support/Jevcast/Clipboard`, readable only by you, for 30 days and up to 500 items by default. Change that, or keep history in memory only, in Settings › General › Clipboard. Copies from password managers, and items they mark as concealed, are never recorded.
+
+### Dictation
+
+On macOS 26 or later, turn on **Hold Right Command to dictate** in Settings › Voice › Dictation. Hold Right Command, speak, and let go: the text goes into the app in front. Speech is changed to text on this Mac. Audio stays in memory and is never saved or sent. Transcripts are kept as text in `~/Library/Application Support/Jevcast/Dictation` for 30 days by default, and `dictation history` lists them. Quill can also fix punctuation, but only after you turn on **Dictation transcripts** in Settings › AI › Quill.
+
+### Hyper key
+
+Turn on **Use Caps Lock as a Hyper key** in Settings › Keys. Hold Caps Lock and press a key: M opens the Mail view, C the Calendar view, V the Clipboard view, A Automations, N shows notifications, T the Terminal view, and Space opens the launcher. H, J, K, and L send the arrow keys. The arrow keys move the window to a half, and Return fills the screen. Change any key, or add one that opens an app, in the same place. While Hyper is on, Caps Lock does not type capitals. Jevcast keeps your other key mappings and puts Caps Lock back when you turn Hyper off or quit, and after a crash on the next launch. The Caps Lock light needs Input Monitoring; the Hyper key works without it.
+
+### Terminal
+
+Hyper–T, or `/terminal`, opens the Terminal view in the launcher, for quick commands such as signing in to a command-line tool. It runs your login shell in your home folder and is drawn by [libghostty](https://github.com/ghostty-org/ghostty), with the font, colours, and keys from your Ghostty config if you have one. It takes the launcher's look on top: no background of its own over the panel glass, the launcher's margins, an accent bar cursor, and launcher text and selection colours in light and dark mode. The bar above it shows the shell's folder, such as "ryanerkal ~", and follows `cd`. The view is a third smaller than the other views. Every key goes to the shell except Escape, which closes the view; press ⌃[ to send Escape to a program. The shell keeps running while the launcher is closed, so Hyper–T takes you back to it, and a second Hyper–T closes it again. `exit` ends the shell, and the next Hyper–T starts a new one. ⌘-click opens a web link, such as a sign-in page. Pasting text with line breaks asks first. Dead keys and input methods, such as Japanese, do not type yet.
+
 ### Jev memory and usage
 
 When you choose a result for a request, Jevcast remembers it on this Mac, and the same request then needs no Jev call. Press ⌘Z on a Jev or remembered pick to undo it and forget it. A whole-name match, a sum, a URL, a timer, or a port lookup never asks Jev. Settings › AI › Usage shows requests, tokens, and cost for 7 days, 30 days, and all time.
+
+## Automations
+
+Automations run background work on a schedule, also while Jevcast is closed. Open them from **Automations…** in the menu-bar menu, with Hyper–A, or by typing `automations`. Turn on the background runner in Settings › Automations. It is a signed helper inside the app, so it needs a signed build, and macOS may ask you to allow it in Login Items.
+
+- **Kinds.** A script you choose, an agent prompt run by the `codex` or `claude` command-line tool you installed and signed in to, or a script that asks an agent to diagnose it only when it fails. Agent runs use your subscription sign-in; Jevcast removes API-key variables from them.
+- **Access.** An agent reads only, by default. It can also edit its own folder, and use the network, if you choose. The CLI's own sandbox or tool list enforces this. There is no full-access level.
+- **Changes to approve.** For other file changes, an agent proposes moves, renames, new folders, tags, and moves to the Trash. You approve each item. Jevcast checks and applies them, keeps a journal, and can undo them. A proposal expires after 7 days.
+- **Quiet.** Automations make no system banners. A notch alert shows only when a run needs your answer or approval, or fails after its retries. Alerts hide automation names by default.
+- **Codex.** Jevcast lists the automations in `~/.codex/automations` and never writes there. An imported copy starts paused and stays blocked while its Codex original is active. Before you turn it on, check its model, reasoning effort, and time zone in the editor and save it. Run Now also waits until the model and effort are checked.
+
+Definitions and run history are in `~/Library/Application Support/Jevcast/Automations`, readable only by you. A paused automation that you turn on again starts from that moment and does not catch up the paused time.
 
 ## Privacy
 
 The app has no account, no analytics, and no crash reporting. It connects to the internet for these things only:
 
-| When                                                                             | Where                                | What is sent                                                                                                                                                                                                          |
-| -------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Once a day, if **Check for updates automatically** is on (default: on)           | `api.github.com`                     | A request for the newest release, with the app version. GitHub sees your IP address, as with any web request. Nothing is downloaded.                                                                                  |
-| After each pause in typing or speech, if natural-language matching is on (default: off) | `api.typesafe.ai`, or `openrouter.ai` with an OpenRouter key | The text you typed or said and a short list of candidate names: apps, settings panes, window actions, commands, workflows, Shortcuts, snippet names, menu item names, search sites, files, and folders. Jevcast does not add file or folder paths, command text, snippet text, clipboard text, or audio. A path you type yourself is included in the query. Jev can only choose one of the supplied candidates. |
-| When you ask Luna, if Luna is on (default: off)                                  | `openrouter.ai`                      | What you typed after `ask`, or your instruction. Selected text and mail messages only when you turn on each one in Settings › AI › Luna. Never file paths, clipboard history, or audio. |
-| While Jevcast accounts are the mail source and you have added an account         | That account's IMAP and SMTP servers, over TLS | Your user name and app password to sign in, requests for your mail, the changes you make, and the messages you send. Nothing else, and nothing to any other server. |
-| When you open a web search or a URL                                              | Your default browser                 | Whatever you chose to open.                                                                                                                                                                                           |
+| When                                                                                       | Where                                                        | What is sent                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Once a day, if **Check for updates automatically** is on (default: on)                     | `api.github.com`                                             | A request for the newest release, with the app version. GitHub sees your IP address, as with any web request. Nothing is downloaded.                                                                                                                                                                                                                                                                            |
+| After each pause in typing or speech, if natural-language matching is on (default: off)    | `api.typesafe.ai`, or `openrouter.ai` with an OpenRouter key | The text you typed or said and a short list of candidate names: apps, settings panes, window actions, commands, workflows, Shortcuts, snippet names, menu item names, search sites, files, and folders. Jevcast does not add file or folder paths, command text, snippet text, clipboard text, or audio. A path you type yourself is included in the query. Jev can only choose one of the supplied candidates. |
+| When you ask Quill, if Quill is on (default: off)                                          | `openrouter.ai`                                              | What you typed after `ask`, or your instruction. Selected text, mail messages, calendar and reminders, the unread mail list, and dictation transcripts only when you turn on each one in Settings › AI › Quill. Never file paths, clipboard history, or audio.                                                                                                                                                  |
+| When you read an HTML message in Mail, if **Load Images from the Web** is on (default: on) | The servers the message names                                | Requests for the message's web images, fonts, and style sheets. As with any mail app, the sender can learn that you opened it, when, and from which IP address. Scripts never run. Turn it off in the ⋯ menu above a message.                                                                                                                                                                                   |
+| While Jevcast accounts are the mail source and you have added an account | That account's IMAP and SMTP servers, over TLS | Your user name and app password to sign in, requests for your mail, the changes you make, and the messages you send. Nothing else, and nothing to any other server. |
+| When you open a web search or a URL                                                        | Your default browser                                         | Whatever you chose to open.                                                                                                                                                                                                                                                                                                                                                                                     |
 
-Everything else stays on your Mac. Clipboard history is kept in memory only, holds plain text only, and skips items that password managers mark as concealed. The app writes one file of its own: a cache of your app list in `~/Library/Caches/JevLauncher`. A browser history search copies each history database to a temporary folder and deletes it after the search. Mail, Calendar, Reminders, Contacts, tabs, and selected text are read on this Mac and are not stored by Jevcast. The exception is mail for Jevcast accounts, which Jevcast keeps in `~/Library/Application Support/Jevcast/Mail`.
+Automations run the `codex` and `claude` tools you signed in to, or your own scripts. Those programs make their own connections under your account. Jevcast adds none for them. The same is true of the commands you type in the Terminal view. Jevcast does not store or send what the terminal shows.
+
+Everything else stays on your Mac. Settings are in macOS preferences, and keys are in your Keychain. The app writes these files of its own: a cache of your app list in `~/Library/Caches/JevLauncher`, and in `~/Library/Application Support/Jevcast` the clipboard history (`Clipboard`), dictation transcripts (`Dictation`), Quill task results (`Luna Tasks`), automations and their runs (`Automations`), and a lock file that keeps one copy running. The Terminal view's style is a small Ghostty settings file in the system temporary folder. Clipboard history skips password managers and items they mark as concealed. A browser history search copies each history database to a temporary folder and deletes it after the search. Mail, Calendar, Reminders, Contacts, tabs, and selected text are read on this Mac and are not stored by Jevcast. The exception is mail for Jevcast accounts, which Jevcast keeps in `~/Library/Application Support/Jevcast/Mail`.
 
 ## Permissions
 
-| Permission                        | Needed for                  | Required?               |
-| --------------------------------- | --------------------------- | ----------------------- |
-| Accessibility                     | Moving and resizing windows | Only for window actions |
-| Microphone and Speech Recognition | Voice input                 | Only for voice          |
-| Calendars, Reminders, Contacts    | Events, reminders, people   | Only for those rows     |
-| Automation (Apple Events)         | Browser tabs, Finder selection, and changes to mail | Only for those features |
-| Full Disk Access                  | Reading Apple Mail and Safari history | Only for Apple Mail and Safari history; not for Jevcast accounts |
+| Permission                        | Needed for                                                                                         | Required?                        |
+| --------------------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------- |
+| Accessibility                     | Moving and resizing windows, dictation, and the Hyper key                                          | Only for those features          |
+| Microphone and Speech Recognition | Voice input. Dictation needs the microphone only.                                                  | Only for voice and dictation     |
+| Input Monitoring                  | The Caps Lock light. Settings › Keys also asks for it when the Hyper key cannot read the keyboard. | Only for the Hyper key           |
+| Calendars, Reminders, Contacts    | Events, reminders, people                                                                          | Only for those rows              |
+| Automation (Apple Events)         | Browser tabs, Finder selection, and changes to mail                                                | Only for those features          |
+| Full Disk Access                  | Reading Apple Mail and Safari history                                                              | Only for Apple Mail and Safari history; not for Jevcast accounts |
+| Notifications                     | Timers, and your own commands set to notify                                                        | Only for those features          |
+| Login Items                       | The background runner for automations, and Open at Login                                           | Only for those features          |
 
-Allow each one from the welcome window, Settings, or the **Permissions** menu in the menu bar. Each item opens the matching page of System Settings.
+Allow each one from the welcome window, Settings › General, or the Settings tab of its feature. When a feature you turned on still needs Accessibility or Microphone and Speech Recognition, the menu-bar menu shows an item that opens the right Settings tab.
 
 ## Build from source
 
-You need Xcode 26 or later (it includes the macOS 26 SDK). The built app runs on macOS 14 or later.
+You need Xcode 26 or later (it includes the macOS 26 SDK), its Metal Toolchain, and Zig 0.15 for the Terminal's libghostty. The built app runs on macOS 14 or later.
 
 ```sh
 git clone https://github.com/RyanErkal/jevcast.git
 cd jevcast
+brew install zig@0.15
+xcodebuild -downloadComponent MetalToolchain
+scripts/ghosttykit.sh       # builds libghostty from pinned Ghostty source, once
 swift test
 scripts/build.sh            # universal build; ARCHS=arm64 scripts/build.sh builds one architecture
 open "dist/Jevcast.app"

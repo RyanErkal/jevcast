@@ -37,7 +37,8 @@ extension AutomationCenter {
         guard let ids = Self.alertRunIDs(alertID) else { return true }
         switch action {
         case "review", "answer", "open": openWindow?(ids.automationID, ids.runID)
-        case "retry": runNow(ids.automationID)
+        // A blocked Retry opens the automation, where the window shows why.
+        case "retry": if !runNow(ids.automationID), let a = automation(ids.automationID), runProblem(a) != nil { openWindow?(a.id, nil) }
         case "cancel", "approveAll", "undo":
             Task { @MainActor [weak self] in
                 guard let self, let run = await self.currentRun(ids.automationID, ids.runID) else { return }

@@ -35,7 +35,7 @@ public enum JevKind: String, CaseIterable, Sendable {
         case .settingsPane: return "The request is about a macOS setting such as Wi-Fi, Bluetooth, display, or sound settings"
         case .window: return "The request moves, resizes, snaps, tiles, or maximises a window, such as \"make this bigger\" or \"put it on the left\""
         case .files: return "The request looks for a document, download, image, folder, or recent file"
-        case .command: return "The request changes the Mac: dark mode, keep awake, empty trash, lock screen, IP address, or the user's own commands"
+        case .command: return "The request changes the Mac: dark mode, keep awake, empty trash, IP address, or the user's own commands"
         case .ports: return "The request is about a dev server, localhost, or a process listening on a port"
         case .automation: return "The request names one of the user's Shortcuts, workflows, or text snippets"
         case .menu: return "The request asks the app in front to do something from its menus, such as export, new tab, or print"

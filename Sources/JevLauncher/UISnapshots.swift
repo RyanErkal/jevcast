@@ -72,7 +72,7 @@ final class LauncherSnapshotRig {
         panel.acceptsKey = false; panel.alphaValue = 0; panel.ignoresMouseEvents = true
         panel.host(LauncherView(model: model, speech: model.speech, catalogue: catalogue, actions: {}))
         model.makePage = { [unowned model] id in LauncherPages.make(id, model: model, links: .init(), snapshot: true) }
-        viewSizeWatch = model.$page.map { $0 != nil }.removeDuplicates().sink { [panel] wide in panel.setViewSize(wide) }
+        viewSizeWatch = model.$page.map { $0?.id }.removeDuplicates().sink { [panel] view in panel.setViewSize(view) }
     }
     private var viewSizeWatch: AnyCancellable?
     func open() {

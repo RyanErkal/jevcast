@@ -45,14 +45,13 @@ public struct CleanupProcess: Equatable, Sendable {
 /// Something the cleanup list offers to stop, and whether it is checked at first.
 public struct CleanupFinding: Equatable, Sendable {
     public enum Group: String, Sendable, CaseIterable {
-        case simulator, server, orphan, docker, idleApp, heavy
+        case simulator, server, orphan, docker, heavy
         public var title: String {
             switch self {
             case .simulator: return "Simulator"
             case .server: return "Idle dev server"
             case .orphan: return "Leftover process"
             case .docker: return "Docker"
-            case .idleApp: return "Idle app"
             case .heavy: return "Heavy process"
             }
         }

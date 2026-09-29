@@ -165,6 +165,8 @@ struct AutomationDraft: Equatable {
         case .scriptWithDiagnosis: automation.kind = .scriptWithDiagnosis(scriptTask, diagnosisTask)
         }
         if existing == nil { automation.enabled = false }
+        // The editor showed every imported value, so saving it confirms them.
+        automation.source?.unconfirmed = nil
         return automation
     }
 

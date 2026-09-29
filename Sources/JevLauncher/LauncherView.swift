@@ -27,7 +27,7 @@ struct LauncherView: View {
             HStack(spacing: 10) {
                 Spacer(minLength: 10)
                 ForEach(page.footerHints, id: \.key) { hint in KeyHint(hint.title, hint.key) }
-                KeyHint(page.openTitle, "↩")
+                if page.hasFilter { KeyHint(page.openTitle, "↩") }
                 KeyHint(model.escapeClosesLauncher ? "Close" : "Back", "esc")
                 if page.canPopOut { KeyHint("Open Window", "⌘O") }
             }
@@ -35,7 +35,7 @@ struct LauncherView: View {
             .padding(.horizontal, LauncherMetrics.gutter)
             .frame(height: LauncherMetrics.footerHeight)
         }
-        .frame(height: LauncherPanel.viewSize.height - LauncherMetrics.searchBarHeight)
+        .frame(height: LauncherPanel.viewSize(for: page.id).height - LauncherMetrics.searchBarHeight)
     }
 
     /// An empty query shows the search bar alone.
@@ -66,7 +66,8 @@ struct LauncherView: View {
         // Glyph width and spacing match the row icon column, so query text lines up with row titles.
         HStack(spacing: LauncherMetrics.iconSpacing) {
             if let page = model.page { ViewChip(view: page.id) { model.closeView() } } else { searchGlyph }
-            LauncherSearchField(model: model)
+            // A view with its own input, such as the terminal, has no filter.
+            if let page = model.page, !page.hasFilter { page.header() ?? AnyView(Spacer()) } else { LauncherSearchField(model: model) }
             // Voice setup lives in Settings › Voice; the button appears only once voice can work.
             if speech.permissionsGranted && model.page == nil { MicButton(speech: speech) { model.toggleListening() } }
         }

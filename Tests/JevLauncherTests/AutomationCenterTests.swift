@@ -83,6 +83,67 @@ final class AutomationCenterTests: XCTestCase {
         XCTAssertEqual(center.automation(a.id)?.enabled, true)
     }
 
+    func testResumeStartsTheScheduleFromNow() throws {
+        let a = Automation(id: "s-2", name: "S", kind: .script(ScriptTask(executable: "/bin/echo", workingDirectory: work)),
+                           schedule: Schedule(rule: .rrule("FREQ=HOURLY")), policy: Policy(catchUp: .runOnce))
+        center.save(a)
+        XCTAssertNil(center.automation(a.id)?.resumed)
+        let before = Date()
+        XCTAssertNil(center.setEnabled(a.id, true))
+        let resumed = try XCTUnwrap(center.store.automation(id: a.id)?.resumed)
+        XCTAssertGreaterThanOrEqual(resumed, before)
+        XCTAssertNil(center.setEnabled(a.id, false))
+        XCTAssertEqual(center.store.automation(id: a.id)?.resumed, resumed, "Pausing keeps the last resume time.")
+    }
+
+    func testImportedCopyTurnsOnOnlyAfterAnEditorSave() throws {
+        let cli = workURL.appendingPathComponent("codex")
+        try "#!/bin/sh\n".write(to: cli, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: cli.path)
+        center.settings.codexPath = cli.path
+        let source = workURL.appendingPathComponent("automation.toml")
+        try "status = \"PAUSED\"\n".write(to: source, atomically: true, encoding: .utf8)
+        var a = agent(output: .report)
+        a.source = .init(app: .codex, sourceID: "x", path: source.path, hash: "h", unconfirmed: ["model", "time zone"])
+        XCTAssertNil(center.save(a))
+        let problem = try XCTUnwrap(center.setEnabled(a.id, true))
+        XCTAssertTrue(problem.contains("model and time zone"), problem)
+        XCTAssertEqual(center.automation(a.id)?.enabled, false)
+
+        let confirmed = try XCTUnwrap(AutomationDraft(center.automation(a.id)!).build(isExecutable: { _ in true }))
+        XCTAssertNil(confirmed.source?.unconfirmed)
+        XCTAssertEqual(confirmed.source?.sourceID, "x")
+        XCTAssertNil(center.save(confirmed))
+        XCTAssertNil(center.setEnabled(a.id, true))
+        XCTAssertEqual(center.automation(a.id)?.enabled, true)
+
+        var plain = agent(output: .report); plain.id = "plain-1"
+        XCTAssertNil(center.save(plain))
+        XCTAssertNil(center.setEnabled(plain.id, true), "Automations made here are unchanged.")
+    }
+
+    func testRunNowWaitsForAnImportedModelAndEffort() throws {
+        var a = agent(output: .report)
+        a.source = .init(app: .codex, sourceID: "x", path: "/x/automation.toml", hash: "h",
+                         unconfirmed: ["model", "reasoning effort", "time zone"])
+        XCTAssertNil(center.save(a))
+        XCTAssertFalse(center.runNow(a.id))
+        let message = try XCTUnwrap(center.message)
+        XCTAssertTrue(message.contains("model and reasoning effort"), message)
+        XCTAssertFalse(message.contains("time zone"), message)
+        center.message = nil
+        let failed = RunRecord(id: RunID.make(), automation: a, trigger: .manual, occurrence: nil)
+        XCTAssertTrue(center.handleAlertAction(AutomationCenter.alertID(failed), "retry"))
+        XCTAssertEqual(center.message, message, "The notch Retry is blocked the same way.")
+        XCTAssertTrue(center.store.pendingRequests().isEmpty, "No run is queued.")
+
+        var zoneOnly = center.automation(a.id)!
+        zoneOnly.source?.unconfirmed = ["time zone"]
+        XCTAssertNil(center.runProblem(zoneOnly), "A manual run uses no schedule, so the time zone does not block it.")
+        XCTAssertNotNil(center.enableProblem(zoneOnly), "Turning it on still waits for the time zone.")
+        XCTAssertNil(center.runProblem(agent()), "Automations made here are unchanged.")
+    }
+
     func testApproveAppliesJournalsAndUndoes() async throws {
         try Data("x".utf8).write(to: URL(fileURLWithPath: work + "/a.txt"))
         try fm.createDirectory(atPath: work + "/Done", withIntermediateDirectories: false)

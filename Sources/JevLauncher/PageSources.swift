@@ -44,6 +44,8 @@ enum LauncherPages {
         var mail: (() -> MailModel)?
         var mailWindow: ((Int64?) -> Void)?
         var runWindow: ((QuillTaskRun) -> Void)?
+        /// The running shell, or a new one. Nil when libghostty cannot start.
+        var terminal: (() -> TerminalView?)?
     }
 
     static func make(_ id: ViewID, model: LauncherModel, links: Links, snapshot: Bool) -> LauncherPage? {
@@ -74,6 +76,10 @@ enum LauncherPages {
         case .cleanup:
             return SourcePage(.cleanup, source: snapshot ? nil : CleanupSource(preferences: model.preferences), model: model, hasDetail: false,
                               emptyText: "Nothing to clean up. No idle servers, leftover processes, or simulators are running.")
+        case .terminal:
+            // Snapshots never start a shell.
+            return TerminalPage(terminal: snapshot ? nil : links.terminal?(),
+                                placeholder: snapshot ? "Your login shell runs here." : "The terminal could not start.")
         }
     }
 }

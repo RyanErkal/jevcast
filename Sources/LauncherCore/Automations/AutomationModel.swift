@@ -28,6 +28,9 @@ public struct Automation: Codable, Equatable, Identifiable, Sendable {
     public var approvedProgram: ProgramIdentity?
     /// The agent CLI as it was on the last save. A change only adds a note; CLIs update themselves.
     public var approvedAgentCLI: ProgramIdentity?
+    /// When the user last turned it back on. The schedule starts again here: occurrences from the paused
+    /// time never run, also with `.runOnce`. Nil in older files and before the first resume.
+    public var resumed: Date?
 
     public init(id: String, name: String, symbol: String = "gearshape.2", kind: Kind, schedule: Schedule,
                 policy: Policy = Policy(), enabled: Bool = false, revision: Int = 1, created: Date = Date(),
@@ -61,8 +64,13 @@ public struct Automation: Codable, Equatable, Identifiable, Sendable {
         public var path: String
         /// SHA-256 hex of the source file when imported, to show when the source changed.
         public var hash: String
-        public init(app: App, sourceID: String, path: String, hash: String) {
-            self.app = app; self.sourceID = sourceID; self.path = path; self.hash = hash
+        /// Values the import could not take from the source, such as "time zone". The automation cannot
+        /// be turned on until the user saves it in the editor. Nil in older files and after that save.
+        public var unconfirmed: [String]?
+        /// The names `unconfirmed` holds. Only an unconfirmed time zone leaves Run Now free, since a manual run uses no schedule.
+        public static let unconfirmedModel = "model", unconfirmedEffort = "reasoning effort", unconfirmedTimeZone = "time zone"
+        public init(app: App, sourceID: String, path: String, hash: String, unconfirmed: [String]? = nil) {
+            self.app = app; self.sourceID = sourceID; self.path = path; self.hash = hash; self.unconfirmed = unconfirmed
         }
     }
 }

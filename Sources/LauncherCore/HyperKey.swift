@@ -12,7 +12,7 @@ public enum HyperAction: Codable, Hashable, Sendable {
 
 /// The fixed Jevcast actions a Hyper key can run. IDs are stored, so never rename them.
 public enum HyperBuiltIn: String, CaseIterable, Sendable {
-    case launcher, mail, calendar, automations, clipboard, notifications
+    case launcher, mail, calendar, automations, clipboard, notifications, terminal
     case leftHalf = "window.left-half", rightHalf = "window.right-half"
     case topHalf = "window.top-half", bottomHalf = "window.bottom-half"
     case maximize = "window.maximize"
@@ -25,6 +25,7 @@ public enum HyperBuiltIn: String, CaseIterable, Sendable {
         case .automations: return "Open Automations"
         case .clipboard: return "Open Clipboard view"
         case .notifications: return "Show notifications"
+        case .terminal: return "Open Terminal view"
         case .leftHalf: return "Window left half"
         case .rightHalf: return "Window right half"
         case .topHalf: return "Window top half"
@@ -59,6 +60,7 @@ public enum HyperLayer {
         .init(keyCode: 0, action: .builtIn(HyperBuiltIn.automations.rawValue)),    // A
         .init(keyCode: 9, action: .builtIn(HyperBuiltIn.clipboard.rawValue)),      // V
         .init(keyCode: 45, action: .builtIn(HyperBuiltIn.notifications.rawValue)), // N
+        .init(keyCode: 17, action: .builtIn(HyperBuiltIn.terminal.rawValue)),      // T
         .init(keyCode: 4, action: .sendKey(123)),                                  // H → ←
         .init(keyCode: 38, action: .sendKey(125)),                                 // J → ↓
         .init(keyCode: 40, action: .sendKey(126)),                                 // K → ↑
@@ -74,7 +76,8 @@ public enum HyperLayer {
     /// each one once, and only when the user has nothing on that key.
     public static let addedDefaults: [(version: Int, keyCode: UInt16, action: HyperAction)] = [
         (1, 9, .builtIn(HyperBuiltIn.clipboard.rawValue)),
-        (2, 45, .builtIn(HyperBuiltIn.notifications.rawValue))
+        (2, 45, .builtIn(HyperBuiltIn.notifications.rawValue)),
+        (3, 17, .builtIn(HyperBuiltIn.terminal.rawValue))
     ]
     public static var addedDefaultsVersion: Int { addedDefaults.map(\.version).max() ?? 0 }
 

@@ -122,6 +122,25 @@ final class LauncherFlowTests: XCTestCase {
             XCTAssertEqual(model.selected?.title, "Search GitHub")
         }
     }
+    @MainActor func testBareKeywordGoesBelowAnItemWithThatExactName() async throws {
+        let jev = HeldJev()
+        let (model, preferences, defaults, suite) = makeModel(jev: jev)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        preferences.customCommands = [CustomCommand(name: "Maps", command: "true")]
+        model.begin(); defer { model.end() }
+        let asked = expectation(description: "Jev asked")
+        asked.isInverted = true
+        jev.onChoose = { asked.fulfill() }
+        model.updateQuery("maps", typed: true)
+        XCTAssertEqual(model.selected?.title, "Maps", "An item named Maps comes first.")
+        let ids = model.results.map(\.id)
+        let keyword = try XCTUnwrap(ids.firstIndex(of: "quicklink:maps"))
+        let command = try XCTUnwrap(ids.firstIndex { $0.hasPrefix("custom:") })
+        XCTAssertLessThan(command, keyword)
+        model.updateQuery("gh", typed: true)
+        XCTAssertEqual(model.selected?.id, "quicklink:gh", "With no exact name, the keyword stays first.")
+        await fulfillment(of: [asked], timeout: 0.8)
+    }
     @MainActor func testClipboardModeListsAndFiltersEntries() async {
         let board = FakePasteboard()
         let (model, _, defaults, suite) = makeModel(jev: HeldJev(), board: board)

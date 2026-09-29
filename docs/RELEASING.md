@@ -31,7 +31,7 @@ Unit tests cannot prove these. Do them on a Mac with a real keyboard, and record
 - [ ] The app opens from `/Applications` without bypassing Gatekeeper or
       changing macOS security settings.
 - [ ] The welcome window opens by itself, and the "try it" line turns green after the shortcut opens the launcher.
-- [ ] Accessibility, Microphone, and Speech Recognition prompts open the right System Settings pages.
+- [ ] Accessibility, Microphone, Speech Recognition, Input Monitoring, and Full Disk Access buttons open the right System Settings pages.
 - [ ] Open at login works after a restart.
 
 **Launcher:**
@@ -48,7 +48,8 @@ Unit tests cannot prove these. Do them on a Mac with a real keyboard, and record
 
 - [ ] Window actions and direct shortcuts move real windows, including on a second display.
 - [ ] Voice input transcribes speech and stops when you type.
-- [ ] With a TypeSafe key, a loose request such as "make this window bigger" selects a window action.
+- [ ] With a TypeSafe or OpenRouter key, a loose request such as "make this window bigger" selects a window action.
+- [ ] `maps` shows the Maps app above Search Maps. `gh` shows Search GitHub first.
 - [ ] **Check for Updates…** reports the right result.
 - [ ] `port <n>` lists a real local server with CPU and memory. Picking it and pressing ⌫ twice stops it, and the launcher stays open.
 - [ ] A built-in command, such as Toggle Dark Mode, runs. Empty Trash asks for a second Return.
@@ -57,6 +58,8 @@ Unit tests cannot prove these. Do them on a Mac with a real keyboard, and record
 - [ ] A Jev pick shows "Jev" beside it, ⌘Z undoes it, and the same request next time says "Remembered".
 - [ ] Settings › AI › Usage counts a Jev request.
 - [ ] A menu item of the front app, a Shortcut, a workflow, a snippet (Shift–Return pastes), a timer notification, and `:tada` all work.
+- [ ] Hyper–T opens the Terminal view with a prompt in the home folder. Typing, ⌃C, ⌃[, arrow keys, ⌘C and ⌘V, scrolling, and a ⌘-clicked link work. A paste with line breaks asks first. Escape and a second Hyper–T close it, and the next Hyper–T shows the same shell. `exit` closes it, and the next Hyper–T starts a new shell.
+- [ ] Start `5m test`, then quit and open Jevcast again. `timers` still lists the timer, and Cancel stops it.
 - [ ] With voice on and sound playing through the built-in speakers, the speakers mute while listening and come back after. Headphones are not muted.
 
 **Sources, Quill, and Mail:**
@@ -68,8 +71,25 @@ Unit tests cannot prove these. Do them on a Mac with a real keyboard, and record
 - [ ] `tabs` in Safari and Chrome asks for Automation once, lists tabs, and Switch to Tab and Close Tab act on the right tab.
 - [ ] With a page open, `copy link` copies it. Opening the launcher over a browser without typing shows no Automation prompt.
 - [ ] With Quill on and an OpenRouter key: `ask what is 2+2` answers. With Selected text on, Fix Spelling replaces a selection in TextEdit. With it off, no selected-text request is sent, and Settings › AI › Quill logs each request.
-- [ ] `mail` without Full Disk Access shows the setup view. With it, the Inbox lists messages. Archive, Delete, Flag, Reply, and a new message act on the right message in Apple Mail.
-- [ ] An HTML newsletter shows without remote images, and a link opens in the browser.
+- [ ] `mail` without Full Disk Access shows the setup view. With it, the Inbox lists messages. Archive, Delete, Flag, Reply, and a new message act on the right message in Apple Mail. In the mail window, F forwards, S flags, C and ⌘N write a new message, and Move To in the ⋯ menu moves the message.
+- [ ] An HTML newsletter shows its web images. With Load Images from the Web off in the ⋯ menu, it shows none. A link opens in the browser.
 - [ ] One click on a row runs it. Moving the pointer highlights rows; a still pointer does not change the selection while ↑↓ move it. The empty launcher shows only the bar, and no square edge shows at its corners in Dark Mode.
-- [ ] `every day at <two minutes from now> give me a quote` schedules a task. A notification arrives on time, a click opens the result, and `task results` lists it. With Mail off in Settings › AI › Quill, a mail task reports that it needs the switch and sends nothing.
+- [ ] `every day at <two minutes from now> give me a quote` schedules a task, and the launcher shows it in the scheduled tasks list with no notification. It runs on time, and `task results` lists it. With Mail off in Settings › AI › Quill, a mail task reports that it needs the switch and sends nothing.
 - [ ] With layered matching on, `put the chrom one on the left` moves Chrome, and Settings › AI › Usage counts the extra calls.
+
+**Clipboard, dictation, and the Hyper key:**
+
+- [ ] Copy text, an image, and a file. `clip` lists them, the Clipboard view previews each one, and Return copies. A copy from a password manager is not recorded.
+- [ ] On macOS 26, hold Right Command in TextEdit, speak, and let go. The text goes in, and the clipboard is as it was before.
+- [ ] With the Hyper key on, Caps Lock and M opens the Mail view, and Caps Lock alone types no capitals. After you turn Hyper off or quit, Caps Lock works as before. After a forced quit, the next launch puts Caps Lock back.
+- [ ] Settings › Keys lists every shortcut, and `keys` in the launcher opens it.
+
+**Automations and notch alerts (signed build only):**
+
+- [ ] Settings › Automations › Turn On registers the runner. macOS shows it in Login Items, and Settings shows it as running.
+- [ ] A script automation runs on time while Jevcast is quit.
+- [ ] A Codex and a Claude agent run use the subscription sign-in. A read-only run cannot write a file.
+- [ ] A Desktop tidy proposal shows each item. Approve some: Jevcast applies only those, and Undo puts them back. Undo stops when a file changed.
+- [ ] A run that needs approval, or fails, shows a notch alert on a built-in display with a notch and on an external display. No system banner shows. The alert does not bring Jevcast to the front.
+- [ ] Pause an automation, wait past one of its times, and resume it. No catch-up run starts.
+- [ ] An automation imported from Codex starts paused. It cannot be turned on until you save it in the editor.

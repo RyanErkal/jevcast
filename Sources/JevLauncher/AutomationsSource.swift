@@ -96,6 +96,7 @@ final class AutomationsSource: ThingSource {
         var verbs: [Verb] = [
             Verb(title: "Open") { center.openWindow?(id, nil); return nil },
             Verb(title: "Run Now", after: .stay) {
+                if let problem = center.automation(id).flatMap(center.runProblem) { throw LauncherError(problem) }
                 center.runNow(id)
                 return center.message ?? "Asked the runner to start \(name)."
             },

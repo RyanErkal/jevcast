@@ -124,8 +124,6 @@ public struct LaunchSchedule: Equatable, Sendable {
         return parts.isEmpty ? "When asked" : parts.joined(separator: ", ")
     }
 
-    public var hasTimer: Bool { !calendar.isEmpty || (interval ?? 0) > 0 }
-
     /// The next start for a calendar schedule after `date`. Interval and event jobs have no fixed time.
     public func nextRun(after date: Date, calendar cal: Calendar = .current) -> Date? {
         calendar.compactMap { Self.next($0, after: date, calendar: cal) }.min()

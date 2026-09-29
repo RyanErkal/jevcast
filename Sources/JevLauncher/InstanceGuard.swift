@@ -22,12 +22,11 @@ enum InstanceGuard {
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: AppIdentity.bundleID)
             .filter { $0.processIdentifier != me && !$0.isTerminated }
         let decision = SingleInstance.decide(arguments: arguments, otherProcesses: others.count, lockAcquired: acquireLock())
-        if decision == .handOff {
-            // The runner opens the app for alerts; the running copy already shows them.
-            if !arguments.contains("--automation-alerts") {
-                DistributedNotificationCenter.default().postNotificationName(showNotification, object: nil, userInfo: nil,
-                                                                             deliverImmediately: true)
-            }
+        // The runner opens the app for alerts; the running copy already shows them. That hand-off
+        // neither shows the launcher nor brings the running copy to the front.
+        if decision == .handOff, !arguments.contains("--automation-alerts") {
+            DistributedNotificationCenter.default().postNotificationName(showNotification, object: nil, userInfo: nil,
+                                                                         deliverImmediately: true)
             others.first?.activate()
         }
         return decision

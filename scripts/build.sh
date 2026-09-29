@@ -19,6 +19,8 @@ IDENTITY="${SIGNING_IDENTITY:-${DEV_IDENTITY:--}}"
 BUILD_FLAGS=(-c release)
 for arch in ${ARCHS:-arm64 x86_64}; do BUILD_FLAGS+=(--arch "$arch"); done
 
+# libghostty for the Terminal window, built once from pinned Ghostty source.
+scripts/ghosttykit.sh
 swift build "${BUILD_FLAGS[@]}"
 BIN_DIR="$(swift build "${BUILD_FLAGS[@]}" --show-bin-path)"
 
@@ -41,6 +43,9 @@ xcrun vtool -set-build-version macos 14.0 "$(xcrun --show-sdk-version)" -replace
   -output "$APP/Contents/MacOS/$RUNNER" "$BIN_DIR/$RUNNER"
 chmod 755 "$APP/Contents/MacOS/$RUNNER"
 cp scripts/runner-agent.plist "$APP/Contents/Library/LaunchAgents/$RUNNER_LABEL.plist"
+# libghostty is linked in; its MIT license travels with the app.
+mkdir -p "$APP/Contents/Resources/Licenses"
+cp Vendor/GhosttyKit-LICENSE.txt "$APP/Contents/Resources/Licenses/Ghostty.txt"
 plutil -lint -s "$APP/Contents/Library/LaunchAgents/$RUNNER_LABEL.plist"
 # macOS 26 draws the Icon Composer bundle as a Liquid Glass icon. actool also writes an
 # AppIcon.icns fallback for older systems. Without actool (no Xcode), ship the static .icns.

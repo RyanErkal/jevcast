@@ -44,6 +44,7 @@ final class Runner: @unchecked Sendable {
         ticks += 1
         let settings = store.loadSettings()
         beat()
+        expireWaitingRuns()
         handleRequests(settings)
         scheduleDue(settings)
         startQueued(settings)
@@ -53,6 +54,18 @@ final class Runner: @unchecked Sendable {
     private func beat() {
         try? store.writeHeartbeat(RunnerHeartbeat(pid: pid, started: started, heartbeat: Date(),
                                                   version: RunnerIdentity.version, signedBuild: RunnerIdentity.signedBuild))
+    }
+
+    /// A proposal older than seven days can no longer be approved. Its run becomes expired,
+    /// so it stops blocking the next run. Journals and other run files stay.
+    private func expireWaitingRuns() {
+        let now = Date()
+        for automation in store.loadAutomations().automations {
+            for run in store.runs(for: automation.id, limit: 20) where active[run.id] == nil {
+                guard let expired = WaitingRunExpiry.expired(run, now: now) else { continue }
+                saveRun(expired)
+            }
+        }
     }
 
     private func handleRequests(_ settings: AutomationSettings) {

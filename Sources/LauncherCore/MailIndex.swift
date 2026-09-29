@@ -277,6 +277,17 @@ public enum MailScripts {
           end repeat
     """, check: 5)
 
+    /// The number of messages in Mail's Outbox, where `send` leaves a message until Mail delivers it,
+    /// or -1 when Mail is not running. It never starts Mail.
+    public static let outboxCount = """
+    on run argv
+      if not (application id "com.apple.mail" is running) then return -1
+      with timeout of 10 seconds
+        tell application id "com.apple.mail" to return count of messages of outbox
+      end timeout
+    end run
+    """
+
     public static let checkForNewMail = """
     on run argv
       with timeout of 10 seconds

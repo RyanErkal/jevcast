@@ -82,6 +82,15 @@ enum MailActions {
         return Int(text[text.index(after: open)..<text.index(before: text.endIndex)])
     }
 
+    /// The number of messages in Mail's Outbox: 0 when Mail is not running, nil when Mail does not
+    /// answer. It never starts Mail.
+    static func outboxCount() async -> Int? {
+        guard AppleScript.isRunning(bundleID) else { return 0 }
+        guard let output = try? await AppleScript.run(MailScripts.outboxCount, app: bundleID, name: "Mail", timeout: 15),
+              let count = Int(output.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
+        return max(count, 0)
+    }
+
     private static func target(_ message: MailSummary, _ mailbox: MailMailbox) -> [String] {
         [mailbox.accountID, mailbox.path, String(message.rowID)]
     }

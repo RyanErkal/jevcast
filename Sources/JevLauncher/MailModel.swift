@@ -234,8 +234,12 @@ final class MailModel: ObservableObject {
             // An action that started after closing, or Mail opened by you, keeps it running.
             try? await Task.sleep(nanoseconds: accounts.isEmpty ? 1_500_000_000 : 15_000_000_000)
             guard !Task.isCancelled else { return }
+            // `send` only puts a message in Mail's Outbox. Mail quits once the Outbox is empty; with
+            // mail still there after about a minute, Mail keeps running so it can deliver it.
+            let delivered = await MailOutbox.waitUntilEmpty()
+            guard !Task.isCancelled else { return }
             self?.quit = nil
-            guard let mail = NSRunningApplication.runningApplications(withBundleIdentifier: MailActions.bundleID).first,
+            guard delivered, let mail = NSRunningApplication.runningApplications(withBundleIdentifier: MailActions.bundleID).first,
                   !MailActions.openedByUser else { return }
             mail.terminate()
         }

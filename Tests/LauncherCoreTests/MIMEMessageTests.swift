@@ -148,6 +148,16 @@ final class MIMEMessageTests: XCTestCase {
         let body = "\n\n" + String(repeating: "word ", count: 100)
         XCTAssertTrue(MailScripts.sendingText(body).hasPrefix(MailScripts.checkText(body)))
     }
+
+    /// The Outbox count runs only while Mail runs, so it never starts Mail.
+    func testOutboxCountNeverStartsMail() throws {
+        let script = MailScripts.outboxCount
+        let running = try XCTUnwrap(script.range(of: "if not (application id \"com.apple.mail\" is running) then return -1"))
+        let tell = try XCTUnwrap(script.range(of: "tell application id \"com.apple.mail\""))
+        XCTAssertLessThan(running.lowerBound, tell.lowerBound)
+        XCTAssertTrue(script.contains("return count of messages of outbox"))
+        XCTAssertFalse(script.contains("of argv)"), "It takes no values")
+    }
 }
 
 final class MIMEHostileTests: XCTestCase {

@@ -57,6 +57,7 @@ Run the executable inside the app bundle, for example `"dist/Jevcast.app/Content
 | `--diagnose-files 'kind:pdf in:downloads'` | Prints file-search results from your folders for five seconds.                                         |
 | `--diagnose-source 'scheduled tasks'`      | Prints the rows and verbs a source query lists. Runs nothing. Tabs may ask for Automation access.       |
 | `--diagnose-mail`                          | Checks that Apple Mail can be read. Prints column names, counts per mailbox kind, inbox and All Mail totals, whether Mail runs, and page and search timings. Never subjects or addresses. |
+| `--diagnose-native-mail`                   | For each Jevcast mail account, signs in to IMAP and SMTP with the saved password and prints capabilities, mailbox roles and counts, and timings. Changes nothing. Never mailbox names, subjects, or addresses. |
 | `--diagnose-jev 'request' …`               | Runs each request through the launcher with the stored TypeSafe key and prints the pick, the top row, and the tokens used. Billed, and counted in Settings › AI › Usage. |
 | `echo KEY \| … --store-jev-key`            | Saves a TypeSafe or OpenRouter key in the Keychain from standard input, as Settings › AI › Jev does. The key is never an argument or printed. |
 | `--hyper-led-test`                         | Turns the Caps Lock light on for two seconds, then off. Prints whether each step worked and quits. Changes no key mapping. |

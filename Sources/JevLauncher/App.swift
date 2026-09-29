@@ -18,6 +18,7 @@ struct JevLauncherApp {
         }
         if CommandLine.arguments.contains("--hyper-led-test") { HyperKeyController.runLightTest(); return }
         if CommandLine.arguments.contains("--diagnose-mail") { Diagnostics.mail(); return }
+        if CommandLine.arguments.contains("--diagnose-native-mail") { Diagnostics.nativeMail(); return }
         if CommandLine.arguments.contains("--cleanup") { Diagnostics.cleanup(apply: CommandLine.arguments.contains("--apply")); return }
         if let index = CommandLine.arguments.firstIndex(of: "--diagnose-source"), CommandLine.arguments.indices.contains(index + 1) {
             Diagnostics.source(CommandLine.arguments[index + 1]); return

@@ -139,35 +139,85 @@ public enum MailScripts {
         """
     }
 
-    /// The first line of `text` that has words, trimmed and cut to 60 characters. The reply,
-    /// forward, and send scripts look for it in Mail's copy before they send.
-    public static func checkText(_ text: String) -> String {
-        let line = text.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty } ?? ""
-        return String(line.prefix(60))
+    /// The text that goes to Mail: `text` without leading spaces and blank lines, so Mail's copy
+    /// starts with the same characters as `checkText`.
+    public static func sendingText(_ text: String) -> String {
+        String(text.drop { $0.isWhitespace })
     }
 
-    /// Reads the text back from `message` and stops before sending when Mail did not keep it:
-    /// Mail can ignore text set on a message it has not shown. Argument `argument` holds
-    /// `checkText`; an empty one skips the check. The discarded message is never sent.
-    static func keepsText(_ message: String, argument: Int) -> String {
-        """
-              if (item \(argument) of argv) is not "" then
-                set written to ""
+    /// The first 200 characters of `sendingText`. The reply, forward, and send scripts check that
+    /// Mail's copy starts with them before they send.
+    public static func checkText(_ text: String) -> String {
+        String(sendingText(text).prefix(200))
+    }
+
+    /// Reads the text back from `message` and fails with 1003 when Mail did not keep it: Mail can
+    /// ignore text set on a message it has not shown. Argument `argument` holds `checkText`; an empty
+    /// one skips the check. Mail's copy must start with it, so a quoted original that contains the
+    /// same words does not count. White space is ignored, because Mail can change line endings and
+    /// blank lines; case counts. `before` names Mail's own text from before the change. When that
+    /// already starts with the check text, such as the signature "Thanks, Ryan" under the reply
+    /// "Thanks", only a copy that no longer starts with Mail's own text shows that the text was kept.
+    static func keepsText(_ message: String, argument: Int, before: String? = nil) -> String {
+        let check = "(item \(argument) of argv)"
+        let own = before.map { "\n            if kept and \($0) starts with \(check) then set kept to written does not start with \($0)" } ?? ""
+        return """
+              if \(check) is not "" then
+                set kept to false
                 repeat 10 times
                   set written to (content of \(message)) as text
-                  if written contains (item \(argument) of argv) then exit repeat
+                  considering case but ignoring white space
+                    set kept to written starts with \(check)\(own)
+                  end considering
+                  if kept then exit repeat
                   delay 0.2
                 end repeat
-                if written does not contain (item \(argument) of argv) then
-                  try
-                    close \(message) saving no
-                  end try
-                  try
-                    delete \(message)
-                  end try
-                  error "Mail did not take the text, so nothing was sent." number 1003
-                end if
+                if not kept then error "Mail did not take the text, so nothing was sent." number 1003
               end if
+        """
+    }
+
+    /// Closes `message` without saving, so a message that was not sent does not stay in Mail.
+    static func discard(_ message: String) -> String {
+        """
+                try
+                  close \(message) saving no
+                end try
+                try
+                  delete \(message)
+                end try
+        """
+    }
+
+    /// A script that makes `message` in `prepare`, checks its text, and sends it. Every error before
+    /// `send` discards the message and becomes 1004: nothing was sent. The text check (1003) and a
+    /// refused Automation permission (-1743) keep their numbers. An error from `send` itself becomes
+    /// 1005, because Mail may have sent the message. `send` that returns false discards it (1002).
+    static func sending(_ message: String, prepare: String, check argument: Int, before: String? = nil) -> String {
+        """
+        on run argv
+          with timeout of 20 seconds
+            tell application id "com.apple.mail"
+              try
+        \(prepare)
+        \(keepsText(message, argument: argument, before: before))
+              on error errText number errNum
+        \(discard(message))
+                if errNum is -1743 or errNum is 1003 then error errText number errNum
+                error errText number 1004
+              end try
+              try
+                set didSend to (send \(message))
+              on error
+                error "Mail stopped while it sent the message." number 1005
+              end try
+              if not didSend then
+        \(discard(message))
+                error "Mail did not send the message." number 1002
+              end if
+            end tell
+          end timeout
+        end run
         """
     }
 
@@ -177,14 +227,15 @@ public enum MailScripts {
     public static let delete = onMessage("      delete m")
     /// `argv` 4: the destination mailbox path in the same account.
     public static let move = onMessage("      move m to mailbox (item 4 of argv) of acct")
-    /// `argv` 4: the reply text; 5: "true" to reply to all; 6: `checkText` of the reply. The quoted
-    /// original stays below the text.
-    public static let reply = onMessage("""
+    /// `argv` 4: the reply text (`sendingText`); 5: "true" to reply to all; 6: `checkText` of the
+    /// reply. The quoted original stays below the text.
+    public static let reply = sending("r", prepare: """
+    \(findMessage)
           set r to reply m opening window false reply to all ((item 5 of argv) is "true")
           set quoted to ""
           repeat 10 times
             delay 0.2
-            set quoted to content of r
+            set quoted to (content of r) as text
             if quoted is not "" then exit repeat
           end repeat
           if quoted is "" then
@@ -192,12 +243,11 @@ public enum MailScripts {
           else
             set content of r to (item 4 of argv) & return & return & quoted
           end if
-    \(keepsText("r", argument: 6))
-          if not (send r) then error "Mail did not send the message." number 1002
-    """)
-    /// `argv` 4: the text above the forwarded message; 5: recipient addresses, one per line;
-    /// 6: `checkText` of the text.
-    public static let forward = onMessage("""
+    """, check: 6, before: "quoted")
+    /// `argv` 4: the text above the forwarded message (`sendingText`); 5: recipient addresses, one
+    /// per line; 6: `checkText` of the text.
+    public static let forward = sending("f", prepare: """
+    \(findMessage)
           set f to forward m opening window false
           delay 0.5
           repeat with a in paragraphs of (item 5 of argv)
@@ -205,18 +255,19 @@ public enum MailScripts {
           end repeat
           -- The body is left as Mail made it when there is no text to add, so attachments stay.
           if (item 4 of argv) is not "" then
-            set quoted to content of f
+            -- Mail fills in the forwarded message a moment after it makes the forward.
+            set quoted to ""
+            repeat 10 times
+              set quoted to (content of f) as text
+              if quoted is not "" then exit repeat
+              delay 0.2
+            end repeat
             set content of f to (item 4 of argv) & return & return & quoted
           end if
-    \(keepsText("f", argument: 6))
-          if not (send f) then error "Mail did not send the message." number 1002
-    """)
+    """, check: 6, before: "quoted")
 
-    /// `argv`: to (one per line), cc (one per line), subject, body, `checkText` of the body.
-    public static let send = """
-    on run argv
-      with timeout of 20 seconds
-        tell application id "com.apple.mail"
+    /// `argv`: to (one per line), cc (one per line), subject, body (`sendingText`), `checkText` of the body.
+    public static let send = sending("o", prepare: """
           set o to make new outgoing message with properties {subject:(item 3 of argv), content:(item 4 of argv), visible:false}
           repeat with a in paragraphs of (item 1 of argv)
             if (a as text) is not "" then make new to recipient at end of to recipients of o with properties {address:(a as text)}
@@ -224,9 +275,15 @@ public enum MailScripts {
           repeat with a in paragraphs of (item 2 of argv)
             if (a as text) is not "" then make new cc recipient at end of cc recipients of o with properties {address:(a as text)}
           end repeat
-    \(keepsText("o", argument: 5))
-          if not (send o) then error "Mail did not send the message." number 1002
-        end tell
+    """, check: 5)
+
+    /// The number of messages in Mail's Outbox, where `send` leaves a message until Mail delivers it,
+    /// or -1 when Mail is not running. It never starts Mail.
+    public static let outboxCount = """
+    on run argv
+      if not (application id "com.apple.mail" is running) then return -1
+      with timeout of 10 seconds
+        tell application id "com.apple.mail" to return count of messages of outbox
       end timeout
     end run
     """

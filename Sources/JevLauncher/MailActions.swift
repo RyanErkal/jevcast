@@ -17,41 +17,52 @@ enum MailActions {
         return engine
     }
 
-    /// The launch in progress. Callers that arrive meanwhile wait for it instead of opening Mail
-    /// again: a second open reaches a Mail that is still starting, and Mail answers it by showing
-    /// its window.
-    @MainActor private static var launch: Task<Void, Error>?
-
-    /// Starts Mail hidden, without taking focus, and waits until it answers.
+    /// Starts Mail hidden, without taking focus, and waits until it answers. See `MailLaunch`.
     static func ensureRunning() async throws {
         if NativeMailCenter.isActive { return }
-        try await launchOnce()
-    }
-
-    @MainActor private static func launchOnce() async throws {
-        if let launch { return try await launch.value }
-        if AppleScript.isRunning(bundleID) { return }
-        let task = Task { @MainActor in
-            guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
-                throw LauncherError("Apple Mail is not installed.")
-            }
-            let config = NSWorkspace.OpenConfiguration()
-            config.activates = false; config.hides = true; config.addsToRecentItems = false
-            let app = try await NSWorkspace.shared.openApplication(at: url, configuration: config)
-            for _ in 0..<40 where !AppleScript.isRunning(bundleID) { try await Task.sleep(nanoseconds: 100_000_000) }
-            // Mail answers scripts a moment after it launches.
-            try await Task.sleep(nanoseconds: 800_000_000)
-            // Mail can restore its last window while it starts. The Mail that Jevcast started stays out of sight.
-            _ = app.hide()
-        }
-        launch = task
-        defer { launch = nil }
-        try await task.value
+        try await launcher.ensureRunning()
     }
 
     static func run(_ script: String, _ arguments: [String]) async throws {
         try await ensureRunning()
         _ = try await AppleScript.run(script, arguments, app: bundleID, name: "Mail", timeout: 30)
+    }
+
+    /// Runs a script that sends mail. When Mail may have sent the message, the error is `MailMaybeSentError`.
+    private static func runSending(_ script: String, _ arguments: [String]) async throws {
+        try await ensureRunning()
+        // Nothing has reached Mail yet, so a cancel here means nothing was sent.
+        try Task.checkCancellation()
+        do { _ = try await AppleScript.run(script, arguments, app: bundleID, name: "Mail", timeout: 30) }
+        catch { throw sendFailure(error) }
+    }
+
+    /// What a failed send script means. 1005 is an error from Mail's `send` itself. A timeout (-1712),
+    /// the osascript time limit, or a cancel stops the script at a point Jevcast cannot know. In each
+    /// of these cases Mail may have sent the message. Every other error, such as 1002, 1003, or 1004
+    /// (an error before `send`), means that Mail did not send it.
+    static func sendFailure(_ error: Error) -> Error {
+        if error is CancellationError { return MailMaybeSentError() }
+        guard let failure = error as? CommandRunner.Failure else { return error }
+        if let code = errorNumber(failure.text), code == 1005 || code == -1712 { return MailMaybeSentError() }
+        // `CommandRunner` ends a script at its time limit with this text.
+        if failure.text.hasSuffix("took too long and was stopped.") { return MailMaybeSentError() }
+        return error
+    }
+
+    /// The number at the end of an osascript error line, such as 1005 in "0:12: execution error: … (1005)".
+    static func errorNumber(_ text: String) -> Int? {
+        guard text.hasSuffix(")"), let open = text.lastIndex(of: "(") else { return nil }
+        return Int(text[text.index(after: open)..<text.index(before: text.endIndex)])
+    }
+
+    /// The number of messages in Mail's Outbox: 0 when Mail is not running, nil when Mail does not
+    /// answer. It never starts Mail.
+    static func outboxCount() async -> Int? {
+        guard AppleScript.isRunning(bundleID) else { return 0 }
+        guard let output = try? await AppleScript.run(MailScripts.outboxCount, app: bundleID, name: "Mail", timeout: 15),
+              let count = Int(output.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
+        return max(count, 0)
     }
 
     private static func target(_ message: MailSummary, _ mailbox: MailMailbox) -> [String] {
@@ -89,18 +100,22 @@ enum MailActions {
         if let engine = try native() { return try await engine.move(message.rowID, to: destination.rowID) }
         try await run(MailScripts.move, target(message, mailbox) + [destination.path])
     }
+    /// Apple Mail gets the text without leading white space, so Mail's copy starts with `checkText`.
     static func reply(_ message: MailSummary, in mailbox: MailMailbox, text: String, all: Bool) async throws {
         if let engine = try native() { return try await engine.reply(to: message.rowID, text: text, all: all) }
-        try await run(MailScripts.reply, target(message, mailbox) + [text, all ? "true" : "false", MailScripts.checkText(text)])
+        let text = MailScripts.sendingText(text)
+        try await runSending(MailScripts.reply, target(message, mailbox) + [text, all ? "true" : "false", MailScripts.checkText(text)])
     }
     static func forward(_ message: MailSummary, in mailbox: MailMailbox, text: String, to recipients: [String]) async throws {
         if let engine = try native() { return try await engine.forward(message.rowID, text: text, to: recipients) }
-        try await run(MailScripts.forward, target(message, mailbox) + [text, recipients.joined(separator: "\n"), MailScripts.checkText(text)])
+        let text = MailScripts.sendingText(text)
+        try await runSending(MailScripts.forward, target(message, mailbox) + [text, recipients.joined(separator: "\n"), MailScripts.checkText(text)])
     }
     static func send(to: [String], cc: [String], subject: String, body: String) async throws {
         guard !to.isEmpty else { throw LauncherError("Add at least one recipient.") }
         if let engine = try native() { return try await engine.send(to: to, cc: cc, subject: subject, body: body) }
-        try await run(MailScripts.send, [to.joined(separator: "\n"), cc.joined(separator: "\n"), subject, body, MailScripts.checkText(body)])
+        let body = MailScripts.sendingText(body)
+        try await runSending(MailScripts.send, [to.joined(separator: "\n"), cc.joined(separator: "\n"), subject, body, MailScripts.checkText(body)])
     }
     static func checkForNewMail() async throws {
         if let engine = try native() { return await engine.sync(.inboxOnly) }

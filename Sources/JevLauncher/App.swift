@@ -121,6 +121,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         configureAutomations()
         // Snapshot runs never run tasks.
         if UISnapshots.directory == nil { model.quillTasks.start() }
+        // Timers still pending with macOS come back to the list after a relaunch.
+        if UISnapshots.directory == nil { Task { await model.timers.restore() } }
         model.composeMail = { [weak self] address in self?.showMail(compose: address) }
         model.onFailure = { [weak self] text in
             guard let self else { return }
@@ -571,16 +573,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         resultWindow = QuillResultWindow(run: run)
         resultWindow?.show()
     }
-    /// Shows task results while Jevcast is in front too.
+    /// Shows timer and command notifications while Jevcast is in front too.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         [.banner, .list, .sound]
-    }
-    /// A click on a task's notification opens its result.
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        guard let id = response.notification.request.content.userInfo[QuillStorageKeys.notificationRunKey] as? String else { return }
-        await MainActor.run {
-            if let run = self.model.quillTasks.runs.first(where: { $0.id == id }) { self.showRun(run) }
-        }
     }
     /// The Jevcast mail window, made on first use.
     func showMail(select rowID: Int64? = nil, compose address: String? = nil) {

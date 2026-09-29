@@ -457,6 +457,10 @@ final class LauncherModel: ObservableObject {
                 return row.score < 90
             }
         }
+        // A bare site keyword such as "maps" stays first, unless an item has that exact
+        // name, such as the Maps app. Then it goes just below that item.
+        let bareKeyword = isFileSearch ? nil : Quicklink.match(q, in: preferences.quicklinks).flatMap { $0.query.isEmpty ? "quicklink:" + $0.link.id : nil }
+        let exactIDs = bareKeyword == nil ? [] : Set(rows.filter { $0.id != bareKeyword && $0.score >= Self.exactScore && $0.score < Self.bareKeywordScore }.map(\.id))
         // Learned use reorders close matches. The boost stays under 10 points, the gap
         // between an exact match (100) and the best non-exact match (90).
         let now = Date(), frecency = preferences.frecency
@@ -464,6 +468,10 @@ final class LauncherModel: ObservableObject {
             guard row.learnsFromUse else { return row }
             let boost = frecency.boost(for: row.id, query: q, now: now) * Self.maxBoost
             return boost > 0 ? row.adding(boost) : row
+        }
+        if let bareKeyword, let index = rows.firstIndex(where: { $0.id == bareKeyword }),
+           let lowest = rows.filter({ exactIDs.contains($0.id) }).map(\.score).min() {
+            rows[index].score = lowest - 0.5
         }
         if let answer {
             let kind = q.rangeOfCharacter(from: .letters) == nil ? "Calculator" : "Conversion"
@@ -484,6 +492,8 @@ final class LauncherModel: ObservableObject {
         publish(rows, start: start)
     }
     static let maxBoost = 9.0
+    /// A site keyword with no search text, such as "maps". It is above Jev's exact score, so Jev is not asked.
+    static let bareKeywordScore = 950.0
     static let interpreting = "Understanding…"
     private func publish(_ unsorted: [LauncherResult], start: CFAbsoluteTime) {
         var unsorted = unsorted
@@ -558,7 +568,7 @@ final class LauncherModel: ObservableObject {
         let matched = Quicklink.match(q, in: preferences.quicklinks)
         if let (link, text) = matched, let url = link.url(for: text) {
             rows.append(text.isEmpty
-                ? LauncherResult(id: "quicklink:" + link.id, title: "Search " + link.name, detail: Self.hostDetail(url), symbol: "link", action: .url(url), score: 950)
+                ? LauncherResult(id: "quicklink:" + link.id, title: "Search " + link.name, detail: Self.hostDetail(url), symbol: "link", action: .url(url), score: Self.bareKeywordScore)
                 : LauncherResult(id: "quicklink:" + link.id, title: "Search \(link.name) for \(text)", detail: Self.hostDetail(url), symbol: "link", action: .url(url), score: 1800))
         }
         for link in preferences.quicklinks where link.id != matched?.link.id {

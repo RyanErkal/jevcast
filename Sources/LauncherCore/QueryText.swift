@@ -27,13 +27,15 @@ public enum QueryText {
         return words.joined(separator: " ")
     }
 
-    /// Replaces the word "ans" with the last answer, for "ans * 2".
-    public static func substitutingAnswer(_ expression: String, last: String?) -> String? {
+    /// Replaces the word "ans" with the last answer, for "ans * 2". The answer keeps the
+    /// locale's decimal separator, as the calculator wrote it, and loses its grouping.
+    public static func substitutingAnswer(_ expression: String, last: String?, locale: Locale = .current) -> String? {
         guard let last else { return nil }
         let pattern = "\\bans\\b"
         guard expression.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil else { return nil }
-        let number = last.replacingOccurrences(of: ",", with: "").split(separator: " ").first.map(String.init) ?? last
-        guard Double(number) != nil else { return nil }
+        let separators = Calculator.Separators(locale: locale)
+        let number = last.replacingOccurrences(of: String(separators.grouping), with: "").split(separator: " ").first.map(String.init) ?? last
+        guard Double(number.replacingOccurrences(of: String(separators.decimal), with: ".")) != nil else { return nil }
         return expression.replacingOccurrences(of: pattern, with: "(\(number))", options: [.regularExpression, .caseInsensitive])
     }
 }

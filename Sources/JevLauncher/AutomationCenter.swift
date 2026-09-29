@@ -208,6 +208,8 @@ final class AutomationCenter: ObservableObject {
     @discardableResult func setEnabled(_ id: String, _ enabled: Bool) -> String? {
         guard var a = automation(id) else { return "This automation no longer exists." }
         if enabled, let reason = enableProblem(a) { return reason }
+        // A resume starts the schedule from now, so the paused time is not caught up.
+        if enabled, !a.enabled { a.resumed = Date() }
         a.enabled = enabled
         return save(a)
     }
@@ -226,6 +228,9 @@ final class AutomationCenter: ObservableObject {
     /// Why this automation cannot be turned on now, or nil.
     func enableProblem(_ a: Automation) -> String? {
         if case .blocked(let reason) = CodexSourceGuard.check(a) { return reason }
+        if let pending = a.source?.unconfirmed, !pending.isEmpty {
+            return "Check the " + Self.list(pending) + " in the editor and save before you turn this on."
+        }
         func folderMissing(_ path: String) -> Bool {
             var isDir: ObjCBool = false
             let expanded = (path as NSString).expandingTildeInPath
@@ -251,9 +256,24 @@ final class AutomationCenter: ObservableObject {
         }
     }
 
+    /// Why Run Now cannot start this automation, or nil. An import's model or effort is never filled in
+    /// silently. An unconfirmed time zone does not block, because a manual run uses no schedule.
+    func runProblem(_ a: Automation) -> String? {
+        let pending = (a.source?.unconfirmed ?? []).filter { $0 != Automation.ImportSource.unconfirmedTimeZone }
+        guard !pending.isEmpty else { return nil }
+        return "Check the " + Self.list(pending) + " in the editor and save before you run this."
+    }
+
+    /// "model, reasoning effort, and time zone", in English like the rest of the app.
+    private static func list(_ items: [String]) -> String {
+        let formatter = ListFormatter(); formatter.locale = Locale(identifier: "en_US")
+        return formatter.string(from: items) ?? items.joined(separator: ", ")
+    }
+
     // MARK: Runs
 
     @discardableResult func runNow(_ id: String, test: Bool = false) -> Bool {
+        if let a = automation(id), let problem = runProblem(a) { message = problem; return false }
         guard submit(.runNow(automationID: id, test: test)) else { return false }
         if !runnerStatus.isRunning, !isolated {
             message = "Queued. It starts when the background runner is on (Settings › Automations)."

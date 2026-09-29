@@ -58,7 +58,7 @@ extension AutomationCenter {
         }
         let now = Date()
         if ProposalValidator.isExpired(manifest, now: now) {
-            current.state = .expired; current.finished = now; current.summary = "Proposal expired after 7 days"
+            current.state = .expired; current.finished = now; current.summary = WaitingRunExpiry.summary
             await saveApprovalAsync(current)
             message = "This proposal is older than 7 days. Run the automation again for a fresh one."
             return nil

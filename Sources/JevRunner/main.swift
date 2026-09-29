@@ -11,7 +11,9 @@ if let i = args.firstIndex(of: "--root"), i + 1 < args.count { root = URL(fileUR
 
 guard let lockFD = SingleInstance.acquire(root: root) else {
     log("Another runner is active. Exiting.")
-    // Exit 0 so launchd's KeepAlive does not restart us in a tight loop while the other copy runs.
+    // KeepAlive is true, so launchd starts this copy again after any exit. The sleep keeps those
+    // restarts to about one each 10 seconds while the other copy holds the lock. When the lock
+    // frees, the next start takes over.
     sleep(10)
     exit(0)
 }

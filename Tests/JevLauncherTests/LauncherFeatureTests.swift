@@ -152,3 +152,16 @@ final class LauncherSectionsTests: XCTestCase {
         XCTAssertEqual(LauncherSections.listHeight(dangling), CGFloat(fill.count) * pitch)
     }
 }
+
+final class TimerRestoreTests: XCTestCase {
+    @MainActor func testTimerComesBackFromItsNotification() {
+        let now = Date()
+        let info: [AnyHashable: Any] = ["timerFires": now.addingTimeInterval(300).timeIntervalSince1970, "timerLabel": "tea"]
+        let timer = TimerCenter.timer(id: "timer.abc", userInfo: info, now: now)
+        XCTAssertEqual(timer?.title, "tea")
+        XCTAssertEqual(timer?.fires.timeIntervalSince1970 ?? 0, now.addingTimeInterval(300).timeIntervalSince1970, accuracy: 0.001)
+        XCTAssertNil(TimerCenter.timer(id: "timer.abc", userInfo: info, now: now.addingTimeInterval(301)), "An ended timer is not active.")
+        XCTAssertNil(TimerCenter.timer(id: "command.1", userInfo: info, now: now), "Only timer notifications count.")
+        XCTAssertNil(TimerCenter.timer(id: "timer.old", userInfo: [:], now: now), "No end time: not listed.")
+    }
+}

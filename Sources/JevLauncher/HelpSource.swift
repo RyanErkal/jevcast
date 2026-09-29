@@ -1,4 +1,5 @@
 import AppKit
+import LauncherCore
 
 /// "help" or "what can you do": every kind of thing Jevcast finds, with the words that show it.
 /// Return types those words into the search field.
@@ -25,10 +26,13 @@ final class HelpSource: ThingSource {
         ("Files", "find <name> · recent files · kind:pdf in:downloads", "recent files", "doc.text.magnifyingglass")
     ]
 
+    /// "help mail" lists only the features whose name or words match.
     func load(_ filter: String) async throws -> [LauncherResult] {
-        Self.features.enumerated().map { index, feature in
-            LauncherResult(id: "help:\(index)", title: feature.title, detail: feature.words, symbol: feature.symbol,
-                           action: .route(feature.query), score: 3000 - Double(index))
+        let text = filter.trimmingCharacters(in: .whitespaces)
+        return Self.features.enumerated().compactMap { index, feature in
+            guard text.isEmpty || SearchRanking.score(query: text, title: feature.title, aliases: [feature.words]) != nil else { return nil }
+            return LauncherResult(id: "help:\(index)", title: feature.title, detail: feature.words, symbol: feature.symbol,
+                                  action: .route(feature.query), score: 3000 - Double(index))
         }
     }
 }

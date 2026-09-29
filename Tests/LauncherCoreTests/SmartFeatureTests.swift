@@ -58,10 +58,26 @@ final class SmartFeatureTests: XCTestCase {
     }
 
     func testAnswerSubstitution() {
-        XCTAssertEqual(QueryText.substitutingAnswer("ans * 2", last: "1,240"), "(1240) * 2")
+        XCTAssertEqual(QueryText.substitutingAnswer("ans * 2", last: "1,240", locale: Locale(identifier: "en_US")), "(1240) * 2")
         XCTAssertNil(QueryText.substitutingAnswer("answer me", last: "12"))
         XCTAssertNil(QueryText.substitutingAnswer("ans + 1", last: nil))
         XCTAssertEqual(Calculator.evaluate(QueryText.substitutingAnswer("ans * 2", last: "120")!, locale: Locale(identifier: "en_GB")), "240")
+    }
+
+    func testAnswerSubstitutionKeepsTheLocaleDecimal() throws {
+        let english = Locale(identifier: "en_US")
+        XCTAssertEqual(Calculator.evaluate("3 / 2", locale: english), "1.5")
+        let dot = try XCTUnwrap(QueryText.substitutingAnswer("ans * 3", last: "1.5", locale: english))
+        XCTAssertEqual(dot, "(1.5) * 3")
+        XCTAssertEqual(Calculator.evaluate(dot, locale: english), "4.5")
+
+        let german = Locale(identifier: "de_DE")
+        XCTAssertEqual(Calculator.evaluate("3 / 2", locale: german), "1,5")
+        let comma = try XCTUnwrap(QueryText.substitutingAnswer("ans * 3", last: "1,5", locale: german))
+        XCTAssertEqual(comma, "(1,5) * 3")
+        XCTAssertEqual(Calculator.evaluate(comma, locale: german), "4,5")
+        XCTAssertEqual(QueryText.substitutingAnswer("ans + 1", last: "1.240", locale: german), "(1240) + 1")
+        XCTAssertNil(QueryText.substitutingAnswer("ans + 1", last: "1,2,3", locale: german))
     }
 
     func testSymbolSearch() {

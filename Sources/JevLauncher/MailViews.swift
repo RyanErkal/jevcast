@@ -2,7 +2,8 @@ import SwiftUI
 import LauncherCore
 
 /// The mail window: every inbox in one list, and the message beside it. Built for checking mail:
-/// ↑↓ or J K move, ⌫ deletes, E archives, R replies, U marks unread, C writes a new message.
+/// ↑↓ or J K move, ⌫ deletes, E archives, R replies, F forwards, S flags, U marks unread,
+/// C or ⌘N writes a new message.
 struct MailRootView: View {
     @ObservedObject var model: MailModel
 
@@ -55,7 +56,8 @@ struct MailSetupView: View {
                     Text("4. Click Restart Jevcast. macOS applies the access only to a new start.")
                 }
                 .font(.callout).frame(maxWidth: 460, alignment: .leading)
-                Text("Nothing leaves your Mac unless you use Quill on a message.").font(.caption).foregroundStyle(.secondary)
+                Text("HTML mail loads its web images, fonts, and style sheets. Turn this off with Load Images from the Web in the ⋯ menu. A message goes to Quill only when you use Quill on it.")
+                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 460)
                 HStack {
                     Button("Open Full Disk Access") { Permissions.open("Privacy_AllFiles") }
                     Button("Show Jevcast in Finder") { Frontmost.reveal([Bundle.main.bundleURL]) }
@@ -244,6 +246,15 @@ struct MailReader: View {
             Button { model.toggleRead() } label: { Image(systemName: model.selected?.read == false ? "envelope.open" : "envelope.badge") }
                 .help("Mark read or unread (U)")
             Menu {
+                Button("Forward (F)") { model.forward() }
+                Button(model.selected?.flagged == true ? "Unflag (S)" : "Flag (S)") { model.toggleFlag() }
+                let destinations = model.moveDestinations
+                if !destinations.isEmpty {
+                    Menu("Move To") {
+                        ForEach(destinations) { box in Button(box.path) { model.move(to: box) } }
+                    }
+                }
+                Divider()
                 Button("Delete All from \(model.selected?.sender ?? "Sender")", role: .destructive) { model.deleteAllFromSender() }
                 if model.canUseQuill { Button("Summarise with Quill") { model.summarise() }.disabled(model.detail == nil || model.quillBusy) }
                 Toggle("Load Images from the Web", isOn: $model.loadsImages)

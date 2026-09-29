@@ -2,6 +2,31 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Fixed
+
+- **Maps opens Maps.** An app or item whose whole name you type, such as Maps, now comes before the site search with the same keyword. A keyword with no such item, such as "gh", still searches first, and neither asks Jev.
+- `ans` keeps its decimals where numbers use a decimal comma, so 1,5 stays 1,5 and not 15.
+- **Old proposals stop blocking.** The background runner now expires a proposal after seven days, so it no longer holds back the next runs of its automation. The run folder and any journal stay.
+- **Resume starts from now.** An automation you turn on again no longer runs once for the time it was paused.
+- **Timers survive a restart.** `timers` lists running timers again after Jevcast restarts, so you can still cancel them. A timer that ended while Jevcast was closed does not show.
+- **Mail keys.** In the mail window, F forwards, S flags or unflags, and C or ⌘N writes a new message. The ⋯ menu above a message has Forward, Flag, and Move To.
+- An alert that the background runner opens no longer brings a running Jevcast to the front.
+- `help <words>` lists only the matching features.
+- A library import keeps aliases with spaces, such as "coding app", as Settings › Search does.
+- The Clipboard view no longer says that ⇧Return pastes a multiple selection. It only copies.
+- Settings › Keys lists ⇧Return, ⌘Y, ⌘R, ⌘⇧C, and ⌘Z in the launcher.
+- Jev is no longer told about a Lock Screen command that does not exist.
+- The README, the website, and the Mail setup view now say that HTML mail loads web images, fonts, and style sheets by default, and how to turn that off.
+
+### Changed
+
+- Scheduling a Quill task no longer posts a system notification. The launcher shows the task in the scheduled tasks list instead.
+- Automation alerts hide automation names by default. A choice you already made stays.
+- A copy imported from Codex cannot be turned on until you check its model, reasoning effort, and time zone in the editor and save it. Run Now also waits until its model and effort are checked. Jevcast no longer fills in a model or effort without asking.
+- The README names Quill, and has new parts for Automations, the Clipboard view, Dictation, and the Hyper key.
+
 ## [1.12.3] - 2026-09-28
 
 ### Fixed

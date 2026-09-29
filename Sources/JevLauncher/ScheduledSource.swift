@@ -245,7 +245,10 @@ final class ScheduledSource: ThingSource {
             parts.append("Jevcast automation")
             let id = a.id, name = a.name, enabled = a.enabled
             var verbs = [Verb(title: "Open") { center.openWindow?(id, nil); return nil },
-                         Verb(title: "Run Now", after: .stay) { center.runNow(id); return center.message ?? "Asked the runner to start \(name)." },
+                         Verb(title: "Run Now", after: .stay) {
+                             if let problem = center.automation(id).flatMap(center.runProblem) { throw LauncherError(problem) }
+                             center.runNow(id); return center.message ?? "Asked the runner to start \(name)."
+                         },
                          Verb(title: enabled ? "Pause" : "Resume", after: .stay) {
                              if let problem = center.setEnabled(id, !enabled) { throw LauncherError(problem) }
                              return enabled ? "Paused \(name)." : "Resumed \(name)."

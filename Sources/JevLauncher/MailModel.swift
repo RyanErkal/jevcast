@@ -719,6 +719,11 @@ final class MailModel: ObservableObject {
         keptUnread = message.read ? message.rowID : nil
         setRead(!message.read, message)
     }
+    /// Where the selected message can move: the other mailboxes of its account.
+    var moveDestinations: [MailMailbox] {
+        guard let message = selected, let box = actionBox(message) else { return [] }
+        return mailboxes.filter { $0.accountID == box.accountID && $0.rowID != box.rowID }.sorted { $0.path < $1.path }
+    }
     func move(to destination: MailMailbox) {
         guard let message = selected, let box = actionBox(message) else { return }
         perform("move", removes: true) { try await MailActions.move(message, from: box, to: destination) }

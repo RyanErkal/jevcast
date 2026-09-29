@@ -84,7 +84,8 @@ final class CodexImportTests: XCTestCase {
         let a = CodexImport.makeAutomation(from: codex, timeZone: "Europe/London", anchor: Date(timeIntervalSince1970: 0), folderExists: exists)
         XCTAssertFalse(a.enabled)
         XCTAssertEqual(a.schedule.rule, .rrule("FREQ=DAILY;BYHOUR=4"))
-        XCTAssertEqual(a.source, .init(app: .codex, sourceID: "sample", path: "/x/sample/automation.toml", hash: "abc"))
+        XCTAssertEqual(a.source, .init(app: .codex, sourceID: "sample", path: "/x/sample/automation.toml", hash: "abc",
+                                       unconfirmed: ["time zone"]))
         guard case .agent(let task) = a.kind else { return XCTFail("not agent") }
         XCTAssertEqual(task.prompt, prompt)
         XCTAssertEqual(task.model, "gpt-6-astra")
@@ -100,6 +101,8 @@ final class CodexImportTests: XCTestCase {
         XCTAssertFalse(issues.contains { $0.contains("working folder") })
         let bare = CodexAutomation(id: "b", status: .paused, prompt: "Summarize.", path: "/x")
         XCTAssertEqual(CodexImport.importIssues(for: bare, folderExists: exists).count, 3)
+        let bareCopy = CodexImport.makeAutomation(from: bare, timeZone: "Europe/London", anchor: Date(timeIntervalSince1970: 0), folderExists: exists)
+        XCTAssertEqual(bareCopy.source?.unconfirmed, ["model", "reasoning effort", "time zone"], "No silent model or effort.")
     }
 
     func testIsActiveInCodexFailsClosed() throws {

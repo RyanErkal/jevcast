@@ -56,7 +56,10 @@ struct LibraryFile: Codable, Equatable {
             workflows: fresh(workflows, preferences.workflows, name: \.name),
             snippets: fresh(snippets, preferences.snippets, name: \.name),
             keywords: keywords)
-        for (alias, app) in aliases where !apps.contains(alias.lowercased()) && !alias.contains(where: \.isWhitespace) {
+        // Aliases may have spaces, such as "coding app", as in Settings › Search.
+        for (key, app) in aliases {
+            let alias = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !alias.isEmpty, !apps.contains(alias.lowercased()) else { continue }
             if !file.aliases.keys.contains(where: { $0.lowercased() == alias.lowercased() }) { file.aliases[alias] = app }
         }
         return (file, count - file.count)

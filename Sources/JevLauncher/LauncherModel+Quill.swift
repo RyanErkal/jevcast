@@ -172,11 +172,13 @@ extension LauncherModel {
         if !task.contexts.isEmpty { parts.append("reads " + task.contexts.map(\.title).joined(separator: ", ").lowercased()) }
         let refused = quillTasks.refused(task)
         if !refused.isEmpty { parts.append("turn on " + refused.map(\.title).joined(separator: " and ").lowercased() + " in Settings › AI › Quill") }
-        let verb = Verb(title: "Schedule Task") { [weak self] in
+        // The launcher stays open on the scheduled tasks list, with the new task in it. No system notification.
+        let verb = Verb(title: "Schedule Task", after: .keepOpen) { [weak self] in
             guard let self else { return nil }
             self.quillTasks.add(task)
             let next = task.nextRun(after: Date()).map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "soon"
-            _ = await Notifier.post(title: "Scheduled: " + task.name, body: task.schedule.summary + ". First run " + next + ". “scheduled tasks” lists it.")
+            self.updateQuery("scheduled tasks", typed: false)
+            self.sourceNote = "Scheduled “\(task.name)”. First run " + next + "."
             return nil
         }
         return [LauncherResult(id: QuillStorageKeys.taskRowPrefix + "new", title: "Schedule with Quill: " + task.prompt, detail: parts.joined(separator: " · "),

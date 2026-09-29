@@ -90,11 +90,6 @@ extension LauncherModel {
         }
     }
 
-    static func homeRelative(_ path: String) -> String {
-        let home = NSHomeDirectory()
-        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
-    }
-
     /// The strip text for a port lookup: what just stopped, how to stop, or why the list is empty.
     var portNotice: String? {
         guard let portQuery else { return nil }

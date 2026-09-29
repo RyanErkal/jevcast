@@ -26,10 +26,12 @@ public enum Scheduler {
         case .manual: return none
         case .once(let date):
             if let lastCovered, coveredBound(lastCovered) >= date { return none }
+            if let resumed = automation.resumed, date < resumed { return none }
             pending = date <= now ? (date, 1) : nil
         case .rrule(let text):
             guard let rule = try? RRule(text) else { return none }
-            let after = lastCovered.map(coveredBound) ?? schedule.anchor.addingTimeInterval(-1)
+            let covered = lastCovered.map(coveredBound) ?? schedule.anchor.addingTimeInterval(-1)
+            let after = max(covered, automation.resumed ?? .distantPast)
             pending = newest(rule, after: after, upTo: now, schedule: schedule)
         }
         guard let pending else { return none }
@@ -50,6 +52,7 @@ public enum Scheduler {
         case .manual: return nil
         case .once(let date):
             if let lastCovered, coveredBound(lastCovered) >= date { return nil }
+            if let resumed = automation.resumed, date < resumed { return nil }
             return date
         case .rrule(let text):
             guard let rule = try? RRule(text), let zone = TimeZone(identifier: schedule.timeZone) else { return nil }

@@ -140,6 +140,31 @@ final class AutomationStoreTests: XCTestCase {
         XCTAssertEqual(Set(store.runs(for: a.id, limit: 10).map(\.id)), [ids[.needsInput]!, ids[.running]!])
     }
 
+    func testStaleApprovalExpiresAndKeepsItsFiles() throws {
+        let a = sample(); try store.save(a)
+        let now = Date()
+        var run = RunRecord(id: RunID.make(), automation: a, trigger: .schedule, occurrence: nil, queued: now.addingTimeInterval(-9 * 86400))
+        run.state = .needsApproval; run.started = now.addingTimeInterval(-8 * 86400); run.ownerPID = 42
+        try store.saveRun(run)
+        try store.writeRunFile(automationID: a.id, runID: run.id, name: ApplyJournal.fileName, data: Data("{}".utf8))
+        XCTAssertNil(WaitingRunExpiry.expired(run, now: now.addingTimeInterval(-2 * 86400)), "Six days old: still waits.")
+
+        let expired = try XCTUnwrap(WaitingRunExpiry.expired(run, now: now))
+        XCTAssertEqual(expired.state, .expired)
+        XCTAssertEqual(expired.finished, now)
+        XCTAssertEqual(expired.summary, WaitingRunExpiry.summary)
+        XCTAssertNil(expired.ownerPID)
+        XCTAssertFalse(expired.state.needsUser || expired.state.isActive, "An expired run no longer blocks the next run.")
+        try store.saveRun(expired)
+        XCTAssertEqual(store.run(automationID: a.id, runID: run.id)?.state, .expired)
+        XCTAssertNotNil(try store.readRunFile(automationID: a.id, runID: run.id, name: ApplyJournal.fileName), "The journal stays.")
+
+        var asking = run; asking.state = .needsInput
+        XCTAssertNil(WaitingRunExpiry.expired(asking, now: now), "Answers have no expiry.")
+        var finished = run; finished.state = .succeeded
+        XCTAssertNil(WaitingRunExpiry.expired(finished, now: now))
+    }
+
     func testTopFiles() throws {
         struct Item: Codable, Equatable { var name: String }
         XCTAssertNil(store.readTopFile([Item].self, name: "items.json"))

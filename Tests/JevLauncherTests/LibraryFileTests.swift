@@ -14,12 +14,12 @@ final class LibraryFileTests: XCTestCase {
         var file = LibraryFile(commands: [CustomCommand(id: "a", name: "Theirs", command: "echo theirs"),
                                           CustomCommand(id: "b", name: "New", command: "echo new")],
                                snippets: [Snippet(name: "Hi", text: "Hello")],
-                               aliases: ["ff": "other", "sf": "safari"])
+                               aliases: ["ff": "other", "sf": "safari", "coding app": "xcode", " ": "blank"])
         file = try LibraryFile.decode(file.encoded())
 
-        XCTAssertEqual(file.merge(into: preferences), 3)
+        XCTAssertEqual(file.merge(into: preferences), 4)
         XCTAssertEqual(preferences.customCommands.map(\.name), ["Mine", "New"], "An item with the same ID is not replaced.")
-        XCTAssertEqual(preferences.aliases, ["ff": "firefox", "sf": "safari"])
+        XCTAssertEqual(preferences.aliases, ["ff": "firefox", "sf": "safari", "coding app": "xcode"], "Spaced aliases import; blank ones do not.")
         XCTAssertEqual(file.merge(into: preferences), 0, "A second import adds nothing.")
     }
 

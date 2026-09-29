@@ -45,7 +45,7 @@ struct ClipPreview: View {
 
     private var multiple: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Return copies them joined by new lines. ⇧Return pastes them one after another, in this order.")
+            Text("Return copies them joined by new lines, in this order.")
                 .font(.callout).foregroundStyle(.secondary)
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) {

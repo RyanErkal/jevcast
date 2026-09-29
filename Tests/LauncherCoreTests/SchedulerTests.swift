@@ -35,6 +35,24 @@ final class SchedulerTests: XCTestCase {
         XCTAssertEqual(due.missed, 2)
     }
 
+    func testResumeStartsFromNow() {
+        var a = automation(.rrule("FREQ=HOURLY;INTERVAL=4"), catchUp: .runOnce)
+        let now = anchor.addingTimeInterval(13 * 3600)
+        XCTAssertEqual(Scheduler.due(a, lastCovered: anchor, now: now).runs.count, 1, "Without a resume, runOnce catches up.")
+        a.resumed = now.addingTimeInterval(-60)
+        let due = Scheduler.due(a, lastCovered: anchor, now: now)
+        XCTAssertEqual(due.runs, [])
+        XCTAssertNil(due.coveredThrough)
+        let next = anchor.addingTimeInterval(16 * 3600)
+        XCTAssertEqual(Scheduler.nextRun(a, lastCovered: anchor, now: now), next)
+        XCTAssertEqual(Scheduler.due(a, lastCovered: anchor, now: next.addingTimeInterval(30)).runs, [next])
+
+        var once = automation(.once(anchor.addingTimeInterval(3600)), catchUp: .runOnce)
+        once.resumed = anchor.addingTimeInterval(7200)
+        XCTAssertEqual(Scheduler.due(once, lastCovered: nil, now: anchor.addingTimeInterval(7300)).runs, [])
+        XCTAssertNil(Scheduler.nextRun(once, lastCovered: nil, now: anchor.addingTimeInterval(7300)))
+    }
+
     func testLongBacklogIsBounded() {
         let a = automation(.rrule("FREQ=HOURLY"), catchUp: .runOnce)
         let now = anchor.addingTimeInterval(3 * 365 * 86400 + 30)

@@ -40,8 +40,6 @@ struct Snippet: Codable, Identifiable, Equatable, Hashable {
     var name: String
     var text: String
 
-    static let placeholders = ["{date}", "{time}", "{clipboard}"]
-
     func expanded(now: Date = Date(), clipboard: String?) -> String {
         text
             .replacingOccurrences(of: "{date}", with: now.formatted(date: .abbreviated, time: .omitted))

@@ -49,10 +49,15 @@ extension CodexImport {
         var rule = codex.rrule
         if rule.uppercased().hasPrefix("RRULE:") { rule = String(rule.dropFirst(6)) }
         let name = codex.name.isEmpty ? codex.id : codex.name
+        // Codex files name no time zone, so this Mac's zone is only a suggestion. A model or effort
+        // the prompt does not name is not filled in silently either: the user confirms each one.
+        typealias Source = Automation.ImportSource
+        let unconfirmed = (s.model == nil ? [Source.unconfirmedModel] : []) + (s.effort == nil ? [Source.unconfirmedEffort] : [])
+            + [Source.unconfirmedTimeZone]
         return Automation(id: AutomationID.make(from: name), name: name, kind: .agent(task),
                           schedule: Schedule(rule: rule.isEmpty ? .manual : .rrule(rule), timeZone: timeZone, anchor: anchor),
                           enabled: false, created: anchor,
-                          source: .init(app: .codex, sourceID: codex.id, path: codex.path, hash: codex.hash))
+                          source: .init(app: .codex, sourceID: codex.id, path: codex.path, hash: codex.hash, unconfirmed: unconfirmed))
     }
 
     /// Reasons the import must not be enabled yet. Write words mean "review needed", not proof of writes.

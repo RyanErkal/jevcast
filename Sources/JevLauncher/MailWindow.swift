@@ -69,6 +69,7 @@ final class MailWindow: NSWindowController, NSWindowDelegate {
     private func handle(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection([.command, .control, .option])
         if flags == .command, event.charactersIgnoringModifiers == "f" { model.searching = true; return true }
+        if flags == .command, event.charactersIgnoringModifiers == "n", model.draft == nil { model.compose(); return true }
         let typing = window?.firstResponder is NSTextView || model.draft != nil
         if event.keyCode == 53 { // Escape: leave the search, then close.
             if model.searching || !model.search.isEmpty { model.search = ""; model.searching = false; window?.makeFirstResponder(nil); return true }
@@ -89,6 +90,9 @@ final class MailWindow: NSWindowController, NSWindowDelegate {
         case "e": model.archive()
         case "r": model.reply(all: event.modifierFlags.contains(.shift))
         case "u": model.toggleRead()
+        case "f": model.forward()
+        case "s": model.toggleFlag()
+        case "c": model.compose()
         case "/": model.searching = true
         default: return false
         }

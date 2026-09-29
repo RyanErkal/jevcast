@@ -1,7 +1,7 @@
 # Jevcast
 
 Native macOS launcher and window manager. Swift Package, SwiftUI + AppKit, macOS 14+. Open source (MIT).
-Use small focused files. No external dependencies. Keep local actions off network paths.
+Use small focused files. No external dependencies, except libghostty (GhosttyKit) for the Terminal view, built from pinned Ghostty source by scripts/ghosttykit.sh. Keep local actions off network paths.
 
 ## Naming
 
@@ -30,6 +30,7 @@ Quill tasks that read Calendar, Reminders, or Mail run in the app process, which
 Do not execute shell text inferred by a model. Jev may only select known action IDs, and code validates any value it fills. Quill only writes text; it never picks or runs actions. Script tasks run only argv the user typed or approved.
 Apple Events use fixed script text; values reach scripts only as arguments. Changes to mail go through Apple Mail. Mail HTML never runs scripts; it loads web images, fonts, and style sheets unless the user turns that off in the mail window (on by default, at the user's request).
 Preserve user apps and settings. Do not change Spotlight, Raycast, or Rectangle shortcuts automatically.
+The Terminal view (Hyper–T) runs the user's login shell with only what the user types or pastes. Jevcast never writes text into it and never reads its contents.
 
 ## Checks and release
 

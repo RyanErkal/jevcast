@@ -16,13 +16,27 @@ jobs:
   test-and-build:
     # NSGlassEffectView needs the macOS 26 SDK, so the runner needs Xcode 26 or later.
     runs-on: macos-26
-    timeout-minutes: 30
+    # A libghostty build without the cache takes several minutes.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - name: Toolchain
         run: |
           xcodebuild -version
           swift --version
+      - name: Cache libghostty
+        id: ghosttykit
+        uses: actions/cache@v4
+        with:
+          path: Vendor
+          key: ghosttykit-${{ runner.os }}-${{ hashFiles('scripts/ghosttykit.sh', 'scripts/ghosttykit-libtool.patch') }}
+      - name: libghostty toolchain
+        if: steps.ghosttykit.outputs.cache-hit != 'true'
+        run: |
+          brew install zig@0.15
+          xcodebuild -downloadComponent MetalToolchain
+      - name: Build libghostty
+        run: scripts/ghosttykit.sh
       - name: Test
         run: swift test
       - name: Build the universal app

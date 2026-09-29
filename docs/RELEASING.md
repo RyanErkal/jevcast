@@ -58,6 +58,7 @@ Unit tests cannot prove these. Do them on a Mac with a real keyboard, and record
 - [ ] A Jev pick shows "Jev" beside it, ⌘Z undoes it, and the same request next time says "Remembered".
 - [ ] Settings › AI › Usage counts a Jev request.
 - [ ] A menu item of the front app, a Shortcut, a workflow, a snippet (Shift–Return pastes), a timer notification, and `:tada` all work.
+- [ ] Hyper–T opens the Terminal view with a prompt in the home folder. Typing, ⌃C, ⌃[, arrow keys, ⌘C and ⌘V, scrolling, and a ⌘-clicked link work. A paste with line breaks asks first. Escape and a second Hyper–T close it, and the next Hyper–T shows the same shell. `exit` closes it, and the next Hyper–T starts a new shell.
 - [ ] Start `5m test`, then quit and open Jevcast again. `timers` still lists the timer, and Cancel stops it.
 - [ ] With voice on and sound playing through the built-in speakers, the speakers mute while listening and come back after. Headphones are not muted.
 

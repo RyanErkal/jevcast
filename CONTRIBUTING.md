@@ -4,9 +4,12 @@ Thank you for helping. Bug reports, fixes, and small focused features are welcom
 
 ## Set up
 
-You need Xcode 26 or later. The app runs on macOS 14 or later.
+You need Xcode 26 or later with its Metal Toolchain, and Zig 0.15. The app runs on macOS 14 or later.
 
 ```sh
+brew install zig@0.15
+xcodebuild -downloadComponent MetalToolchain
+scripts/ghosttykit.sh           # libghostty for the Terminal view, built once
 swift test                      # all tests
 ARCHS=arm64 scripts/build.sh    # fast local build (scripts/build.sh builds both architectures)
 open "dist/Jevcast.app"
@@ -16,7 +19,7 @@ open "dist/Jevcast.app"
 
 ## Rules the code follows
 
-- **No third-party dependencies.** Use Apple frameworks.
+- **No third-party dependencies.** Use Apple frameworks. The one exception is libghostty (GhosttyKit) for the Terminal view, which `scripts/ghosttykit.sh` builds from pinned Ghostty source.
 - **Small, focused files.** Pure logic goes in `LauncherCore` with unit tests. AppKit and SwiftUI code goes in `JevLauncher`. The background runner is `JevRunner`.
 - **Local first.** Local results never wait for the network. The app makes direct requests only for the daily update check, optional Jev matching, and optional Quill through OpenRouter. HTML mail loads its web images, fonts, and style sheets unless the user turns that off. Do not add another network path.
 - **Models choose or write, and never run.** Jev may return one of the candidate IDs it was given, or no match. Quill only writes text; it never picks or runs actions. Never run shell commands or text that a model produced.

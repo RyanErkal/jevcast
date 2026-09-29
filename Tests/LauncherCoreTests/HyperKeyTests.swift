@@ -134,9 +134,10 @@ final class HyperDefaultsMergeTests: XCTestCase {
     func testNewDefaultIsAddedOnceWhenVIsFree() {
         let user = [HyperBinding(keyCode: 46, action: .builtIn("mail"))]
         let merged = HyperLayer.addingNewDefaults(to: user, seenVersion: 0)
-        XCTAssertEqual(merged.count, 3)
+        XCTAssertEqual(merged.count, 4)
         XCTAssertEqual(HyperLayer.table(merged)[9], .builtIn("clipboard"))
         XCTAssertEqual(HyperLayer.table(merged)[45], .builtIn("notifications"))
+        XCTAssertEqual(HyperLayer.table(merged)[17], .builtIn("terminal"))
         // Already seen: a user who removed V does not get it back.
         XCTAssertEqual(HyperLayer.addingNewDefaults(to: user, seenVersion: HyperLayer.addedDefaultsVersion), user)
     }
@@ -153,7 +154,17 @@ final class HyperDefaultsMergeTests: XCTestCase {
         let merged = HyperLayer.addingNewDefaults(to: free, seenVersion: 1)
         XCTAssertEqual(HyperLayer.table(merged)[45], .builtIn(HyperBuiltIn.notifications.rawValue))
         let taken = [HyperBinding(keyCode: 45, action: .openApp("com.apple.Notes"))]
-        XCTAssertEqual(HyperLayer.addingNewDefaults(to: taken, seenVersion: 1), taken)
-        XCTAssertEqual(HyperLayer.addingNewDefaults(to: free, seenVersion: 2), free)
+        XCTAssertEqual(HyperLayer.addingNewDefaults(to: taken, seenVersion: 1).filter { $0.keyCode == 45 }, taken)
+        XCTAssertEqual(HyperLayer.addingNewDefaults(to: free, seenVersion: 3), free)
+    }
+
+    func testTerminalKeyIsAddedOnlyWhenTIsFree() {
+        let free = [HyperBinding(keyCode: 46, action: .builtIn("mail"))]
+        XCTAssertEqual(HyperLayer.table(HyperLayer.addingNewDefaults(to: free, seenVersion: 2))[17],
+                       .builtIn(HyperBuiltIn.terminal.rawValue))
+        // A key the user already put on T, such as opening another terminal app, stays.
+        let taken = [HyperBinding(keyCode: 17, action: .openApp("com.apple.Terminal"))]
+        XCTAssertEqual(HyperLayer.addingNewDefaults(to: taken, seenVersion: 2), taken)
+        XCTAssertEqual(HyperLayer.addingNewDefaults(to: free, seenVersion: 3), free)
     }
 }

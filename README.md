@@ -14,7 +14,7 @@ For loose requests such as “make this window bigger,” Jevcast can use **Jev 
 
 ## Install with your agent
 
-Copy this prompt into a coding agent on the Mac where you want Jevcast. The Mac needs Xcode 26 or later to build it.
+Copy this prompt into a coding agent on the Mac where you want Jevcast. The Mac needs Xcode 26 or later and Homebrew to build it.
 
 ```
 Install Jevcast from the official source repository:
@@ -23,8 +23,10 @@ https://github.com/RyanErkal/jevcast
 First check that this Mac can run Xcode 26 or later and has it installed. If
 not, report the requirement and stop. Clone the repository and check out its
 latest published release tag. If there is no release tag, stop. Verify that `git remote get-url origin`
-resolves exactly to `https://github.com/RyanErkal/jevcast.git`. Run `swift test`
-and `scripts/build.sh`. Verify the built app code signature with
+resolves exactly to `https://github.com/RyanErkal/jevcast.git`. If the checkout
+has `scripts/ghosttykit.sh`, install Homebrew's `zig@0.15` and Xcode's Metal
+Toolchain (`xcodebuild -downloadComponent MetalToolchain`), then run
+`scripts/ghosttykit.sh`. Run `swift test` and `scripts/build.sh`. Verify the built app code signature with
 `codesign --verify --deep --strict --verbose=2 "dist/Jevcast.app"` and report
 the result. After those checks pass, quit any running Jev Launcher or Jevcast.
 Back up an existing `/Applications/Jevcast.app` before replacing it, and keep
@@ -186,7 +188,11 @@ On macOS 26 or later, turn on **Hold Right Command to dictate** in Settings › 
 
 ### Hyper key
 
-Turn on **Use Caps Lock as a Hyper key** in Settings › Keys. Hold Caps Lock and press a key: M opens the Mail view, C the Calendar view, V the Clipboard view, A Automations, N shows notifications, and Space opens the launcher. H, J, K, and L send the arrow keys. The arrow keys move the window to a half, and Return fills the screen. Change any key, or add one that opens an app, in the same place. While Hyper is on, Caps Lock does not type capitals. Jevcast keeps your other key mappings and puts Caps Lock back when you turn Hyper off or quit, and after a crash on the next launch. The Caps Lock light needs Input Monitoring; the Hyper key works without it.
+Turn on **Use Caps Lock as a Hyper key** in Settings › Keys. Hold Caps Lock and press a key: M opens the Mail view, C the Calendar view, V the Clipboard view, A Automations, N shows notifications, T the Terminal view, and Space opens the launcher. H, J, K, and L send the arrow keys. The arrow keys move the window to a half, and Return fills the screen. Change any key, or add one that opens an app, in the same place. While Hyper is on, Caps Lock does not type capitals. Jevcast keeps your other key mappings and puts Caps Lock back when you turn Hyper off or quit, and after a crash on the next launch. The Caps Lock light needs Input Monitoring; the Hyper key works without it.
+
+### Terminal
+
+Hyper–T, or `/terminal`, opens the Terminal view in the launcher, for quick commands such as signing in to a command-line tool. It runs your login shell in your home folder and is drawn by [libghostty](https://github.com/ghostty-org/ghostty), with the font, colours, and keys from your Ghostty config if you have one. It takes the launcher's look on top: no background of its own over the panel glass, the launcher's margins, an accent bar cursor, and launcher text and selection colours in light and dark mode. The bar above it shows the shell's folder, such as "ryanerkal ~", and follows `cd`. The view is a third smaller than the other views. Every key goes to the shell except Escape, which closes the view; press ⌃[ to send Escape to a program. The shell keeps running while the launcher is closed, so Hyper–T takes you back to it, and a second Hyper–T closes it again. `exit` ends the shell, and the next Hyper–T starts a new one. ⌘-click opens a web link, such as a sign-in page. Pasting text with line breaks asks first. Dead keys and input methods, such as Japanese, do not type yet.
 
 ### Jev memory and usage
 
@@ -216,9 +222,9 @@ The app has no account, no analytics, and no crash reporting. It connects to the
 | When you read an HTML message in Mail, if **Load Images from the Web** is on (default: on) | The servers the message names                                | Requests for the message's web images, fonts, and style sheets. As with any mail app, the sender can learn that you opened it, when, and from which IP address. Scripts never run. Turn it off in the ⋯ menu above a message.                                                                                                                                                                                   |
 | When you open a web search or a URL                                                        | Your default browser                                         | Whatever you chose to open.                                                                                                                                                                                                                                                                                                                                                                                     |
 
-Automations run the `codex` and `claude` tools you signed in to, or your own scripts. Those programs make their own connections under your account. Jevcast adds none for them.
+Automations run the `codex` and `claude` tools you signed in to, or your own scripts. Those programs make their own connections under your account. Jevcast adds none for them. The same is true of the commands you type in the Terminal view. Jevcast does not store or send what the terminal shows.
 
-Everything else stays on your Mac. Settings are in macOS preferences, and keys are in your Keychain. The app writes these files of its own: a cache of your app list in `~/Library/Caches/JevLauncher`, and in `~/Library/Application Support/Jevcast` the clipboard history (`Clipboard`), dictation transcripts (`Dictation`), Quill task results (`Luna Tasks`), automations and their runs (`Automations`), and a lock file that keeps one copy running. Clipboard history skips password managers and items they mark as concealed. A browser history search copies each history database to a temporary folder and deletes it after the search. Mail, Calendar, Reminders, Contacts, tabs, and selected text are read on this Mac and are not stored by Jevcast.
+Everything else stays on your Mac. Settings are in macOS preferences, and keys are in your Keychain. The app writes these files of its own: a cache of your app list in `~/Library/Caches/JevLauncher`, and in `~/Library/Application Support/Jevcast` the clipboard history (`Clipboard`), dictation transcripts (`Dictation`), Quill task results (`Luna Tasks`), automations and their runs (`Automations`), and a lock file that keeps one copy running. The Terminal view's style is a small Ghostty settings file in the system temporary folder. Clipboard history skips password managers and items they mark as concealed. A browser history search copies each history database to a temporary folder and deletes it after the search. Mail, Calendar, Reminders, Contacts, tabs, and selected text are read on this Mac and are not stored by Jevcast.
 
 ## Permissions
 
@@ -237,11 +243,14 @@ Allow each one from the welcome window, Settings › General, or the Settings ta
 
 ## Build from source
 
-You need Xcode 26 or later (it includes the macOS 26 SDK). The built app runs on macOS 14 or later.
+You need Xcode 26 or later (it includes the macOS 26 SDK), its Metal Toolchain, and Zig 0.15 for the Terminal's libghostty. The built app runs on macOS 14 or later.
 
 ```sh
 git clone https://github.com/RyanErkal/jevcast.git
 cd jevcast
+brew install zig@0.15
+xcodebuild -downloadComponent MetalToolchain
+scripts/ghosttykit.sh       # builds libghostty from pinned Ghostty source, once
 swift test
 scripts/build.sh            # universal build; ARCHS=arm64 scripts/build.sh builds one architecture
 open "dist/Jevcast.app"

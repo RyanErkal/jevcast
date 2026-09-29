@@ -4,6 +4,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Terminal view.** Hyper–T, or `/terminal`, opens your login shell in the launcher, for quick commands such as signing in to a command-line tool. It is drawn by libghostty with your Ghostty font, palette, and keys, and takes the launcher's look: the panel glass behind the text, the launcher's margins, and an accent bar cursor. The bar above it shows the shell's folder. Escape closes it and the shell keeps running, so Hyper–T takes you back; ⌃[ sends Escape to a program. `exit` ends the shell. ⌘-click opens a web link. An existing Hyper layer gets T only when nothing else is on it.
+
 ### Fixed
 
 - **Maps opens Maps.** An app or item whose whole name you type, such as Maps, now comes before the site search with the same keyword. A keyword with no such item, such as "gh", still searches first, and neither asks Jev.

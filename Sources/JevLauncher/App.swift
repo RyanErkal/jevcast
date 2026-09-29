@@ -64,6 +64,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     private var panel: LauncherPanel!
     private var settings: SettingsWindow?
     private var mail: MailWindow?
+    /// The shell behind the Terminal view. It keeps running while the launcher is closed.
+    private var terminal: TerminalView?
     /// One mail model for the Mail view and the mail window, so ⌘O keeps your place.
     private lazy var mailModel = MailModel(quill: { [unowned self] in try await self.model.sendQuill($0) },
                                            quillAllowed: { [unowned self] in self.model.allowedQuillContext.contains(.mailMessage) })
@@ -116,7 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             if id == .mail, self.mail?.isOpen == true { self.showMail(); return nil }
             return LauncherPages.make(id, model: self.model, links: self.pageLinks, snapshot: false)
         }
-        viewSizeWatch = model.$page.map { $0 != nil }.removeDuplicates().sink { [weak self] wide in self?.panel.setViewSize(wide) }
+        viewSizeWatch = model.$page.map { $0?.id }.removeDuplicates().sink { [weak self] view in self?.panel.setViewSize(view) }
         UNUserNotificationCenter.current().delegate = self
         configureAutomations()
         // Snapshot runs never run tasks.
@@ -200,7 +202,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         updates.start()
         // The runner opened the app for an alert: AutomationCenter shows it; nothing else opens.
         if alertLaunch { return }
-        if CommandLine.arguments.contains("--open") { show() }
+        if CommandLine.arguments.contains("--terminal") { showView(.terminal, fromHyper: true) }
+        else if CommandLine.arguments.contains("--open") { show() }
         else if !preferences.welcomeShown || CommandLine.arguments.contains("--welcome") { showWelcome() }
     }
     /// Renders each state in turn. Every capture waits for the previous step, so a
@@ -397,6 +400,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             case .automations: showAutomations()
             case .clipboard: showView(.clipboard, fromHyper: true)
             case .notifications: NotchAlertController.shared.showLast()
+            case .terminal:
+                // A second Hyper–T closes the view; the shell keeps running.
+                if wasVisible, model.page?.id == .terminal { hide(); return }
+                showView(.terminal, fromHyper: true)
             default: break
             }
         case .openApp(let bundleID):
@@ -422,7 +429,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         backdrop.show { [weak self] in self?.hide() }
         // The panel is non-activating: it takes typing without activating the app, so no Space switch.
         panel.makeKeyAndOrderFront(nil)
-        model.focusSearch?()
+        model.focusInput()
         traceInteraction("opened")
         panel.displayIfNeeded()
         NotificationCenter.default.post(name: .launcherDidOpen, object: nil)
@@ -467,10 +474,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     func applicationDidBecomeActive(_ notification: Notification) {
         guard wasVisible else { return }
         panel.makeKeyAndOrderFront(nil)
-        model.focusSearch?()
+        model.focusInput()
     }
     func windowDidBecomeKey(_ notification: Notification) {
-        if notification.object as? NSWindow === panel, wasVisible { model.focusSearch?(); traceInteraction("focused") }
+        if notification.object as? NSWindow === panel, wasVisible { model.focusInput(); traceInteraction("focused") }
     }
     func applicationDidResignActive(_ notification: Notification) {
         hide(restoreFocus: false)
@@ -583,6 +590,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         if mail == nil { mail = MailWindow(model: mailModel) }
         mail?.show(select: rowID, compose: address)
     }
+    /// The running shell, or a new one. When the shell exits, the view closes and the next
+    /// Hyper–T starts a new shell. Nil when libghostty cannot start.
+    private func runningTerminal() -> TerminalView? {
+        if let terminal { return terminal }
+        guard let app = GhosttyRuntime.shared.app, let view = TerminalView(app: app) else { return nil }
+        view.onClose = { [weak self, weak view] in
+            guard let self, let view, self.terminal === view else { return }
+            self.terminal = nil
+            if self.model.page?.id == .terminal { self.hide() }
+            view.close()
+        }
+        terminal = view
+        return view
+    }
     /// Shows the launcher as a view, such as Mail, in place of a separate window.
     /// `fromHyper` makes Escape close the launcher instead of going back to search.
     func showView(_ view: ViewID, fromHyper: Bool = false) {
@@ -602,7 +623,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     private var pageLinks: LauncherPages.Links {
         .init(mail: { [unowned self] in self.mailModel },
               mailWindow: { [weak self] rowID in self?.model.closeAllViews(handingOff: true); self?.showMail(select: rowID) },
-              runWindow: { [weak self] run in self?.showRun(run) })
+              runWindow: { [weak self] run in self?.showRun(run) },
+              terminal: { [weak self] in self?.runningTerminal() })
     }
     func showSettings(tab: SettingsWindow.Tab, aiPart: AISettings.Part? = nil, voicePart: VoicePane.Part? = nil) {
         if let aiPart { UserDefaults.standard.set(aiPart.rawValue, forKey: "settingsAIPart") }
@@ -676,6 +698,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         backdrop.close(); resultActions.dismiss(); preview.close()
         model.end(); model.windows.stopEdgeSnapping(); hotkeys.clear()
         if UISnapshots.directory == nil { hyper.shutdown() }
+        terminal?.close()
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
     }
 }

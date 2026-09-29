@@ -15,6 +15,13 @@ final class LauncherPanel: NSPanel {
         let visible = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame.size ?? NSSize(width: 1440, height: 900)
         return NSSize(width: max(860, min(1320, visible.width - 120)), height: max(620, min(880, visible.height - 140)))
     }
+    /// The size for one view. The terminal is for quick commands, so it is 35% smaller, but never
+    /// narrower than search.
+    static func viewSize(for view: ViewID) -> NSSize {
+        let size = viewSize
+        guard view == .terminal else { return size }
+        return NSSize(width: max(width, (size.width * 0.65).rounded()), height: (size.height * 0.65).rounded())
+    }
     /// The width the frame is heading to. Height changes keep it, so they never undo a widening.
     private var targetWidth = LauncherPanel.width
     static let cornerRadius = LauncherMetrics.panelRadius
@@ -97,9 +104,9 @@ final class LauncherPanel: NSPanel {
             self.applyTarget()
         }
     }
-    /// Widens the panel for a view, or narrows it back for search, around its centre.
-    func setViewSize(_ wide: Bool) {
-        let width = wide ? Self.viewSize.width : Self.width
+    /// Sizes the panel for a view, or narrows it back for search (nil), around its centre.
+    func setViewSize(_ view: ViewID?) {
+        let width = view.map { Self.viewSize(for: $0).width } ?? Self.width
         guard width != targetWidth else { return }
         targetWidth = width
         applyTarget()

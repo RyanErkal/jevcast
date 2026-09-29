@@ -116,6 +116,27 @@ final class MIMEMessageTests: XCTestCase {
         XCTAssertTrue(MailScripts.forward.contains("set content of f to (item 4 of argv) & return & return & quoted"), "The note comes first")
     }
 
+    /// An error before `send` is 1004: nothing was sent. An error from `send` itself is 1005: Mail may
+    /// have sent the message. A message Mail would not send (1002) is closed without saving.
+    func testSendingScriptsNumberTheirErrors() throws {
+        for (script, message, _) in sendingScripts {
+            let start = try XCTUnwrap(script.range(of: "      try\n"))
+            let make = try XCTUnwrap(script.range(of: "set \(message) to "))
+            let before = try XCTUnwrap(script.range(of: "error errText number 1004"))
+            let sending = try XCTUnwrap(script.range(of: "set didSend to (send \(message))"))
+            let during = try XCTUnwrap(script.range(of: "error \"Mail stopped while it sent the message.\" number 1005"))
+            let refused = try XCTUnwrap(script.range(of: "error \"Mail did not send the message.\" number 1002"))
+            XCTAssertLessThan(start.lowerBound, make.lowerBound, "Making the message is inside the 1004 block")
+            XCTAssertLessThan(before.lowerBound, sending.lowerBound)
+            XCTAssertLessThan(sending.lowerBound, during.lowerBound)
+            XCTAssertLessThan(during.lowerBound, refused.lowerBound)
+            let discard = try XCTUnwrap(script[during.upperBound...].range(of: "close \(message) saving no"))
+            XCTAssertLessThan(discard.lowerBound, refused.lowerBound, "The 1002 path discards the message")
+            XCTAssertTrue(script.contains("if errNum is -1743 or errNum is 1003 then error errText number errNum"),
+                          "A refused permission and a failed check keep their numbers")
+        }
+    }
+
     /// The text that goes to Mail loses its leading white space, and the check is its first 200 characters.
     func testCheckTextIsTheStartOfTheSentText() {
         XCTAssertEqual(MailScripts.sendingText("\n \t\n\u{00A0} Hello there  \nsecond"), "Hello there  \nsecond")

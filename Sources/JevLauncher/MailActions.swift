@@ -54,6 +54,34 @@ enum MailActions {
         _ = try await AppleScript.run(script, arguments, app: bundleID, name: "Mail", timeout: 30)
     }
 
+    /// Runs a script that sends mail. When Mail may have sent the message, the error is `MailMaybeSentError`.
+    private static func runSending(_ script: String, _ arguments: [String]) async throws {
+        try await ensureRunning()
+        // Nothing has reached Mail yet, so a cancel here means nothing was sent.
+        try Task.checkCancellation()
+        do { _ = try await AppleScript.run(script, arguments, app: bundleID, name: "Mail", timeout: 30) }
+        catch { throw sendFailure(error) }
+    }
+
+    /// What a failed send script means. 1005 is an error from Mail's `send` itself. A timeout (-1712),
+    /// the osascript time limit, or a cancel stops the script at a point Jevcast cannot know. In each
+    /// of these cases Mail may have sent the message. Every other error, such as 1002, 1003, or 1004
+    /// (an error before `send`), means that Mail did not send it.
+    static func sendFailure(_ error: Error) -> Error {
+        if error is CancellationError { return MailMaybeSentError() }
+        guard let failure = error as? CommandRunner.Failure else { return error }
+        if let code = errorNumber(failure.text), code == 1005 || code == -1712 { return MailMaybeSentError() }
+        // `CommandRunner` ends a script at its time limit with this text.
+        if failure.text.hasSuffix("took too long and was stopped.") { return MailMaybeSentError() }
+        return error
+    }
+
+    /// The number at the end of an osascript error line, such as 1005 in "0:12: execution error: … (1005)".
+    static func errorNumber(_ text: String) -> Int? {
+        guard text.hasSuffix(")"), let open = text.lastIndex(of: "(") else { return nil }
+        return Int(text[text.index(after: open)..<text.index(before: text.endIndex)])
+    }
+
     private static func target(_ message: MailSummary, _ mailbox: MailMailbox) -> [String] {
         [mailbox.accountID, mailbox.path, String(message.rowID)]
     }
@@ -93,18 +121,18 @@ enum MailActions {
     static func reply(_ message: MailSummary, in mailbox: MailMailbox, text: String, all: Bool) async throws {
         if let engine = try native() { return try await engine.reply(to: message.rowID, text: text, all: all) }
         let text = MailScripts.sendingText(text)
-        try await run(MailScripts.reply, target(message, mailbox) + [text, all ? "true" : "false", MailScripts.checkText(text)])
+        try await runSending(MailScripts.reply, target(message, mailbox) + [text, all ? "true" : "false", MailScripts.checkText(text)])
     }
     static func forward(_ message: MailSummary, in mailbox: MailMailbox, text: String, to recipients: [String]) async throws {
         if let engine = try native() { return try await engine.forward(message.rowID, text: text, to: recipients) }
         let text = MailScripts.sendingText(text)
-        try await run(MailScripts.forward, target(message, mailbox) + [text, recipients.joined(separator: "\n"), MailScripts.checkText(text)])
+        try await runSending(MailScripts.forward, target(message, mailbox) + [text, recipients.joined(separator: "\n"), MailScripts.checkText(text)])
     }
     static func send(to: [String], cc: [String], subject: String, body: String) async throws {
         guard !to.isEmpty else { throw LauncherError("Add at least one recipient.") }
         if let engine = try native() { return try await engine.send(to: to, cc: cc, subject: subject, body: body) }
         let body = MailScripts.sendingText(body)
-        try await run(MailScripts.send, [to.joined(separator: "\n"), cc.joined(separator: "\n"), subject, body, MailScripts.checkText(body)])
+        try await runSending(MailScripts.send, [to.joined(separator: "\n"), cc.joined(separator: "\n"), subject, body, MailScripts.checkText(body)])
     }
     static func checkForNewMail() async throws {
         if let engine = try native() { return await engine.sync(.inboxOnly) }

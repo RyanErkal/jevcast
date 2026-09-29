@@ -151,10 +151,10 @@ public enum MailScripts {
         String(sendingText(text).prefix(200))
     }
 
-    /// Reads the text back from `message` and discards it before sending when Mail did not keep it:
-    /// Mail can ignore text set on a message it has not shown. Argument `argument` holds `checkText`;
-    /// an empty one skips the check. Mail's copy must start with it, so a quoted original that contains
-    /// the same words does not count. White space is ignored, because Mail can change line endings and
+    /// Reads the text back from `message` and fails with 1003 when Mail did not keep it: Mail can
+    /// ignore text set on a message it has not shown. Argument `argument` holds `checkText`; an empty
+    /// one skips the check. Mail's copy must start with it, so a quoted original that contains the
+    /// same words does not count. White space is ignored, because Mail can change line endings and
     /// blank lines; case counts. `before` names Mail's own text from before the change. When that
     /// already starts with the check text, such as the signature "Thanks, Ryan" under the reply
     /// "Thanks", only a copy that no longer starts with Mail's own text shows that the text was kept.
@@ -172,10 +172,7 @@ public enum MailScripts {
                   if kept then exit repeat
                   delay 0.2
                 end repeat
-                if not kept then
-        \(discard(message))
-                  error "Mail did not take the text, so nothing was sent." number 1003
-                end if
+                if not kept then error "Mail did not take the text, so nothing was sent." number 1003
               end if
         """
     }
@@ -192,6 +189,38 @@ public enum MailScripts {
         """
     }
 
+    /// A script that makes `message` in `prepare`, checks its text, and sends it. Every error before
+    /// `send` discards the message and becomes 1004: nothing was sent. The text check (1003) and a
+    /// refused Automation permission (-1743) keep their numbers. An error from `send` itself becomes
+    /// 1005, because Mail may have sent the message. `send` that returns false discards it (1002).
+    static func sending(_ message: String, prepare: String, check argument: Int, before: String? = nil) -> String {
+        """
+        on run argv
+          with timeout of 20 seconds
+            tell application id "com.apple.mail"
+              try
+        \(prepare)
+        \(keepsText(message, argument: argument, before: before))
+              on error errText number errNum
+        \(discard(message))
+                if errNum is -1743 or errNum is 1003 then error errText number errNum
+                error errText number 1004
+              end try
+              try
+                set didSend to (send \(message))
+              on error
+                error "Mail stopped while it sent the message." number 1005
+              end try
+              if not didSend then
+        \(discard(message))
+                error "Mail did not send the message." number 1002
+              end if
+            end tell
+          end timeout
+        end run
+        """
+    }
+
     /// `argv` 4: "true" or "false".
     public static let setRead = onMessage("      set read status of m to ((item 4 of argv) is \"true\")")
     public static let setFlagged = onMessage("      set flagged status of m to ((item 4 of argv) is \"true\")")
@@ -200,7 +229,8 @@ public enum MailScripts {
     public static let move = onMessage("      move m to mailbox (item 4 of argv) of acct")
     /// `argv` 4: the reply text (`sendingText`); 5: "true" to reply to all; 6: `checkText` of the
     /// reply. The quoted original stays below the text.
-    public static let reply = onMessage("""
+    public static let reply = sending("r", prepare: """
+    \(findMessage)
           set r to reply m opening window false reply to all ((item 5 of argv) is "true")
           set quoted to ""
           repeat 10 times
@@ -213,12 +243,11 @@ public enum MailScripts {
           else
             set content of r to (item 4 of argv) & return & return & quoted
           end if
-    \(keepsText("r", argument: 6, before: "quoted"))
-          if not (send r) then error "Mail did not send the message." number 1002
-    """)
+    """, check: 6, before: "quoted")
     /// `argv` 4: the text above the forwarded message (`sendingText`); 5: recipient addresses, one
     /// per line; 6: `checkText` of the text.
-    public static let forward = onMessage("""
+    public static let forward = sending("f", prepare: """
+    \(findMessage)
           set f to forward m opening window false
           delay 0.5
           repeat with a in paragraphs of (item 5 of argv)
@@ -235,15 +264,10 @@ public enum MailScripts {
             end repeat
             set content of f to (item 4 of argv) & return & return & quoted
           end if
-    \(keepsText("f", argument: 6, before: "quoted"))
-          if not (send f) then error "Mail did not send the message." number 1002
-    """)
+    """, check: 6, before: "quoted")
 
     /// `argv`: to (one per line), cc (one per line), subject, body (`sendingText`), `checkText` of the body.
-    public static let send = """
-    on run argv
-      with timeout of 20 seconds
-        tell application id "com.apple.mail"
+    public static let send = sending("o", prepare: """
           set o to make new outgoing message with properties {subject:(item 3 of argv), content:(item 4 of argv), visible:false}
           repeat with a in paragraphs of (item 1 of argv)
             if (a as text) is not "" then make new to recipient at end of to recipients of o with properties {address:(a as text)}
@@ -251,12 +275,7 @@ public enum MailScripts {
           repeat with a in paragraphs of (item 2 of argv)
             if (a as text) is not "" then make new cc recipient at end of cc recipients of o with properties {address:(a as text)}
           end repeat
-    \(keepsText("o", argument: 5))
-          if not (send o) then error "Mail did not send the message." number 1002
-        end tell
-      end timeout
-    end run
-    """
+    """, check: 5)
 
     public static let checkForNewMail = """
     on run argv

@@ -68,6 +68,16 @@ public actor MailAccountSync {
 
     public func request(_ request: MailSyncRequest) async { await signal.post(request) }
 
+    /// After sleep or a network change: new connections, a new IDLE, and a full check now.
+    public func wake() async {
+        guard loop != nil else { return }
+        idler?.cancel()
+        idler = nil
+        await syncClient.drop()
+        await actionClient.drop()
+        await signal.post(.everything)
+    }
+
     private func setState(_ new: State) {
         guard new != state else { return }
         state = new

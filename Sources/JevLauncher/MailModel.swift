@@ -133,8 +133,17 @@ final class MailModel: ObservableObject {
                 let stored = UserDefaults.standard.object(forKey: "mailLoadsImages") as? Bool ?? true
                 if let self, self.loadsImages != stored { self.loadsImages = stored }
             }
+        // Jevcast's own store says when it changes, so new mail and changes show without waiting for a poll.
+        nativeObserver = NotificationCenter.default.publisher(for: NativeMailCenter.changed)
+            .debounce(for: .milliseconds(120), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self, self.poll != nil else { return }
+                // A change of mail source, or a first account, needs the store found again.
+                if NativeMailCenter.isActive, let root = self.root, NativeMailCenter.isNativeRoot(root) { self.refresh() } else { self.refreshStatus() }
+            }
     }
     private var defaultsObserver: AnyCancellable?
+    private var nativeObserver: AnyCancellable?
 
     var selected: MailSummary? { messages.first { $0.rowID == selectedID } }
     func mailbox(_ id: Int64) -> MailMailbox? { mailboxes.first { $0.rowID == id } }
@@ -209,6 +218,8 @@ final class MailModel: ObservableObject {
     /// Starts Apple Mail hidden, if needed, and asks it to fetch new mail. New mail reaches the
     /// index only while Mail runs.
     private func fetchNewMail() {
+        // Jevcast's own accounts sync by themselves; Apple Mail is never started for them.
+        if NativeMailCenter.isActive { checkForNewMail(); return }
         let wasRunning = AppleScript.isRunning(MailActions.bundleID)
         if !wasRunning { startedMail = true; MailActions.openedByUser = false }
         checkForNewMail()
@@ -232,7 +243,7 @@ final class MailModel: ObservableObject {
     }
 
     private func updateMailRunning() {
-        let running = AppleScript.isRunning(MailActions.bundleID)
+        let running = NativeMailCenter.isActive || AppleScript.isRunning(MailActions.bundleID)
         if mailRunning != running { mailRunning = running }
     }
 
@@ -582,7 +593,11 @@ final class MailModel: ObservableObject {
         }
         detail = nil; detailHTML = nil; detailMissing = false
         Task { @MainActor [weak self] in
-            let loaded = await Task.detached(priority: .userInitiated) { Self.loadBody(root: root, box: box, rowID: rowID) }.value
+            var loaded = await Task.detached(priority: .userInitiated) { Self.loadBody(root: root, box: box, rowID: rowID) }.value
+            // A Jevcast account downloads a body the first time it is shown.
+            if loaded == nil, let engine = NativeMailCenter.activeEngine, (try? await engine.fetchBody(rowID)) == true {
+                loaded = await Task.detached(priority: .userInitiated) { Self.loadBody(root: root, box: box, rowID: rowID) }.value
+            }
             guard let self, self.root == root, self.indexIdentity == identity else { return }
             if let loaded { self.remember(loaded, for: rowID) }
             guard self.selectedID == rowID, self.loadingID == rowID else { return }

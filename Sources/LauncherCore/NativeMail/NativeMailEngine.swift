@@ -76,6 +76,11 @@ public actor NativeMailEngine {
         changed()
     }
 
+    /// After sleep: every account connects again and checks at once.
+    public func wake() async {
+        for sync in syncs.values { await sync.wake() }
+    }
+
     /// Asks every account to check now, such as when the inbox opens.
     public func sync(_ request: MailSyncRequest = .inboxOnly) async {
         for sync in syncs.values { await sync.request(request) }

@@ -33,8 +33,11 @@ struct MailSettings: View {
     @AppStorage(MailReading.markReadKey) private var markRead = MailReading.MarkRead.oneSecond.rawValue
     @AppStorage(MailReading.plainKey) private var prefersPlain = false
 
+    @ObservedObject private var native = NativeMailCenter.shared
+
     var body: some View {
         Form {
+            MailAccountsSection()
             Section {
                 Toggle("Load web images, fonts, and styles", isOn: $loadsImages)
                 InfoCaption("Mail never runs scripts.",
@@ -59,11 +62,13 @@ struct MailSettings: View {
                 Text("In the launcher, Space shows the message across the full panel. Escape shows the list again. ⌘O opens the Mail window.")
                     .font(.caption).foregroundStyle(.secondary)
             } header: { Text("Reading") }
-            Section("Access") {
-                SourcePermissionRow(kind: .fullDiskAccess)
-                SourcePermissionRow(kind: .automation)
-                Text("Reading needs Full Disk Access. Delete, move, and send go through Apple Mail, which needs Automation.")
-                    .font(.caption).foregroundStyle(.secondary)
+            if native.backend == .appleMail {
+                Section("Access") {
+                    SourcePermissionRow(kind: .fullDiskAccess)
+                    SourcePermissionRow(kind: .automation)
+                    Text("Reading needs Full Disk Access. Delete, move, and send go through Apple Mail, which needs Automation.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             Section("Quill") {
                 LabeledContent("Quill reads mail") {

@@ -10,8 +10,10 @@ enum MailStore {
         case noMail
     }
 
-    /// Where Mail keeps its data, and whether Jevcast may read it.
+    /// Where Mail keeps its data, and whether Jevcast may read it. With Jevcast accounts as the
+    /// mail source, this is Jevcast's own store, which has the same layout.
     static func status() -> Status {
+        if NativeMailCenter.isActive { return NativeMailCenter.status() }
         let base = NSHomeDirectory() + "/Library/Mail"
         guard FileManager.default.fileExists(atPath: base) else { return .noMail }
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: base) else { return .needsFullDiskAccess }
@@ -88,9 +90,12 @@ enum MailStore {
         let columns = db.columns("mailboxes")
         let unread = columns.contains("unread_count") ? "unread_count" : "0"
         let total = columns.contains("total_count") ? "total_count" : "0"
-        let boxes: [MailMailbox] = try db.rows("SELECT ROWID, url, \(unread), \(total) FROM mailboxes").compactMap { row in
-            guard row.count == 4, let id = row[0].int, let url = row[1].text else { return nil }
-            return MailMailbox(rowID: id, url: url, unread: Int(row[2].int ?? 0), total: Int(row[3].int ?? 0))
+        // Only Jevcast's own store has `role`: the server's special use for the mailbox.
+        let role = columns.contains("role") ? "role" : "NULL"
+        let boxes: [MailMailbox] = try db.rows("SELECT ROWID, url, \(unread), \(total), \(role) FROM mailboxes").compactMap { row in
+            guard row.count == 5, let id = row[0].int, let url = row[1].text else { return nil }
+            return MailMailbox(rowID: id, url: url, unread: Int(row[2].int ?? 0), total: Int(row[3].int ?? 0),
+                               serverRole: row[4].text.flatMap(MailMailbox.Role.init(rawValue:)))
         }
         // A Gmail inbox holds no rows of its own: its messages sit in All Mail with an Inbox label.
         // Its unread count is read through the labels, so it matches the list.
@@ -526,6 +531,8 @@ enum MailStore {
                 if FileManager.default.fileExists(atPath: candidate) { return candidate }
             }
         }
+        // Jevcast's own store has one layout, and a missing file means the body is not downloaded yet.
+        if NativeMailCenter.isNativeRoot(root) { return nil }
         // Some layouts differ. Search this mailbox's folder, at most a few levels down.
         let names = Set(relative.map { ($0 as NSString).lastPathComponent })
         guard let enumerator = FileManager.default.enumerator(atPath: folder) else { return nil }

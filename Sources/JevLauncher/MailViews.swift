@@ -44,7 +44,7 @@ struct MailSetupView: View {
     var body: some View {
         VStack(spacing: 14) {
             Image(systemName: needsAccess ? "lock.shield" : "envelope").font(.system(size: 40)).foregroundStyle(.secondary)
-            Text(needsAccess ? "Allow Jevcast to read Mail" : "Set up Apple Mail first").font(.title2.weight(.semibold))
+            Text(needsAccess ? "Allow Jevcast to read Mail" : NativeMailCenter.isActive ? "Add a mail account" : "Set up Apple Mail first").font(.title2.weight(.semibold))
             if needsAccess {
                 Text("macOS protects Apple Mail's messages. Full Disk Access does not list apps by itself, so add Jevcast once:")
                     .multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 460)
@@ -62,7 +62,8 @@ struct MailSetupView: View {
                     Button("Restart Jevcast") { Relaunch.now() }.keyboardShortcut(.defaultAction)
                 }
             } else {
-                Text("Jevcast shows the accounts you add to Apple Mail. Add an account in Mail, then check again.")
+                Text(NativeMailCenter.isActive ? "Jevcast syncs the accounts you add in Settings › Mail. Add one there, then check again."
+                     : "Jevcast shows the accounts you add to Apple Mail. Add an account in Mail, then check again.")
                     .multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 440)
                 Button("Check Again") { model.refreshStatus() }.keyboardShortcut(.defaultAction)
             }

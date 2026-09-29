@@ -3,14 +3,23 @@ import LauncherCore
 
 /// Changes to mail go through Apple Mail, so its accounts, rules, and sync stay in charge.
 /// Mail starts hidden when it is not running. Values reach the fixed scripts only as arguments.
+/// With Jevcast accounts as the mail source, each change goes to `NativeMailEngine` instead, and
+/// Apple Mail is never started.
 enum MailActions {
     static let bundleID = "com.apple.mail"
     /// Set when you open a message in Mail itself, so Jevcast does not quit Mail after.
     static var openedByUser = false
 
+    /// The engine for Jevcast accounts, or nil when Apple Mail is the mail source.
+    private static func native() throws -> NativeMailEngine? {
+        guard NativeMailCenter.isActive else { return nil }
+        guard let engine = NativeMailCenter.activeEngine else { throw LauncherError("Add a mail account in Settings › Mail first.") }
+        return engine
+    }
+
     /// Starts Mail hidden, without taking focus, and waits until it answers.
     static func ensureRunning() async throws {
-        if AppleScript.isRunning(bundleID) { return }
+        if NativeMailCenter.isActive || AppleScript.isRunning(bundleID) { return }
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
             throw LauncherError("Apple Mail is not installed.")
         }
@@ -35,6 +44,7 @@ enum MailActions {
     /// more, in `fallback` when given: the row's own mailbox, such as Gmail's All Mail for an Inbox row.
     /// Read status belongs to the message, so either mailbox changes it on the server.
     static func setRead(_ read: Bool, _ message: MailSummary, in mailbox: MailMailbox, fallback: MailMailbox? = nil) async throws {
+        if let engine = try native() { return try await engine.setRead(message.rowID, read) }
         let value = read ? "true" : "false"
         do { try await run(MailScripts.setRead, target(message, mailbox) + [value]) }
         catch let problem as SourceProblem { throw problem }
@@ -45,33 +55,41 @@ enum MailActions {
     }
     /// Asks Mail to send pending changes for these accounts to their servers. Does nothing when Mail is not running.
     static func synchronize(accounts: [String]) async throws {
-        guard !accounts.isEmpty, AppleScript.isRunning(bundleID) else { return }
+        guard !accounts.isEmpty, !NativeMailCenter.isActive, AppleScript.isRunning(bundleID) else { return }
         _ = try await AppleScript.run(MailScripts.synchronize, accounts, app: bundleID, name: "Mail", timeout: 30)
     }
     static func setFlagged(_ flagged: Bool, _ message: MailSummary, in mailbox: MailMailbox) async throws {
+        if let engine = try native() { return try await engine.setFlagged(message.rowID, flagged) }
         try await run(MailScripts.setFlagged, target(message, mailbox) + [flagged ? "true" : "false"])
     }
     static func delete(_ message: MailSummary, in mailbox: MailMailbox) async throws {
+        if let engine = try native() { return try await engine.delete(message.rowID) }
         try await run(MailScripts.delete, target(message, mailbox))
     }
     static func move(_ message: MailSummary, from mailbox: MailMailbox, to destination: MailMailbox) async throws {
         guard destination.accountID == mailbox.accountID else { throw LauncherError("Messages move only within one account.") }
+        if let engine = try native() { return try await engine.move(message.rowID, to: destination.rowID) }
         try await run(MailScripts.move, target(message, mailbox) + [destination.path])
     }
     static func reply(_ message: MailSummary, in mailbox: MailMailbox, text: String, all: Bool) async throws {
+        if let engine = try native() { return try await engine.reply(to: message.rowID, text: text, all: all) }
         try await run(MailScripts.reply, target(message, mailbox) + [text, all ? "true" : "false"])
     }
     static func forward(_ message: MailSummary, in mailbox: MailMailbox, text: String, to recipients: [String]) async throws {
+        if let engine = try native() { return try await engine.forward(message.rowID, text: text, to: recipients) }
         try await run(MailScripts.forward, target(message, mailbox) + [text, recipients.joined(separator: "\n")])
     }
     static func send(to: [String], cc: [String], subject: String, body: String) async throws {
         guard !to.isEmpty else { throw LauncherError("Add at least one recipient.") }
+        if let engine = try native() { return try await engine.send(to: to, cc: cc, subject: subject, body: body) }
         try await run(MailScripts.send, [to.joined(separator: "\n"), cc.joined(separator: "\n"), subject, body])
     }
     static func checkForNewMail() async throws {
+        if let engine = try native() { return await engine.sync(.inboxOnly) }
         try await run(MailScripts.checkForNewMail, [])
     }
     static func openInMail(_ message: MailSummary, in mailbox: MailMailbox) async throws {
+        if NativeMailCenter.isActive { throw LauncherError("Messages from Jevcast accounts open here. Apple Mail does not have them.") }
         try await run(MailScripts.open, target(message, mailbox))
     }
 

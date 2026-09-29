@@ -48,9 +48,12 @@ extension LauncherModel {
         return made
     }
 
-    /// Jevcast writes mail only for people who use Apple Mail: it can read it, and it opens mailto links.
+    /// Jevcast writes mail for people who use Apple Mail, where it can read it and it opens mailto
+    /// links, and for Jevcast's own accounts, which it sends itself.
     static var usesJevcastMail: Bool {
-        guard case .ready = MailStore.status(), let mailto = URL(string: "mailto:x@example.com"),
+        guard case .ready = MailStore.status() else { return false }
+        if NativeMailCenter.isActive { return true }
+        guard let mailto = URL(string: "mailto:x@example.com"),
               let handler = NSWorkspace.shared.urlForApplication(toOpen: mailto) else { return false }
         return Bundle(url: handler)?.bundleIdentifier == MailActions.bundleID
     }

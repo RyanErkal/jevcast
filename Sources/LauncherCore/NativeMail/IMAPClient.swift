@@ -93,6 +93,10 @@ public actor IMAPClient {
         disconnect()
     }
 
+    /// Drops the connection without LOGOUT, such as after the Mac wakes, when the old one is
+    /// likely dead. A command waiting on it fails and the next one connects again.
+    public func drop() { disconnect() }
+
     func disconnect() {
         transport?.close()
         transport = nil

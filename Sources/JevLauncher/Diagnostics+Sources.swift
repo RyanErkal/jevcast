@@ -34,6 +34,7 @@ extension Diagnostics {
     /// never subjects, names, or addresses.
     static func mail() {
         let status = MailStore.status()
+        print("Mail source: " + MailBackend.current.title + (NativeMailCenter.isActive ? " (\(NativeMailCenter.loadAccounts().count) accounts)" : ""))
         if case .ready(let root) = status { print("Mail status: ready (\((root as NSString).lastPathComponent))") } else { print("Mail status: \(status)") }
         guard case .ready(let root) = status else { exit(status == .noMail ? 1 : 2) }
         do {
@@ -73,7 +74,9 @@ extension Diagnostics {
                 print("  inbox of account \(number + 1): \(try MailStore.count(root: root, mailboxes: ids)) messages, \(unread) unread")
             }
             let allMail = boxes.filter(\.inAllMail).map(\.rowID)
-            print("Apple Mail running: " + (AppleScript.isRunning(MailActions.bundleID) ? "yes" : "no (new mail is not arriving)"))
+            if !NativeMailCenter.isActive {
+                print("Apple Mail running: " + (AppleScript.isRunning(MailActions.bundleID) ? "yes" : "no (new mail is not arriving)"))
+            }
             func timed<T>(_ body: () throws -> T) rethrows -> (T, Int) {
                 let start = CFAbsoluteTimeGetCurrent()
                 let value = try body()

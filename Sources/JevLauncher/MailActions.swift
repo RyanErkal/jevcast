@@ -121,3 +121,9 @@ enum MailActions {
         return found
     }
 }
+
+/// A send that failed during or after Mail's `send`, or timed out there: Mail may have sent the
+/// message. The composer keeps the draft but says to check Sent, so the user does not send twice.
+struct MailMaybeSentError: LocalizedError {
+    var errorDescription: String? { "Mail may have sent this message. Check Sent before you send it again." }
+}

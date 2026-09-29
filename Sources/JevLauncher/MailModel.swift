@@ -238,10 +238,12 @@ final class MailModel: ObservableObject {
             // mail still there after about a minute, Mail keeps running so it can deliver it.
             let delivered = await MailOutbox.waitUntilEmpty()
             guard !Task.isCancelled else { return }
-            self?.quit = nil
-            guard delivered, let mail = NSRunningApplication.runningApplications(withBundleIdentifier: MailActions.bundleID).first,
-                  !MailActions.openedByUser else { return }
-            mail.terminate()
+            if delivered, let mail = NSRunningApplication.runningApplications(withBundleIdentifier: MailActions.bundleID).first,
+               !MailActions.openedByUser {
+                // `quit` stays set until Mail has ended, so opening the inbox meanwhile starts Mail again hidden, as Jevcast's own.
+                await MailActions.quit(mail)
+            }
+            if !Task.isCancelled { self?.quit = nil }
         }
     }
 

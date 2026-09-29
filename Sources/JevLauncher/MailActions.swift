@@ -17,36 +17,10 @@ enum MailActions {
         return engine
     }
 
-    /// The launch in progress. Callers that arrive meanwhile wait for it instead of opening Mail
-    /// again: a second open reaches a Mail that is still starting, and Mail answers it by showing
-    /// its window.
-    @MainActor private static var launch: Task<Void, Error>?
-
-    /// Starts Mail hidden, without taking focus, and waits until it answers.
+    /// Starts Mail hidden, without taking focus, and waits until it answers. See `MailLaunch`.
     static func ensureRunning() async throws {
         if NativeMailCenter.isActive { return }
-        try await launchOnce()
-    }
-
-    @MainActor private static func launchOnce() async throws {
-        if let launch { return try await launch.value }
-        if AppleScript.isRunning(bundleID) { return }
-        let task = Task { @MainActor in
-            guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
-                throw LauncherError("Apple Mail is not installed.")
-            }
-            let config = NSWorkspace.OpenConfiguration()
-            config.activates = false; config.hides = true; config.addsToRecentItems = false
-            let app = try await NSWorkspace.shared.openApplication(at: url, configuration: config)
-            for _ in 0..<40 where !AppleScript.isRunning(bundleID) { try await Task.sleep(nanoseconds: 100_000_000) }
-            // Mail answers scripts a moment after it launches.
-            try await Task.sleep(nanoseconds: 800_000_000)
-            // Mail can restore its last window while it starts. The Mail that Jevcast started stays out of sight.
-            _ = app.hide()
-        }
-        launch = task
-        defer { launch = nil }
-        try await task.value
+        try await launcher.ensureRunning()
     }
 
     static func run(_ script: String, _ arguments: [String]) async throws {

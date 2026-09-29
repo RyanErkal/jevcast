@@ -6,8 +6,11 @@ public struct MailMailbox: Equatable, Sendable, Identifiable, Hashable {
     public let url: String
     public let unread: Int
     public let total: Int
-    public init(rowID: Int64, url: String, unread: Int, total: Int) {
-        self.rowID = rowID; self.url = url; self.unread = unread; self.total = total
+    /// The role the server gave the mailbox (IMAP special use), which wins over its name.
+    /// Only Jevcast's own mail store records it.
+    public let serverRole: Role?
+    public init(rowID: Int64, url: String, unread: Int, total: Int, serverRole: Role? = nil) {
+        self.rowID = rowID; self.url = url; self.unread = unread; self.total = total; self.serverRole = serverRole
     }
     public var id: Int64 { rowID }
 
@@ -23,8 +26,9 @@ public struct MailMailbox: Equatable, Sendable, Identifiable, Hashable {
     }
     public var name: String { path.split(separator: "/").last.map(String.init) ?? path }
 
-    public enum Role: Sendable { case inbox, sent, drafts, archive, trash, junk, other }
+    public enum Role: String, Sendable { case inbox, sent, drafts, archive, trash, junk, other }
     public var role: Role {
+        if let serverRole { return serverRole }
         let lower = name.lowercased(), full = path.lowercased()
         // Only a top-level Inbox is the inbox, in any case: "INBOX" (IMAP, iCloud, Gmail),
         // "Inbox" (Exchange, Outlook, Yahoo, On My Mac). "Old/Inbox" is an ordinary folder.

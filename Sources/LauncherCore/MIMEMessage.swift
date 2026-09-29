@@ -107,14 +107,16 @@ public struct MIMEMessage: Equatable, Sendable {
         else if message.plainText == nil { message.plainText = text }
     }
 
-    /// Splits at the first blank line.
+    /// Splits at the first blank line. The line break before it stays out of the headers, so the
+    /// last header of a CRLF message does not end in "\r".
     static func splitHeaders(_ data: Data) -> (Data, Data) {
         let bytes = [UInt8](data)
         var index = 0
         while index < bytes.count {
             if bytes[index] == 0x0A {
-                if index + 1 < bytes.count, bytes[index + 1] == 0x0A { return (Data(bytes[0..<index]), Data(bytes[(index + 2)...])) }
-                if index + 2 < bytes.count, bytes[index + 1] == 0x0D, bytes[index + 2] == 0x0A { return (Data(bytes[0..<index]), Data(bytes[(index + 3)...])) }
+                let end = index > 0 && bytes[index - 1] == 0x0D ? index - 1 : index
+                if index + 1 < bytes.count, bytes[index + 1] == 0x0A { return (Data(bytes[0..<end]), Data(bytes[(index + 2)...])) }
+                if index + 2 < bytes.count, bytes[index + 1] == 0x0D, bytes[index + 2] == 0x0A { return (Data(bytes[0..<end]), Data(bytes[(index + 3)...])) }
             }
             index += 1
         }
@@ -123,7 +125,7 @@ public struct MIMEMessage: Equatable, Sendable {
 
     /// Unfolds continuation lines and decodes encoded words.
     static func parseHeaders(_ data: Data) -> [(name: String, value: String)] {
-        let text = String(decoding: data, as: UTF8.self).replacingOccurrences(of: "\r\n", with: "\n")
+        let text = String(decoding: data, as: UTF8.self).replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
         var result: [(String, String)] = []
         for line in text.components(separatedBy: "\n") {
             if let first = line.first, first == " " || first == "\t", !result.isEmpty {

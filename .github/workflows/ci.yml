@@ -45,7 +45,11 @@ jobs:
           path: Vendor
           key: ${{ steps.ghosttykit.outputs.cache-primary-key }}
       - name: Test
+        # A hung test fails the job here, not at the job's limit.
+        timeout-minutes: 20
         env:
           # A live mail model times out with the runner's Xcode 26; those tests run locally.
           JEVCAST_SKIP_LIVE_MAIL_MODEL: "1"
+          # Writes each test line at once, so a cancelled run's log shows the test that hung.
+          NSUnbufferedIO: "YES"
         run: swift test

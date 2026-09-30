@@ -36,8 +36,8 @@ final class QuillTasksPageSource: ThingSource {
     }
 }
 
-/// Makes each view. Snapshot runs get empty Mail, Calendar, and Clean Up views, so a capture
-/// never shows real mail, events, or processes.
+/// Makes each view. Snapshot runs get empty Mail, Calendar, Clean Up, and Tailnet views, so a capture
+/// never shows real mail, events, processes, or devices. Demo snapshots show invented devices.
 @MainActor
 enum LauncherPages {
     struct Links {
@@ -80,6 +80,12 @@ enum LauncherPages {
             // Snapshots never start a shell.
             return TerminalPage(terminal: snapshot ? nil : links.terminal?(),
                                 placeholder: snapshot ? "Your login shell runs here." : "The terminal could not start.")
+        case .tailnet:
+            // The search's source, so pages, icons, and pings carry over between views.
+            let source = snapshot ? (DemoData.isEnabled ? TailnetSource(preferences: model.preferences, reader: DemoTailnet(), checks: { true }) : nil)
+                : model.source(.tailnet) as? TailnetSource
+            return SourcePage(.tailnet, source: source, model: model, hasDetail: false, emptyText: "No tailnet devices.",
+                              refreshEvery: snapshot ? nil : 5, rowIcon: { [weak source] row in source?.icon(for: row.id) })
         }
     }
 }

@@ -21,6 +21,7 @@ final class HelpSource: ThingSource {
         ("Ask Quill", "ask <question>", "ask ", "sparkles"),
         ("Clean up background work", "cleanup · cool down", "cleanup", "leaf"),
         ("Ports and servers", "ports · port 3000", "ports", "server.rack"),
+        ("Tailnet devices and their pages", "tailnet · /tailnet", "tailnet", "network"),
         ("Clipboard history", "clip · clip images · clip links · Hyper-V", "clip", "doc.on.clipboard"),
         ("Timers", "5m tea · timers", "timers", "timer"),
         ("Files", "find <name> · recent files · kind:pdf in:downloads", "recent files", "doc.text.magnifyingglass")

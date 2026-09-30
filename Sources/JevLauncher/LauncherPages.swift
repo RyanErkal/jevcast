@@ -4,7 +4,7 @@ import SwiftUI
 
 /// A view that fills the launcher panel in place of the results, such as Mail.
 enum ViewID: String, CaseIterable {
-    case mail, calendar, tasks, clipboard, cleanup, terminal
+    case mail, calendar, tasks, clipboard, cleanup, terminal, tailnet
     var title: String {
         switch self {
         case .mail: return "Mail"
@@ -13,6 +13,7 @@ enum ViewID: String, CaseIterable {
         case .clipboard: return "Clipboard"
         case .cleanup: return "Clean Up"
         case .terminal: return "Terminal"
+        case .tailnet: return "Tailnet"
         }
     }
     var symbol: String {
@@ -23,6 +24,7 @@ enum ViewID: String, CaseIterable {
         case .clipboard: return "doc.on.clipboard"
         case .cleanup: return "leaf"
         case .terminal: return "terminal"
+        case .tailnet: return "network"
         }
     }
 }

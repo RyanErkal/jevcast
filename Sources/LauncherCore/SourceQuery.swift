@@ -5,7 +5,7 @@ import Foundation
 /// these rows to a normal search, so "calendar" still lists the Calendar app.
 public struct SourceQuery: Equatable, Sendable {
     public enum Kind: String, CaseIterable, Sendable {
-        case scheduled, automations, calendar, reminders, contacts, tabs, history, mail, taskRuns, help, cleanup, dictation
+        case scheduled, automations, calendar, reminders, contacts, tabs, history, mail, taskRuns, help, cleanup, dictation, tailnet
     }
     public let kind: Kind
     /// Words after the keyword, such as "slack" in "tabs slack". Empty lists everything.
@@ -20,6 +20,7 @@ public struct SourceQuery: Equatable, Sendable {
     private static let keywords: [(phrase: String, kind: Kind, takesFilter: Bool)] = [
         ("clean up", .cleanup, false), ("cleanup", .cleanup, false), ("cool down", .cleanup, false), ("cooldown", .cleanup, false),
         ("free memory", .cleanup, false), ("free up memory", .cleanup, false), ("stop background stuff", .cleanup, false),
+        ("tailnet devices", .tailnet, true), ("tailscale devices", .tailnet, true), ("tailnet", .tailnet, true),
         ("dictation history", .dictation, true), ("dictations", .dictation, true), ("dictation", .dictation, true), ("transcripts", .dictation, true),
         ("task results", .taskRuns, true), ("quill results", .taskRuns, true), ("task log", .taskRuns, true), ("task runs", .taskRuns, true),
         ("what can you do", .help, false), ("what can jevcast do", .help, false), ("help", .help, true), ("jevcast", .help, true),

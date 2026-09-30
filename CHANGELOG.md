@@ -2,6 +2,12 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+
+- **Tailnet view.** Type `tailnet` or `/tailnet` to see your Tailscale devices, without phones and tablets. Each one shows its route (direct or relayed) and ping time, the data sent between it and this Mac, when its key expires, and its CPU, memory, free disk space, and uptime. Below it are the pages it shares, with their names and site icons, such as "T3 Code (Alpha)" for a Tailscale Serve share. Return opens a page, and typing part of a page's name in the launcher opens it from anywhere. A computer's row opens Remote Desktop (Windows App) or Screen Sharing, sends files with Taildrop, and copies an SSH command, its name, or its address. This Mac is read locally. Devices are asked only when you turn on **Check tailnet devices** in Settings › General, and only at their Tailscale addresses. `scripts/tailnet-agent.ps1` gives a Windows PC's load and every port it shares; it is read only and reached through `tailscale serve`.
+
 ## [1.14.0] - 2026-09-29
 
 ### Added

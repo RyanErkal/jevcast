@@ -41,6 +41,12 @@ final class Preferences: ObservableObject {
     @Published var hiddenApps: [String] { didSet { defaults.set(hiddenApps, forKey: "hiddenApps") } }
     /// Cleanup items you chose never to be offered again, by key, such as "server:node:3000".
     @Published var cleanupIgnored: [String] { didSet { defaults.set(cleanupIgnored, forKey: "cleanupIgnored") } }
+    /// Requests to the user's other Tailscale devices, at their Tailscale addresses only. Off by default.
+    @Published var tailnetChecks: Bool { didSet { defaults.set(tailnetChecks, forKey: "tailnetChecks") } }
+    /// Tailnet pages the user hid, such as "studio-pc:5357".
+    @Published var tailnetHiddenPages: [String] { didSet { defaults.set(tailnetHiddenPages, forKey: "tailnetHiddenPages") } }
+    /// The pages the Tailnet view last listed, so a search can open them without asking the tailnet.
+    @Published var tailnetPages: [TailnetKnownPage] { didSet { save(tailnetPages, "tailnetPages") } }
     @Published var aliases: [String: String] { didSet { defaults.set(aliases, forKey: "aliases") } }
     @Published var quicklinks: [Quicklink] { didSet { defaults.set(try? JSONEncoder().encode(quicklinks), forKey: "quicklinks") } }
     /// Commands the user writes. Only their names go to Jev.
@@ -136,6 +142,9 @@ final class Preferences: ObservableObject {
         favourites = d.stringArray(forKey: "favourites") ?? []
         hiddenApps = d.stringArray(forKey: "hiddenApps") ?? []
         cleanupIgnored = d.stringArray(forKey: "cleanupIgnored") ?? []
+        tailnetChecks = d.bool(forKey: "tailnetChecks")
+        tailnetHiddenPages = d.stringArray(forKey: "tailnetHiddenPages") ?? []
+        tailnetPages = Self.load(d, "tailnetPages") ?? []
         aliases = d.dictionary(forKey: "aliases") as? [String: String] ?? [:]
         quicklinks = d.data(forKey: "quicklinks").flatMap { try? JSONDecoder().decode([Quicklink].self, from: $0) } ?? Quicklink.defaults
         customCommands = Self.load(d, "customCommands") ?? []

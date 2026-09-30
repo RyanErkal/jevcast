@@ -61,6 +61,7 @@ struct GeneralSettings: View {
             }
             Section {
                 Toggle("Check for updates once a day", isOn: $preferences.checksForUpdates)
+                Toggle("Check tailnet devices", isOn: $preferences.tailnetChecks)
                 LabeledContent("Jev matching") { Text(keys.hasKey && preferences.jevEnabled ? "On" : "Off").foregroundStyle(.secondary) }
                 LabeledContent("Quill writing") { Text(preferences.quillEnabled ? "On" : "Off").foregroundStyle(.secondary) }
                 HStack {
@@ -74,7 +75,18 @@ struct GeneralSettings: View {
                 }
             } header: { Text("Network") } footer: {
                 InfoCaption("These, and web images in mail, are the only network use. Change Jev and Quill in Settings › AI.",
-                            detail: "HTML mail loads web images, fonts, and styles unless you turn that off in Settings › Mail. The update check asks GitHub for the newest version and sends nothing else. Jev gets request text and candidate names. Quill gets only what Settings › AI › Quill allows. File paths, clipboard history, and audio are never sent.")
+                            detail: "HTML mail loads web images, fonts, and styles unless you turn that off in Settings › Mail. The update check asks GitHub for the newest version and sends nothing else. Tailnet checks ask your other Tailscale devices, only at their Tailscale addresses, for their load and the pages they share. Jev gets request text and candidate names. Quill gets only what Settings › AI › Quill allows. File paths, clipboard history, and audio are never sent.")
+            }
+            if !preferences.tailnetHiddenPages.isEmpty {
+                Section("Hidden Tailnet Pages") {
+                    ForEach(preferences.tailnetHiddenPages, id: \.self) { key in
+                        HStack {
+                            Text(key)
+                            Spacer()
+                            Button("Show Again") { preferences.tailnetHiddenPages.removeAll { $0 == key } }.controlSize(.small)
+                        }
+                    }
+                }
             }
             if !preferences.cleanupIgnored.isEmpty {
                 Section("Ignored by Clean Up") {

@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import LauncherCore
 
-/// A panel view over a source's rows: Calendar, Tasks, Clipboard, and Clean Up. Rows and verbs
+/// A panel view over a source's rows: Calendar, Tasks, Clipboard, Clean Up, and Tailnet. Rows and verbs
 /// come from the same sources the search uses. Return opens a row's detail, or runs its first verb
 /// when the view has no detail; ⇧Return runs its second verb.
 @MainActor
@@ -16,8 +16,12 @@ final class SourcePage: ObservableObject, LauncherPage {
     private let hasDetail: Bool
     /// Extra content for a row's detail, such as a task result's text.
     private let detailBody: (LauncherResult) -> AnyView?
+    /// A row's own picture in place of its symbol, such as a page's site icon.
+    let rowIcon: (LauncherResult) -> NSImage?
     private let popOutAction: (() -> Void)?
     private let emptyText: String
+    /// Seconds between reloads while the view shows, such as the Tailnet view's load figures.
+    private let refreshEvery: TimeInterval?
     private weak var model: LauncherModel?
 
     @Published private(set) var rows: [LauncherResult] = []
@@ -29,12 +33,17 @@ final class SourcePage: ObservableObject, LauncherPage {
     private var all: [LauncherResult] = []
     private var text = ""
     private var work: Task<Void, Never>?
+    private var refresher: Task<Void, Never>?
+    /// True while a load runs, so a timed reload never cancels a slow one.
+    private var inFlight = false
     private var confirmID: String?
 
     init(_ id: ViewID, source: ThingSource?, model: LauncherModel, scope: String = "", filtersInSource: Bool = false, hasDetail: Bool,
-         emptyText: String, popOut: (() -> Void)? = nil, detailBody: @escaping (LauncherResult) -> AnyView? = { _ in nil }) {
+         emptyText: String, refreshEvery: TimeInterval? = nil, popOut: (() -> Void)? = nil,
+         rowIcon: @escaping (LauncherResult) -> NSImage? = { _ in nil }, detailBody: @escaping (LauncherResult) -> AnyView? = { _ in nil }) {
         self.id = id; self.source = source; self.model = model; self.scope = scope; self.filtersInSource = filtersInSource
-        self.hasDetail = hasDetail; self.emptyText = emptyText; self.popOutAction = popOut; self.detailBody = detailBody
+        self.hasDetail = hasDetail; self.emptyText = emptyText; self.refreshEvery = refreshEvery; self.popOutAction = popOut
+        self.rowIcon = rowIcon; self.detailBody = detailBody
     }
 
     var selected: LauncherResult? { rows.first { $0.id == selectedID } }
@@ -44,13 +53,36 @@ final class SourcePage: ObservableObject, LauncherPage {
     }
     var canPopOut: Bool { popOutAction != nil }
     func popOut() { popOutAction?() }
-    func opened() { reload() }
-    func closed(handingOff: Bool) { work?.cancel() }
+    func opened() {
+        (source as? UpdatingSource)?.onUpdate = { [weak self] in
+            // A load in progress shows the news when it ends.
+            guard let self, !self.inFlight else { return }
+            self.reload()
+        }
+        reload(); startRefreshing()
+    }
+    func closed(handingOff: Bool) {
+        work?.cancel(); refresher?.cancel()
+        (source as? UpdatingSource)?.onUpdate = nil
+    }
+
+    private func startRefreshing() {
+        guard let refreshEvery, source != nil else { return }
+        refresher?.cancel()
+        refresher = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(refreshEvery * 1_000_000_000))
+                guard !Task.isCancelled, let self else { return }
+                if !self.inFlight { self.reload() }
+            }
+        }
+    }
 
     func reload() {
         guard let source else { all = []; applyFilter(); return }
         work?.cancel()
         loading = rows.isEmpty
+        inFlight = true
         let filter = filtersInSource ? text : scope
         work = Task { @MainActor [weak self] in
             do {
@@ -62,6 +94,7 @@ final class SourcePage: ObservableObject, LauncherPage {
                 self.all = []; self.problem = error as? SourceProblem ?? SourceProblem(text: error.localizedDescription)
             }
             self?.loading = false
+            self?.inFlight = false
             self?.applyFilter()
         }
     }
@@ -191,8 +224,15 @@ private struct SourcePageView: View {
     private func rowView(_ row: LauncherResult) -> some View {
         let selected = row.id == page.selectedID
         return HStack(spacing: LauncherMetrics.iconSpacing) {
-            Image(systemName: row.symbol).font(.system(size: LauncherMetrics.symbolPointSize))
-                .foregroundStyle(.secondary).frame(width: LauncherMetrics.iconSize)
+            Group {
+                if let icon = page.rowIcon(row) {
+                    Image(nsImage: icon).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
+                        .frame(width: LauncherMetrics.symbolPointSize + 4, height: LauncherMetrics.symbolPointSize + 4)
+                } else {
+                    Image(systemName: row.symbol).font(.system(size: LauncherMetrics.symbolPointSize)).foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: LauncherMetrics.iconSize)
             VStack(alignment: .leading, spacing: 1) {
                 Text(row.title).font(.system(size: LauncherMetrics.titleSize)).lineLimit(1)
                 if !row.detail.isEmpty {
@@ -210,6 +250,7 @@ private struct SourcePageView: View {
         .padding(.horizontal, LauncherMetrics.cellInset)
         .frame(height: LauncherMetrics.tallCellHeight)
         .background(RoundedRectangle(cornerRadius: LauncherMetrics.highlightRadius).fill(selected ? Color.primary.opacity(0.09) : .clear))
+        .help(row.help ?? "")
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { page.selectedID = row.id; _ = page.handle(.open(shift: false)) }
         .onTapGesture { page.selectedID = row.id }

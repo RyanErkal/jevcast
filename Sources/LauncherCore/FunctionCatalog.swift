@@ -50,7 +50,8 @@ public enum FunctionCatalog {
         FunctionEntry(id: "view:tasks", title: "Quill Tasks", keywords: ["scheduled quill", "task results", "quill"], summary: "Scheduled Quill tasks and what they wrote", symbol: "sparkles", group: .views),
         FunctionEntry(id: "view:clipboard", title: "Clipboard", keywords: ["clip", "clipboard history", "paste"], summary: "Text you copied earlier", symbol: "doc.on.clipboard", group: .views),
         FunctionEntry(id: "view:cleanup", title: "Clean Up", keywords: ["cleanup", "free memory", "cool down"], summary: "Quit or stop background work you choose", symbol: "leaf", group: .views),
-        FunctionEntry(id: "view:terminal", title: "Terminal", keywords: ["shell", "command line", "console"], summary: "Your shell, for quick commands", symbol: "terminal", group: .views)
+        FunctionEntry(id: "view:terminal", title: "Terminal", keywords: ["shell", "command line", "console"], summary: "Your shell, for quick commands", symbol: "terminal", group: .views),
+        FunctionEntry(id: "view:tailnet", title: "Tailnet", keywords: ["tailscale", "devices", "shared pages", "servers"], summary: "Your Tailscale devices, their load, and the pages they share", symbol: "network", group: .views)
     ]
 
     /// Source lists that have no view of their own.

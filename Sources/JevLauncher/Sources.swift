@@ -17,6 +17,13 @@ extension ThingSource {
     func invalidate() {}
 }
 
+/// A source that learns more after a load returns, such as the Tailnet view's pages. The view it
+/// shows in sets `onUpdate` to load it again.
+@MainActor
+protocol UpdatingSource: ThingSource {
+    var onUpdate: (() -> Void)? { get set }
+}
+
 /// Why a source shows nothing, with the button that fixes it.
 struct SourceProblem: LocalizedError {
     let text: String
@@ -43,6 +50,7 @@ extension LauncherModel {
         case .history: made = HistorySource()
         case .mail: made = MailSource(model: self)
         case .dictation: made = DictationEngines.isSupported ? DictationSource() : nil
+        case .tailnet: made = TailnetSource(preferences: preferences)
         }
         sources[kind] = made
         return made
@@ -86,7 +94,7 @@ extension LauncherModel {
         }
     }
 
-    /// "calendar", "task results", and "clean up" also offer their view in the panel.
+    /// "calendar", "task results", "clean up", and "tailnet" also offer their view in the panel.
     private func viewRow(for query: SourceQuery) -> [LauncherResult] {
         guard query.filter.isEmpty else { return [] }
         let view: ViewID
@@ -94,6 +102,7 @@ extension LauncherModel {
         case .calendar: view = .calendar
         case .taskRuns: view = .tasks
         case .cleanup: view = .cleanup
+        case .tailnet: view = .tailnet
         default: return []
         }
         return viewRow(view, detail: "Show it in a larger view", score: 9000).map { [$0] } ?? []

@@ -36,7 +36,7 @@ extension LauncherModel {
     // MARK: Extra rows in a normal search
 
     func extraRows(_ q: String) -> [LauncherResult] {
-        var rows: [LauncherResult] = []
+        var rows = tailnetPageRows(q)
         for workflow in preferences.workflows {
             guard let score = SearchRanking.score(query: q, title: workflow.name) else { continue }
             rows.append(workflowRow(workflow, score: score * 100))

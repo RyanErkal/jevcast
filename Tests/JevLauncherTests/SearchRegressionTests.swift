@@ -263,6 +263,30 @@ final class SearchRegressionTests: XCTestCase {
         launcher.finish(.success(()))
         XCTAssertNil(model.applicationLaunchToken)
     }
+
+    func testOldLaunchCannotOverwriteANewerLearnedChoice() async throws {
+        let model = try await makeModel(); defer { model.end() }
+        let launcher = HeldApplicationLauncher()
+        model.applicationLauncher = launcher
+        let oldApp = try XCTUnwrap(model.catalogue.entries.first { $0.name == "T3 Code (Nightly)" })
+        let newApp = try XCTUnwrap(model.catalogue.entries.first { $0.name == "Safari" })
+        func row(_ app: AppEntry) -> LauncherResult {
+            LauncherResult(id: app.id, title: app.name, detail: "", symbol: "app", action: .app(app), score: 10)
+        }
+        model.updateQuery("launch reader", typed: true)
+        model.launchApplication(oldApp, result: row(oldApp))
+        let oldCompletion = try XCTUnwrap(launcher.completion)
+        model.end(); model.begin()
+        model.updateQuery("launch reader", typed: true)
+        model.launchApplication(newApp, result: row(newApp))
+        launcher.finish(.success(()))
+        XCTAssertEqual(model.preferences.learned.lookup("launch reader"), newApp.id)
+        XCTAssertEqual(model.preferences.frecency.learned(for: "launch reader")?.id, newApp.id)
+        oldCompletion(.success(()))
+        XCTAssertEqual(model.preferences.learned.lookup("launch reader"), newApp.id)
+        XCTAssertEqual(model.preferences.frecency.learned(for: "launch reader")?.id, newApp.id)
+        XCTAssertTrue(model.preferences.recentIDs.contains(oldApp.id), "The old successful launch still records use")
+    }
 }
 
 @MainActor private final class HeldApplicationLauncher: ApplicationLaunching {

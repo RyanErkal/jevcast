@@ -14,8 +14,11 @@ extension LauncherModel {
             case .failure(let error):
                 if ownsLaunch, self.visibleSession == session, self.revision == searchRevision { self.showFailure(error.localizedDescription) }
             case .success:
-                if learnsIntent { self.preferences.learn(input, id: result.id) }
-                if result.learnsFromUse && Self.prefix(for: input) == nil { self.preferences.record(result.id, query: input) }
+                if ownsLaunch && learnsIntent { self.preferences.learn(input, id: result.id) }
+                if result.learnsFromUse && Self.prefix(for: input) == nil {
+                    // A superseded launch counts as use, but cannot change a newer query choice.
+                    self.preferences.record(result.id, query: ownsLaunch ? input : "")
+                }
                 if ownsLaunch, self.visibleSession == session, self.revision == searchRevision { self.onClose?(false) }
             }
         }

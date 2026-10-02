@@ -2,6 +2,31 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.16.0] - 2026-10-02
+
+### Added
+
+- **Google and Microsoft sign-in for mail accounts.** Gmail can use Google Sign-In and Outlook Microsoft sign-in, with your own free OAuth client. Jevcast ships with none. The steps are in `docs/NATIVE_MAIL.md`. Sign-in uses PKCE, a loopback callback, and the Keychain.
+- **An Apple Mail style composer.** Replies, forwards, and new messages open in the reading pane of the mail window and the launcher, not in a separate window. To, Cc, Bcc, Subject, and From are all editable, with a signature button and a formatting bar: font, size, colour, bold, italic, underline, strikethrough, alignment, lists, and indent.
+- **The original under your reply, as sent.** "On 2 Oct 2026, at 03:01, Name wrote:" and the original's own formatting in a quote with a blue bar, read only. **Remove Quote** sends only your text. Forwards include the original's From, Subject, Date, To, and Cc, and its attachments one by one.
+- **Every mailbox of every account.** The mailbox menu groups each account, with Inbox, Drafts, Sent, Junk, Trash, and Archive first, and counts from the server.
+- **Empty Trash and Empty Junk.** Empty counts what is on the server, asks you, and removes only those messages. Delete in Trash removes a message for good. Mark as Junk and Not Junk are in the ⋯ menu.
+
+### Changed
+
+- **Mail syncs only what you look at.** Each inbox keeps its newest 500 messages and a folder its newest 200 once you open it. Older mail loads when you scroll to it, and a body when you open the message. A first sync is seconds, not hours, and the store stays small.
+- Hyper–M opens Mail at the newest message.
+- Reply All fills To and Cc with names, without your own addresses. You can change them before you send.
+- New Yahoo accounts no longer save a second copy in Sent: Yahoo files one itself.
+
+### Fixed
+
+- **Large Yahoo mailboxes now sync.** Yahoo refuses a search that would return more than 1,000 messages, so a big inbox stayed empty. Searches and fetches now stay inside each server's limit.
+- **Closing a reply no longer crashes Jevcast.** Send and Discard could crash the app while the editor was on screen.
+- A reply or forward sent during its undo time still goes when you archive or delete the original meanwhile.
+- Text in your default colour is sent without a colour, so it no longer turns white or black for the reader.
+- The Message-ID of a sent message uses your address's domain.
+
 ## [1.15.0] - 2026-09-30
 
 ### Added

@@ -699,7 +699,7 @@
               <span class="net-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" /></svg></span>
               <h3>Mail accounts</h3>
               <code>your mail servers</code>
-              <p>Only for accounts you add in Settings › Mail. Talks to that account's own IMAP and SMTP servers over TLS, and nothing else.</p>
+              <p>Only for accounts you add in Settings › Mail. Talks to that account's own IMAP and SMTP servers over TLS, and nothing else. Google or Microsoft sign-in uses your own OAuth client and their sign-in pages.</p>
               <a
                 class="net-link"
                 href="https://github.com/RyanErkal/jevcast/tree/main/Sources/LauncherCore/NativeMail"
@@ -792,6 +792,17 @@ scripts/build.sh</code></pre>
             </p>
           </div>
           <ol class="releases">
+            <li class="release">
+              <div class="release-head">
+                <span class="release-tag">1.16.0</span>
+                <time datetime="2026-10-02">2 October 2026</time>
+              </div>
+              <ul>
+                <li><strong>A full mail app.</strong> Replies open in the reading pane, as in Apple Mail: To, Cc, Bcc, a formatting bar, and the original below your text, exactly as it is sent.</li>
+                <li><strong>Gmail and Outlook sign-in.</strong> Use Google or Microsoft sign-in with your own free OAuth client. Every folder of every account is in one menu, and Empty clears Trash and Junk.</li>
+                <li><strong>Fast with big mailboxes.</strong> Mail keeps only what you look at, so an inbox with tens of thousands of messages shows in seconds.</li>
+              </ul>
+            </li>
             <li class="release">
               <div class="release-head">
                 <span class="release-tag">1.15.0</span>

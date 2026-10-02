@@ -79,6 +79,7 @@ final class SourcePage: ObservableObject, LauncherPage {
     }
 
     func reload() {
+        confirmID = nil
         guard let source else { all = []; applyFilter(); return }
         work?.cancel()
         loading = rows.isEmpty
@@ -100,6 +101,7 @@ final class SourcePage: ObservableObject, LauncherPage {
     }
 
     func filter(_ text: String) {
+        confirmID = nil
         self.text = text
         detailID = nil
         if filtersInSource { reload() } else { applyFilter() }
@@ -132,7 +134,13 @@ final class SourcePage: ObservableObject, LauncherPage {
                 run(verbs[1])
             }
             else if hasDetail { detailID = row.id }
-            else if let verb = verbs.first { run(verb) }
+            else if let verb = verbs.first {
+                if verb.confirm, confirmID != row.id {
+                    confirmID = row.id; note = "Press Return again to " + verb.title.lowercased() + "."; return true
+                }
+                confirmID = nil
+                run(verb)
+            }
         case .delete, .left, .right: return false
         }
         return true

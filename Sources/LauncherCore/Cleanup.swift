@@ -10,13 +10,16 @@ public struct CleanupProcess: Equatable, Sendable {
     /// Seconds since it started.
     public let elapsed: TimeInterval
     public let path: String
-    public init(pid: Int32, ppid: Int32, uid: UInt32, cpu: Double, memoryMB: Double, elapsed: TimeInterval, path: String) {
+    public let identity: CleanupIdentity?
+    public init(pid: Int32, ppid: Int32, uid: UInt32, cpu: Double, memoryMB: Double, elapsed: TimeInterval, path: String,
+                identity: CleanupIdentity? = nil) {
         self.pid = pid; self.ppid = ppid; self.uid = uid; self.cpu = cpu; self.memoryMB = memoryMB; self.elapsed = elapsed; self.path = path
+        self.identity = identity
     }
     public var name: String { (path as NSString).lastPathComponent }
 
     /// Arguments for `ps`: the command comes last because its path may contain spaces.
-    public static let psArguments = ["-Ao", "pid=,ppid=,uid=,%cpu=,rss=,etime=,comm="]
+    public static let psArguments = ["-ww", "-Ao", "pid=,ppid=,uid=,%cpu=,rss=,etime=,comm="]
 
     public static func parse(_ output: String) -> [CleanupProcess] {
         output.split(whereSeparator: \.isNewline).compactMap { line in
@@ -45,7 +48,7 @@ public struct CleanupProcess: Equatable, Sendable {
 /// Something the cleanup list offers to stop, and whether it is checked at first.
 public struct CleanupFinding: Equatable, Sendable {
     public enum Group: String, Sendable, CaseIterable {
-        case simulator, server, orphan, docker, heavy
+        case simulator, server, orphan, docker, heavy, computerUse
         public var title: String {
             switch self {
             case .simulator: return "Simulator"
@@ -53,6 +56,7 @@ public struct CleanupFinding: Equatable, Sendable {
             case .orphan: return "Leftover process"
             case .docker: return "Docker"
             case .heavy: return "Heavy process"
+            case .computerUse: return "Computer Use"
             }
         }
     }
@@ -64,8 +68,11 @@ public struct CleanupFinding: Equatable, Sendable {
     public let pids: [Int32]
     public let memoryMB: Double
     public let checked: Bool
-    public init(group: Group, key: String, title: String, detail: String, pids: [Int32], memoryMB: Double, checked: Bool) {
+    public let canStop: Bool
+    public init(group: Group, key: String, title: String, detail: String, pids: [Int32], memoryMB: Double, checked: Bool,
+                canStop: Bool = true) {
         self.group = group; self.key = key; self.title = title; self.detail = detail; self.pids = pids; self.memoryMB = memoryMB; self.checked = checked
+        self.canStop = canStop
     }
 }
 
@@ -107,14 +114,20 @@ public enum CleanupRules {
         /// PIDs of protected apps, such as T3 Code and Chrome. Their whole tree is kept.
         public var protectedRoots: Set<Int32>
         public var ignoredKeys: Set<String>
+        public var homeDirectory: String
         public init(processes: [CleanupProcess], uid: UInt32, listening: [Int32: [Int]], launchdPIDs: Set<Int32>,
-                    protectedRoots: Set<Int32>, ignoredKeys: Set<String>) {
+                    protectedRoots: Set<Int32>, ignoredKeys: Set<String>, homeDirectory: String = NSHomeDirectory()) {
             self.processes = processes; self.uid = uid; self.listening = listening; self.launchdPIDs = launchdPIDs
             self.protectedRoots = protectedRoots; self.ignoredKeys = ignoredKeys
+            self.homeDirectory = homeDirectory
         }
     }
 
     public static func find(_ input: Input) -> [CleanupFinding] {
+        let computerUse = ComputerUseCleanup.find(input)
+        let protectedRoots = input.protectedRoots.union(input.processes.filter {
+            ComputerUseCleanup.kind($0, home: input.homeDirectory) != nil || ComputerUseCleanup.isAgentHost($0)
+        }.map(\.pid))
         let parents = Dictionary(input.processes.map { ($0.pid, $0.ppid) }, uniquingKeysWith: { first, _ in first })
         var children: [Int32: [CleanupProcess]] = [:]
         for process in input.processes { children[process.ppid, default: []].append(process) }
@@ -127,10 +140,13 @@ public enum CleanupRules {
         }
         let mine = input.processes.filter { $0.uid == input.uid && $0.pid > 1 && !isSystem($0) }
         let kept: (CleanupProcess) -> Bool = { process in
-            input.launchdPIDs.contains(process.pid) || descends(process.pid, from: input.protectedRoots, parents: parents)
+            input.launchdPIDs.contains(process.pid) || descends(process.pid, from: protectedRoots, parents: parents)
         }
-        var findings: [CleanupFinding] = []
-        var taken = Set<Int32>()
+        func safeFamily(_ family: [CleanupProcess]) -> Bool {
+            family.allSatisfy { $0.uid == input.uid && $0.pid > 1 && !isSystem($0) && !kept($0) }
+        }
+        var findings: [CleanupFinding] = computerUse
+        var taken = Set(computerUse.flatMap(\.pids))
         func add(_ finding: CleanupFinding) {
             guard !input.ignoredKeys.contains(finding.key), !finding.pids.contains(where: taken.contains) else { return }
             taken.formUnion(finding.pids)
@@ -140,6 +156,7 @@ public enum CleanupRules {
         for process in mine where isDevTool(process) && !kept(process) {
             guard let ports = input.listening[process.pid], process.elapsed >= 3600, process.cpu < 1 else { continue }
             let family = tree(process)
+            guard safeFamily(family) else { continue }
             let memory = family.map(\.memoryMB).reduce(0, +)
             add(CleanupFinding(group: .server, key: "server:\(process.name):\(ports.sorted().map(String.init).joined(separator: ","))",
                                title: "\(process.name) on :" + ports.sorted().map(String.init).joined(separator: ", :"),
@@ -149,12 +166,14 @@ public enum CleanupRules {
         for process in mine where isDevTool(process) && !kept(process) && process.ppid == 1 && input.listening[process.pid] == nil {
             guard process.elapsed >= 7200, process.cpu < 1 else { continue }
             let family = tree(process)
+            guard safeFamily(family) else { continue }
             add(CleanupFinding(group: .orphan, key: "orphan:\(process.name)", title: process.name,
                                detail: "Started \(duration(process.elapsed)) ago · no parent app · idle",
                                pids: family.map(\.pid), memoryMB: family.map(\.memoryMB).reduce(0, +), checked: true))
         }
         // Heavy: shown for you to decide, never checked.
         for process in mine where process.cpu >= 30 && !kept(process) {
+            guard safeFamily(tree(process)) else { continue }
             add(CleanupFinding(group: .heavy, key: "heavy:\(process.name)", title: process.name,
                                detail: String(format: "%.0f%% CPU now · up ", process.cpu) + duration(process.elapsed),
                                pids: [process.pid], memoryMB: process.memoryMB, checked: false))

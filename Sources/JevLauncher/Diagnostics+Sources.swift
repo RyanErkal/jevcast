@@ -177,9 +177,10 @@ extension Diagnostics {
             let items = await Cleanup.scan(ignored: Set(Preferences().cleanupIgnored))
             if items.isEmpty { print("Nothing to clean up."); exit(0) }
             for item in items {
-                print("\(item.finding.checked ? "[x]" : "[ ]") \(item.finding.group.title): \(item.finding.title) · \(Cleanup.size(item.finding.memoryMB)) · \(item.finding.detail)")
+                let mark = item.finding.canStop ? (item.finding.checked ? "[x]" : "[ ]") : "[protected]"
+                print("\(mark) \(item.finding.group.title): \(item.finding.title) · \(Cleanup.size(item.finding.memoryMB)) · \(item.finding.detail)")
             }
-            let checked = items.filter(\.finding.checked)
+            let checked = items.filter { $0.finding.canStop && $0.finding.checked }
             print("Checked: \(checked.count), using up to \(Cleanup.size(checked.map(\.finding.memoryMB).reduce(0, +)))")
             if apply {
                 let before = Cleanup.availableMB()

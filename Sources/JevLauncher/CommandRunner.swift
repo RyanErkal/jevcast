@@ -78,7 +78,8 @@ enum CommandRunner {
     /// Runs one step and returns its standard output. Both pipes are read while the
     /// process runs, so a command with a lot of output cannot fill a pipe and stall.
     /// Cancelling the task, or passing `timeout`, ends the process.
-    static func capture(_ step: [String], currentDirectory: String? = nil, allowFailure: Bool = false, timeout: TimeInterval? = nil) async throws -> String {
+    static func capture(_ step: [String], currentDirectory: String? = nil, allowFailure: Bool = false, timeout: TimeInterval? = nil,
+                        acceptedExitCodes: Set<Int32> = [0], requireEmptyStderr: Bool = false) async throws -> String {
         let box = ProcessBox()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -121,7 +122,9 @@ enum CommandRunner {
                         continuation.resume(throwing: CancellationError())
                     } else if box.timedOut {
                         continuation.resume(throwing: Failure(text: "\(name) took too long and was stopped."))
-                    } else if process.terminationStatus == 0 || allowFailure {
+                    } else if requireEmptyStderr && !errorData.isEmpty {
+                        continuation.resume(throwing: Failure(text: "\(name) could not verify the full result."))
+                    } else if (process.terminationReason == .exit && acceptedExitCodes.contains(process.terminationStatus)) || allowFailure {
                         continuation.resume(returning: stdout)
                     } else {
                         let line = String(decoding: errorData, as: UTF8.self).split(whereSeparator: \.isNewline).first.map(String.init) ?? ""

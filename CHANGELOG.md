@@ -2,6 +2,16 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## Unreleased
+
+### Added
+
+- **Computer-use cleanup.** Clean Up lists known computer-use workers with their PID, program, and parent. Attached workers and the shared service stay locked. Orphaned workers start unchecked; the group stop asks for a second Return. Jevcast checks ownership and process identity again before stopping, and reports any processes that remain.
+
+### Fixed
+
+- Clean Up keeps coding CLIs, IPC workers, regular apps, and protected child trees running. Changed or reused process IDs cannot be stopped from an old checklist.
+
 ## [1.16.0] - 2026-10-02
 
 ### Added

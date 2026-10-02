@@ -4,12 +4,23 @@ import LauncherCore
 extension MailModel {
     /// A reply, forward, or new message being written. Each draft has its own `id`, so a view, a
     /// late Quill result, or a failed send can tell one draft from the next.
-    struct Draft: Equatable, Identifiable {
-        enum Mode: Equatable { case new, reply(all: Bool), forward }
-        let id = UUID()
+    struct Draft: Codable, Equatable, Identifiable {
+        enum Mode: Codable, Equatable { case new, reply(all: Bool), forward }
+        var id = UUID()
+        var backend = MailBackend.current.rawValue
+        var messageID = "<\(UUID().uuidString.lowercased())@jevcast.local>"
+        var fromAccountID: String?
+        var fromAddress: String?
+        var senderWasChosen = false
+        var ownAddresses: [String] = []
+        var richText: Data?
+        var attachments: [OutgoingMessage.Attachment] = []
+        var uncertainSend = false
         var mode: Mode = .new
         var to = ""
         var cc = ""
+        /// Optional so drafts saved by an older build still load. Use `bcc`.
+        var bccText: String?
         var subject = ""
         var body = ""
         var instruction = ""
@@ -18,8 +29,32 @@ extension MailModel {
         /// The answered message's text and headers from when the draft started. The selection can
         /// move to another message later, so the composer, its To line, and Quill read this.
         var source: Source?
+        /// True when the reply leaves out the original. Optional for older drafts. Use `includesQuote`.
+        var quoteLeftOut: Bool?
+        /// The To and Cc that `fillRecipients` wrote, so it refills them only until you edit them.
+        var filledRecipients: [String]?
 
-        struct Source: Equatable {
+        var bcc: String { get { bccText ?? "" } set { bccText = newValue.isEmpty ? nil : newValue } }
+        var includesQuote: Bool { get { quoteLeftOut != true } set { quoteLeftOut = newValue ? nil : true } }
+
+        /// A reply goes to the original's Reply-To or sender, and Reply All also to the others on
+        /// To and Cc, without your addresses. Fills To and Cc until you change them.
+        mutating func fillRecipients() {
+            guard case .reply = mode, let line = replyLine else { return }
+            if let filled = filledRecipients, filled != [to, cc] { return }
+            to = ReplyLine.field(line.primary)
+            cc = ReplyLine.field(line.others)
+            filledRecipients = [to, cc]
+        }
+
+        /// The Message-ID with the sending address's domain, as other mail programs write it. The
+        /// random part stays, so a resend of the same draft keeps the same ID.
+        var sendingMessageID: String {
+            guard messageID.hasSuffix("@jevcast.local>"), let domain = fromAddress?.split(separator: "@").last, !domain.isEmpty else { return messageID }
+            return String(messageID.dropLast("@jevcast.local>".count)) + "@" + domain + ">"
+        }
+
+        struct Source: Codable, Equatable {
             let rowID: Int64
             let message: MIMEMessage
             let html: String?
@@ -28,18 +63,21 @@ extension MailModel {
         }
 
         /// The fields you type in, to see when the draft changed.
-        var fields: [String] { [to, cc, subject, body, instruction] }
+        var fields: [String] {
+            [to, cc, bcc, subject, body, instruction, fromAccountID ?? "", richText?.base64EncodedString() ?? "", includesQuote ? "" : "no quote"]
+                + attachments.map { $0.filename + String($0.data.count) + ($0.contentID ?? "") }
+        }
 
         /// True when you typed something. A reply's To and the Re: or Fwd: subject are filled in
         /// for you, so they do not count. A draft with content is never replaced or discarded at once.
         var hasContent: Bool {
             let typed: [String]
             switch mode {
-            case .new: typed = [to, cc, subject, body, instruction]
-            case .forward: typed = [to, body, instruction]
+            case .new: typed = [to, cc, bcc, subject, body, instruction]
+            case .forward: typed = [to, cc, bcc, body, instruction]
             case .reply: typed = [body, instruction]
             }
-            return typed.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            return !attachments.isEmpty || typed.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         }
 
         /// "reply" or "message", for notes such as "Finish or discard your open reply first."
@@ -48,13 +86,18 @@ extension MailModel {
         /// What stops sending, or nil when the draft can go. Send and ⌘Return both check it, so an
         /// empty reply never goes out. A forward may have no text; Mail sends the original.
         var sendProblem: String? {
+            if uncertainSend { return "This message may already be sent. Check Sent, then use Allow Resend in Outbox if it was not sent." }
             let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Apple Mail picks a reply's recipients itself; Jevcast's own accounts send to the fields.
+            let checksTo = mode != .reply(all: false) && mode != .reply(all: true) || backend == MailBackend.jevcast.rawValue
+            if checksTo, let problem = Self.addressProblem(to, required: true) ?? Self.addressProblem(cc, required: false) ?? Self.addressProblem(bcc, required: false) {
+                return problem
+            }
             switch mode {
             case .reply: return text.isEmpty ? "Write your reply first." : nil
-            case .forward: return Self.addressProblem(to, required: true)
+            case .forward: return nil
             case .new:
-                if let problem = Self.addressProblem(to, required: true) ?? Self.addressProblem(cc, required: false) { return problem }
-                return text.isEmpty && subject.trimmingCharacters(in: .whitespaces).isEmpty ? "Write a subject or a message first." : nil
+                return text.isEmpty && subject.trimmingCharacters(in: .whitespaces).isEmpty && attachments.isEmpty ? "Write a subject or a message first." : nil
             }
         }
         var canSend: Bool { sendProblem == nil }
@@ -68,13 +111,13 @@ extension MailModel {
         /// Who a reply goes to, for the composer's To line. See `ReplyLine`.
         var replyLine: ReplyLine? {
             guard case .reply(let all) = mode, let original else { return nil }
-            return ReplyLine(original: original, message: source?.message, all: all)
+            return ReplyLine(original: original, message: source?.message, all: all, ownAddresses: ownAddresses)
         }
     }
 
     /// A draft that did not go: a send failed or was undone while another draft was open.
     /// The banner offers Show until you take it back.
-    struct Unsent: Identifiable, Equatable {
+    struct Unsent: Codable, Identifiable, Equatable {
         let draft: Draft
         let reason: String
         var id: UUID { draft.id }
@@ -95,7 +138,7 @@ struct ReplyLine: Equatable {
     let known: Bool
     let all: Bool
 
-    init(original: MailSummary, message: MIMEMessage?, all: Bool) {
+    init(original: MailSummary, message: MIMEMessage?, all: Bool, ownAddresses: [String] = []) {
         self.all = all
         let sender = MailContact(name: original.senderName, address: original.senderAddress)
         guard let message else {
@@ -106,7 +149,7 @@ struct ReplyLine: Equatable {
             MailAddress.list(message.header(header) ?? "").map { MailContact(name: $0.name, address: $0.address) }.filter { !$0.address.isEmpty }
         }
         // The address the message was delivered to is yours; Apple Mail leaves your addresses out.
-        let own = Set((contacts("Delivered-To") + contacts("X-Original-To")).map(\.address))
+        let own = Set((contacts("Delivered-To") + contacts("X-Original-To")).map(\.address) + ownAddresses)
         let (to, cc) = MailReplies.recipients(of: message, all: all, own: own)
         primary = to.isEmpty ? [sender] : to
         others = cc
@@ -130,6 +173,17 @@ struct ReplyLine: Equatable {
     var detail: String {
         let lines = (primary + others).map(full)
         return (lines + (known || !all ? [] : ["Everyone else on the message"])).joined(separator: "\n")
+    }
+
+    /// Addresses for a To or Cc field: "Sam Lee <sam@example.com>, ann@example.com". A name with
+    /// a comma, semicolon, or quote is quoted, so the field reads back as the same people.
+    static func field(_ contacts: [MailContact]) -> String {
+        contacts.map { contact in
+            guard !contact.name.isEmpty, contact.name.lowercased() != contact.address.lowercased() else { return contact.address }
+            let name = contact.name.rangeOfCharacter(from: CharacterSet(charactersIn: ",;\"<>@")) == nil
+                ? contact.name : "\"" + contact.name.replacingOccurrences(of: "\"", with: "'") + "\""
+            return name + " <" + contact.address + ">"
+        }.joined(separator: ", ")
     }
 
     private func marked(_ contact: MailContact) -> String { replyTo.contains(contact.address.lowercased()) ? " (Reply-To)" : "" }

@@ -34,6 +34,9 @@ public struct SMTPClient: Sendable {
         }
         let session = try await open()
         defer { session.close() }
+        if let maximum = session.extensions["SIZE"].flatMap(Int.init), maximum > 0, message.count > maximum {
+            throw MailError.notFound("This message is larger than the outgoing server allows. Reduce its text or attachments.")
+        }
         let eightBit = session.extensions.keys.contains("8BITMIME") && message.contains(where: { $0 >= 0x80 })
         try await session.expect(session.command("MAIL FROM:<\(from)>" + (eightBit ? " BODY=8BITMIME" : "")), 250)
         for address in recipients {
@@ -43,13 +46,20 @@ public struct SMTPClient: Sendable {
             }
         }
         try await session.expect(session.command("DATA"), 354)
-        try await session.write(SMTPClient.dotStuffed(message))
-        try await session.expect(session.read(), 250)
+        // From the first DATA byte onward, a broken connection cannot prove that nothing was sent.
+        do {
+            try await session.write(SMTPClient.dotStuffed(message))
+            let reply = try await session.read()
+            try session.expect(reply, 250)
+        } catch let error as MailError {
+            if case .smtp(let code, _) = error, (400...599).contains(code) { throw error }
+            throw MailError.deliveryUncertain
+        } catch { throw MailError.deliveryUncertain }
         _ = try? await session.command("QUIT")
     }
 
     private func open() async throws -> SMTPSession {
-        let server = settings.server
+        let server = try settings.server.validated()
         let session = SMTPSession(transport: makeTransport(server.host, server.port, server.security == .tls), timeout: timeout)
         do {
             try await session.expect(session.read(), 220)
@@ -60,7 +70,9 @@ public struct SMTPClient: Sendable {
                 try await session.startTLS()
                 try await session.hello()
             }
-            try await authenticate(session)
+            do { try await authenticate(session) }
+            catch MailError.smtp { throw MailError.signInFailed("Check the sign-in details and the account's SMTP access.") }
+            catch MailError.unexpected { throw MailError.signInFailed("The outgoing server did not complete sign-in.") }
             return session
         } catch {
             session.close()
@@ -91,7 +103,7 @@ public struct SMTPClient: Sendable {
             if answer.code == 334 { answer = try await session.command("", secret: true) }
             reply = answer
         }
-        guard reply.code == 235 else { throw MailError.signInFailed(reply.text) }
+        guard reply.code == 235 else { throw MailError.signInFailed("Check the sign-in details and the account's SMTP access.") }
     }
 
     /// Only plain addresses: no brackets, spaces, or line breaks that could change the command.

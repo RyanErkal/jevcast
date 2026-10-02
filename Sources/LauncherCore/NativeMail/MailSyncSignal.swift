@@ -1,23 +1,22 @@
 import Foundation
 
 /// What a sync pass should look at. Requests that arrive while a pass runs merge into one.
+/// An empty request reads ahead a few bodies and nothing else.
 public struct MailSyncRequest: Sendable, Equatable {
-    /// Every mailbox, and the mailbox list itself.
+    /// The mailbox list, the inbox, and every mailbox opened before.
     public var all = false
     public var inbox = false
-    /// Specific mailboxes, such as the Archive a message just moved to.
+    /// Specific mailboxes, such as a folder just opened or the Archive a message just moved to.
     public var mailboxes: Set<Int64> = []
-    /// Older mail and bodies, a step at a time, when nothing newer waits.
-    public var backfill = false
 
-    public init(all: Bool = false, inbox: Bool = false, mailboxes: Set<Int64> = [], backfill: Bool = false) {
-        self.all = all; self.inbox = inbox; self.mailboxes = mailboxes; self.backfill = backfill
+    public init(all: Bool = false, inbox: Bool = false, mailboxes: Set<Int64> = []) {
+        self.all = all; self.inbox = inbox; self.mailboxes = mailboxes
     }
     public static let everything = MailSyncRequest(all: true)
     public static let inboxOnly = MailSyncRequest(inbox: true)
 
     mutating func merge(_ other: MailSyncRequest) {
-        all = all || other.all; inbox = inbox || other.inbox; backfill = backfill || other.backfill
+        all = all || other.all; inbox = inbox || other.inbox
         mailboxes.formUnion(other.mailboxes)
     }
 }
@@ -63,22 +62,24 @@ actor MailSyncSignal {
     }
 }
 
-/// How much sync reads and how often. Fixed numbers, chosen for a quick first list and steady,
-/// light work after it.
+/// How much sync reads and how often. Sync keeps only what the mail view shows: the newest mail
+/// of the inbox and of folders you open. Older mail is read when the list scrolls to it.
 public struct MailSyncPolicy: Sendable {
-    /// Newest messages read first in a mailbox never synced before.
-    public var firstInbox = 2500
-    public var firstOther = 500
+    /// Newest messages read in a mailbox never synced before.
+    public var firstInbox = 500
+    public var firstOther = 200
+    /// Older messages read each time the list reaches the end of what this Mac has.
+    public var olderBatch = 250
     /// Headers per FETCH, so the list fills in steps, newest first.
     public var headerBatch = 250
-    /// Older messages per step once the newest are in.
-    public var backfillBatch = 1000
-    /// Bodies read ahead so messages open at once, and the largest read ahead.
-    public var prefetchInbox = 150
-    public var prefetchOther = 25
-    public var prefetchMaxSize: Int64 = 3_000_000
-    public var bodyBatch = 20
-    /// A full pass over every mailbox, when IDLE reports nothing sooner.
+    /// Stored messages per flag and removal check, well inside a server's MESSAGELIMIT.
+    public var checkBatch = 500
+    /// Inbox bodies read ahead so new mail opens at once, and the largest read ahead.
+    /// Other bodies are read when opened.
+    public var prefetchInbox = 30
+    public var prefetchMaxSize: Int64 = 1_000_000
+    public var bodyBatch = 10
+    /// A pass over the inbox and opened folders, when IDLE reports nothing sooner.
     public var periodic: TimeInterval = 300
     /// Removed messages and flags in mailboxes other than the inbox.
     public var fullCheck: TimeInterval = 900

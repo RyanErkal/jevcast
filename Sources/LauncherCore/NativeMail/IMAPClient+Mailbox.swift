@@ -100,8 +100,15 @@ extension IMAPClient {
                 return IMAPSequenceSet([])
             }
             let reply = try await execute(IMAPCommand("UID SEARCH").raw(criteria))
+            // RFC 9586 does not say which reply a UIDONLY server sends, so take either.
             var numbers: [UInt32] = []
-            for case .search(let found, _) in reply.untagged { numbers += found }
+            for data in reply.untagged {
+                switch data {
+                case .search(let found, _): numbers += found
+                case .esearch(let result): numbers += result.all?.numbers ?? []
+                default: break
+                }
+            }
             return IMAPSequenceSet(numbers)
         }
     }
@@ -117,29 +124,62 @@ extension IMAPClient {
         }
     }
 
-    /// Moves messages to `destination`. Without MOVE it copies, marks the originals deleted, and
-    /// expunges them: only those UIDs with UIDPLUS, or every deleted message without it.
+    /// Only selected UIDs may be removed. Refuse before copying when the server cannot do that.
     public func move(uids set: IMAPSequenceSet, to destination: String, in mailbox: String, validity: UInt32?) async throws {
-        try await exclusive {
+        guard !set.isEmpty else { return }
+        try await exclusive(retry: false) {
             try await ensureSelected(mailbox, validity: validity)
+            guard selected?.readOnly != true else { throw MailError.notFound("This mailbox is read only.") }
             if has("MOVE") {
                 _ = try await execute(IMAPCommand("UID MOVE").raw(set.description).mailbox(destination))
                 return
             }
+            guard has("UIDPLUS") else {
+                throw MailError.notFound("This server cannot safely move selected messages. It needs MOVE or UIDPLUS. Nothing was changed.")
+            }
             _ = try await execute(IMAPCommand("UID COPY").raw(set.description).mailbox(destination))
             _ = try await execute(IMAPCommand("UID STORE").raw(set.description).raw("+FLAGS.SILENT (\\Deleted)"))
-            if has("UIDPLUS") { _ = try await execute(IMAPCommand("UID EXPUNGE").raw(set.description)) }
-            else { _ = try await execute(IMAPCommand("EXPUNGE")) }
+            _ = try await execute(IMAPCommand("UID EXPUNGE").raw(set.description))
         }
     }
 
-    /// Deletes messages for good, as from Trash.
-    public func expunge(uids set: IMAPSequenceSet, in mailbox: String, validity: UInt32?) async throws {
+    /// Removes exactly these messages for good: UID STORE \\Deleted, then UID EXPUNGE of the same
+    /// UIDs, in batches inside the server's MESSAGELIMIT. Other messages marked \\Deleted stay.
+    /// It needs UIDPLUS and is refused before any change without it. There is no mailbox-wide
+    /// EXPUNGE or CLOSE. Not retried, so a lost reply never repeats it.
+    public func deletePermanently(uids set: IMAPSequenceSet, in mailbox: String, validity: UInt32?) async throws {
+        guard !set.isEmpty else { return }
+        for chunk in set.chunked(maxCount: messageLimit ?? 1000) {
+            try await exclusive(retry: false) {
+                try await ensureSelected(mailbox, validity: validity)
+                guard selected?.readOnly != true else { throw MailError.notFound("This mailbox is read only. Nothing was deleted.") }
+                guard has("UIDPLUS") else {
+                    throw MailError.notFound("This server cannot delete only selected messages. It needs UIDPLUS. Nothing was deleted.")
+                }
+                _ = try await execute(IMAPCommand("UID STORE").raw(chunk.description).raw("+FLAGS.SILENT (\\Deleted)"))
+                _ = try await execute(IMAPCommand("UID EXPUNGE").raw(chunk.description))
+            }
+        }
+    }
+
+    /// Message and unread counts of every mailbox in one LIST, on a server with LIST-STATUS.
+    public func listStatus() async throws -> [String: (messages: Int, unseen: Int)] {
         try await exclusive {
-            try await ensureSelected(mailbox, validity: validity)
-            _ = try await execute(IMAPCommand("UID STORE").raw(set.description).raw("+FLAGS.SILENT (\\Deleted)"))
-            if has("UIDPLUS") { _ = try await execute(IMAPCommand("UID EXPUNGE").raw(set.description)) }
-            else { _ = try await execute(IMAPCommand("EXPUNGE")) }
+            let reply = try await execute(IMAPCommand("LIST").string("").string("*").raw("RETURN (STATUS (MESSAGES UNSEEN))"))
+            var counts: [String: (messages: Int, unseen: Int)] = [:]
+            for case .mailboxStatus(let name, let values) in reply.untagged {
+                counts[name] = (Int(values["MESSAGES"] ?? 0), Int(values["UNSEEN"] ?? 0))
+            }
+            return counts
+        }
+    }
+
+    /// One mailbox's message and unread counts, without selecting it.
+    public func status(_ mailbox: String) async throws -> (messages: Int, unseen: Int) {
+        try await exclusive {
+            let reply = try await execute(IMAPCommand("STATUS").mailbox(mailbox).raw("(MESSAGES UNSEEN)"))
+            for case .mailboxStatus(_, let values) in reply.untagged { return (Int(values["MESSAGES"] ?? 0), Int(values["UNSEEN"] ?? 0)) }
+            return (0, 0)
         }
     }
 

@@ -1,19 +1,22 @@
 import Foundation
 
 /// A name and an address, such as "Sam" and "sam@example.com".
-public struct MailContact: Equatable, Sendable, Hashable {
+public struct MailContact: Codable, Equatable, Sendable, Hashable {
     public var name: String
     public var address: String
     public init(name: String = "", address: String) { self.name = name; self.address = address }
 }
 
-/// A message to send, in plain text, with optional attachments.
-public struct OutgoingMessage: Sendable {
-    public struct Attachment: Sendable, Equatable {
+/// A message with a plain text alternative, optional HTML, and explicitly chosen attachments.
+public struct OutgoingMessage: Codable, Sendable {
+    public struct Attachment: Codable, Sendable, Equatable {
         public var filename: String
         public var mimeType: String
         public var data: Data
-        public init(filename: String, mimeType: String, data: Data) { self.filename = filename; self.mimeType = mimeType; self.data = data }
+        public var contentID: String?
+        public init(filename: String, mimeType: String, data: Data, contentID: String? = nil) {
+            self.filename = filename; self.mimeType = mimeType; self.data = data; self.contentID = contentID
+        }
     }
     public var from: MailContact
     public var to: [MailContact]
@@ -22,6 +25,7 @@ public struct OutgoingMessage: Sendable {
     public var bcc: [MailContact] = []
     public var subject: String
     public var body: String
+    public var html: String?
     /// The Message-ID being answered, with its angle brackets.
     public var inReplyTo: String?
     public var references: [String] = []
@@ -57,21 +61,8 @@ public enum MailComposer {
 
         var out = ""
         for (name, value) in headers { out += fold("\(name): \(value)") + "\r\n" }
-        let (textHeaders, textBody) = textPart(message.body)
-        if message.attachments.isEmpty {
-            out += textHeaders.map { $0 + "\r\n" }.joined() + "\r\n" + textBody
-            return Data(out.utf8)
-        }
-        let boundary = "jevcast-" + UUID().uuidString.lowercased()
-        out += "Content-Type: multipart/mixed; boundary=\"\(boundary)\"\r\n\r\n"
-        out += "--\(boundary)\r\n" + textHeaders.map { $0 + "\r\n" }.joined() + "\r\n" + textBody + "\r\n"
         var data = Data(out.utf8)
-        for attachment in message.attachments {
-            data.append(contentsOf: "--\(boundary)\r\n".utf8)
-            data.append(attachmentPart(attachment))
-            data.append(contentsOf: "\r\n".utf8)
-        }
-        data.append(contentsOf: "--\(boundary)--\r\n".utf8)
+        data.append(bodyPart(message))
         return data
     }
 
@@ -102,7 +93,10 @@ public enum MailComposer {
         }
         let shownType = type == "message/rfc822" ? "application/octet-stream" : (type.contains("/") ? type : "application/octet-stream")
         var part = "Content-Type: \(shownType); \(parameter("name", attachment.filename))\r\n"
-        part += "Content-Disposition: attachment; \(name)\r\nContent-Transfer-Encoding: base64\r\n\r\n"
+        let disposition = attachment.contentID == nil ? "attachment" : "inline"
+        part += "Content-Disposition: \(disposition); \(name)\r\n"
+        if let id = attachment.contentID { part += "Content-ID: <\(clean(id).replacingOccurrences(of: "<", with: "").replacingOccurrences(of: ">", with: ""))>\r\n" }
+        part += "Content-Transfer-Encoding: base64\r\n\r\n"
         part += attachment.data.base64EncodedString(options: [.lineLength76Characters, .endLineWithCarriageReturn, .endLineWithLineFeed]) + "\r\n"
         return Data(part.utf8)
     }

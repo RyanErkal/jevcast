@@ -5,6 +5,7 @@ import LauncherCore
 /// becomes a `SourceProblem` whose button opens the Automation settings.
 enum AppleScript {
     static func run(_ script: String, _ arguments: [String] = [], app bundleID: String, name: String, timeout: TimeInterval = 8) async throws -> String {
+        if bundleID == "com.apple.mail" { try MailIOPolicy.requireOnline() }
         do { return try await CommandRunner.capture(["/usr/bin/osascript", "-e", script] + arguments, timeout: timeout) }
         catch let failure as CommandRunner.Failure where TabScripts.isNotAuthorized(failure.text) {
             throw SourceProblem(text: "Allow Jevcast to control \(name) in Privacy & Security › Automation.", access: .automation(bundleID))
@@ -22,7 +23,8 @@ enum AppleScript {
     /// Whether Jevcast may already send Apple Events to a running app, without asking.
     /// Runs off the main thread, because the check can wait on the target app.
     static func permission(for bundleID: String) async -> Permission {
-        await Task.detached(priority: .userInitiated) { () -> Permission in
+        if bundleID == "com.apple.mail", MailIOPolicy.isOffline { return .notRunning }
+        return await Task.detached(priority: .userInitiated) { () -> Permission in
             let target = NSAppleEventDescriptor(bundleIdentifier: bundleID)
             guard let desc = target.aeDesc else { return .denied }
             switch AEDeterminePermissionToAutomateTarget(desc, typeWildCard, typeWildCard, false) {

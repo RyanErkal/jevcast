@@ -11,6 +11,8 @@ final class FakeSMTPServer: @unchecked Sendable {
     private(set) var deliveries: [Delivery] = []
     /// Addresses the server refuses at RCPT.
     var refused: Set<String> = []
+    var acceptThenDisconnect = false
+    var dataReply = 250
 
     func add(_ delivery: Delivery) { lock.withLock { deliveries.append(delivery) } }
     var delivered: [Delivery] { lock.withLock { deliveries } }
@@ -29,6 +31,7 @@ final class FakeSMTPTransport: MailTransport, @unchecked Sendable {
     private var from = ""
     private var recipients: [String] = []
     private var signedIn = false
+    private var closed = false
 
     init(server: FakeSMTPServer) { self.server = server }
 
@@ -46,12 +49,13 @@ final class FakeSMTPTransport: MailTransport, @unchecked Sendable {
 
     func read(timeout: TimeInterval) async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
-            let ready: Data? = lock.withLock {
-                if !output.isEmpty { defer { output = [] }; return Data(output) }
+            let ready: Result<Data, Error>? = lock.withLock {
+                if !output.isEmpty { defer { output = [] }; return .success(Data(output)) }
+                if closed { return .failure(MailTransportError.closed) }
                 reader = continuation
                 return nil
             }
-            if let ready { continuation.resume(returning: ready) }
+            if let ready { continuation.resume(with: ready) }
         }
     }
 
@@ -67,8 +71,9 @@ final class FakeSMTPTransport: MailTransport, @unchecked Sendable {
                 let body = Data(input[0..<end])
                 input.removeFirst(end + 5)
                 inData = false
-                server.add(.init(from: from, recipients: recipients, data: body))
-                reply("250 2.0.0 queued")
+                if server.dataReply == 250 { server.add(.init(from: from, recipients: recipients, data: body)) }
+                if server.acceptThenDisconnect { closed = true; return }
+                reply("\(server.dataReply) final result")
                 continue
             }
             guard let lf = input.firstIndex(of: 0x0A) else { return }

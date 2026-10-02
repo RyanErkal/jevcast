@@ -156,7 +156,7 @@ extension Diagnostics {
                 for message in recent {
                     guard let box = boxes.first(where: { $0.rowID == message.mailbox }) else { continue }
                     do {
-                        _ = try await AppleScript.run(probe, [box.accountID, box.path, String(message.rowID)], app: MailActions.bundleID, name: "Mail", timeout: 30)
+                        _ = try await AppleScript.run(probe, MailActions.target(message, box), app: MailActions.bundleID, name: "Mail", timeout: 30)
                         lines.append("Messages found: 1")
                     } catch {
                         lines.append("Messages not found: 1")

@@ -9,8 +9,12 @@ public struct MailMailbox: Equatable, Sendable, Identifiable, Hashable {
     /// The role the server gave the mailbox (IMAP special use), which wins over its name.
     /// Only Jevcast's own mail store records it.
     public let serverRole: Role?
-    public init(rowID: Int64, url: String, unread: Int, total: Int, serverRole: Role? = nil) {
+    /// The server's own counts, including mail not on this Mac. Only Jevcast's own store has them.
+    public let serverTotal: Int?
+    public let serverUnread: Int?
+    public init(rowID: Int64, url: String, unread: Int, total: Int, serverRole: Role? = nil, serverTotal: Int? = nil, serverUnread: Int? = nil) {
         self.rowID = rowID; self.url = url; self.unread = unread; self.total = total; self.serverRole = serverRole
+        self.serverTotal = serverTotal; self.serverUnread = serverUnread
     }
     public var id: Int64 { rowID }
 
@@ -26,7 +30,7 @@ public struct MailMailbox: Equatable, Sendable, Identifiable, Hashable {
     }
     public var name: String { path.split(separator: "/").last.map(String.init) ?? path }
 
-    public enum Role: String, Sendable { case inbox, sent, drafts, archive, trash, junk, other }
+    public enum Role: String, Codable, Sendable { case inbox, sent, drafts, archive, trash, junk, other }
     public var role: Role {
         if let serverRole { return serverRole }
         let lower = name.lowercased(), full = path.lowercased()
@@ -64,14 +68,14 @@ public struct MailMailbox: Equatable, Sendable, Identifiable, Hashable {
     public static func archive(for account: String, in mailboxes: [MailMailbox]) -> MailMailbox? {
         let own = mailboxes.filter { $0.accountID == account }
         // A top-level Archive first, then Gmail's All Mail, and never a nested "Clients/Archive" before those.
-        return own.first { $0.path.lowercased() == "archive" }
-            ?? own.first { $0.path.lowercased() == "[gmail]/all mail" }
+        return own.first { $0.path.lowercased() == "archive" && $0.role == .archive }
+            ?? own.first { $0.path.lowercased() == "[gmail]/all mail" && $0.role == .archive }
             ?? own.filter { $0.role == .archive }.min { $0.path.count < $1.path.count }
     }
 }
 
 /// One message row: what the list shows. The body is read later from its `.emlx` file.
-public struct MailSummary: Equatable, Sendable, Identifiable, Hashable {
+public struct MailSummary: Codable, Equatable, Sendable, Identifiable, Hashable {
     public let rowID: Int64
     public var mailbox: Int64
     public let subject: String
@@ -112,206 +116,4 @@ public enum MailFiles {
         let base = "Data/" + digits + "Messages/\(rowID)"
         return [base + ".emlx", base + ".partial.emlx"]
     }
-}
-
-/// Fixed AppleScript for Apple Mail. Every value arrives in `argv`: account ID, mailbox path,
-/// message ID, and any text. Nothing the user typed or a message contains becomes script text.
-public enum MailScripts {
-    /// The message `m`, found by account ID, mailbox path, and Mail's message ID (the index row ID).
-    public static let findMessage = """
-          set acct to first account whose id is (item 1 of argv)
-          set mb to mailbox (item 2 of argv) of acct
-          -- In Mail's dictionary "message id" is the Message-ID header, so the message is found by its number.
-          set mid to (item 3 of argv) as integer
-          set m to first message of mb whose id is mid
-    """
-
-    static func onMessage(_ body: String) -> String {
-        """
-        on run argv
-          with timeout of 20 seconds
-            tell application id "com.apple.mail"
-        \(findMessage)
-        \(body)
-            end tell
-          end timeout
-        end run
-        """
-    }
-
-    /// The text that goes to Mail: `text` without leading spaces and blank lines, so Mail's copy
-    /// starts with the same characters as `checkText`.
-    public static func sendingText(_ text: String) -> String {
-        String(text.drop { $0.isWhitespace })
-    }
-
-    /// The first 200 characters of `sendingText`. The reply, forward, and send scripts check that
-    /// Mail's copy starts with them before they send.
-    public static func checkText(_ text: String) -> String {
-        String(sendingText(text).prefix(200))
-    }
-
-    /// Reads the text back from `message` and fails with 1003 when Mail did not keep it: Mail can
-    /// ignore text set on a message it has not shown. Argument `argument` holds `checkText`; an empty
-    /// one skips the check. Mail's copy must start with it, so a quoted original that contains the
-    /// same words does not count. White space is ignored, because Mail can change line endings and
-    /// blank lines; case counts. `before` names Mail's own text from before the change. When that
-    /// already starts with the check text, such as the signature "Thanks, Ryan" under the reply
-    /// "Thanks", only a copy that no longer starts with Mail's own text shows that the text was kept.
-    static func keepsText(_ message: String, argument: Int, before: String? = nil) -> String {
-        let check = "(item \(argument) of argv)"
-        let own = before.map { "\n            if kept and \($0) starts with \(check) then set kept to written does not start with \($0)" } ?? ""
-        return """
-              if \(check) is not "" then
-                set kept to false
-                repeat 10 times
-                  set written to (content of \(message)) as text
-                  considering case but ignoring white space
-                    set kept to written starts with \(check)\(own)
-                  end considering
-                  if kept then exit repeat
-                  delay 0.2
-                end repeat
-                if not kept then error "Mail did not take the text, so nothing was sent." number 1003
-              end if
-        """
-    }
-
-    /// Closes `message` without saving, so a message that was not sent does not stay in Mail.
-    static func discard(_ message: String) -> String {
-        """
-                try
-                  close \(message) saving no
-                end try
-                try
-                  delete \(message)
-                end try
-        """
-    }
-
-    /// A script that makes `message` in `prepare`, checks its text, and sends it. Every error before
-    /// `send` discards the message and becomes 1004: nothing was sent. The text check (1003) and a
-    /// refused Automation permission (-1743) keep their numbers. An error from `send` itself becomes
-    /// 1005, because Mail may have sent the message. `send` that returns false discards it (1002).
-    static func sending(_ message: String, prepare: String, check argument: Int, before: String? = nil) -> String {
-        """
-        on run argv
-          with timeout of 20 seconds
-            tell application id "com.apple.mail"
-              try
-        \(prepare)
-        \(keepsText(message, argument: argument, before: before))
-              on error errText number errNum
-        \(discard(message))
-                if errNum is -1743 or errNum is 1003 then error errText number errNum
-                error errText number 1004
-              end try
-              try
-                set didSend to (send \(message))
-              on error
-                error "Mail stopped while it sent the message." number 1005
-              end try
-              if not didSend then
-        \(discard(message))
-                error "Mail did not send the message." number 1002
-              end if
-            end tell
-          end timeout
-        end run
-        """
-    }
-
-    /// `argv` 4: "true" or "false".
-    public static let setRead = onMessage("      set read status of m to ((item 4 of argv) is \"true\")")
-    public static let setFlagged = onMessage("      set flagged status of m to ((item 4 of argv) is \"true\")")
-    public static let delete = onMessage("      delete m")
-    /// `argv` 4: the destination mailbox path in the same account.
-    public static let move = onMessage("      move m to mailbox (item 4 of argv) of acct")
-    /// `argv` 4: the reply text (`sendingText`); 5: "true" to reply to all; 6: `checkText` of the
-    /// reply. The quoted original stays below the text.
-    public static let reply = sending("r", prepare: """
-    \(findMessage)
-          set r to reply m opening window false reply to all ((item 5 of argv) is "true")
-          set quoted to ""
-          repeat 10 times
-            delay 0.2
-            set quoted to (content of r) as text
-            if quoted is not "" then exit repeat
-          end repeat
-          if quoted is "" then
-            set content of r to (item 4 of argv)
-          else
-            set content of r to (item 4 of argv) & return & return & quoted
-          end if
-    """, check: 6, before: "quoted")
-    /// `argv` 4: the text above the forwarded message (`sendingText`); 5: recipient addresses, one
-    /// per line; 6: `checkText` of the text.
-    public static let forward = sending("f", prepare: """
-    \(findMessage)
-          set f to forward m opening window false
-          delay 0.5
-          repeat with a in paragraphs of (item 5 of argv)
-            if (a as text) is not "" then make new to recipient at end of to recipients of f with properties {address:(a as text)}
-          end repeat
-          -- The body is left as Mail made it when there is no text to add, so attachments stay.
-          if (item 4 of argv) is not "" then
-            -- Mail fills in the forwarded message a moment after it makes the forward.
-            set quoted to ""
-            repeat 10 times
-              set quoted to (content of f) as text
-              if quoted is not "" then exit repeat
-              delay 0.2
-            end repeat
-            set content of f to (item 4 of argv) & return & return & quoted
-          end if
-    """, check: 6, before: "quoted")
-
-    /// `argv`: to (one per line), cc (one per line), subject, body (`sendingText`), `checkText` of the body.
-    public static let send = sending("o", prepare: """
-          set o to make new outgoing message with properties {subject:(item 3 of argv), content:(item 4 of argv), visible:false}
-          repeat with a in paragraphs of (item 1 of argv)
-            if (a as text) is not "" then make new to recipient at end of to recipients of o with properties {address:(a as text)}
-          end repeat
-          repeat with a in paragraphs of (item 2 of argv)
-            if (a as text) is not "" then make new cc recipient at end of cc recipients of o with properties {address:(a as text)}
-          end repeat
-    """, check: 5)
-
-    /// The number of messages in Mail's Outbox, where `send` leaves a message until Mail delivers it,
-    /// or -1 when Mail is not running. It never starts Mail.
-    public static let outboxCount = """
-    on run argv
-      if not (application id "com.apple.mail" is running) then return -1
-      with timeout of 10 seconds
-        tell application id "com.apple.mail" to return count of messages of outbox
-      end timeout
-    end run
-    """
-
-    public static let checkForNewMail = """
-    on run argv
-      with timeout of 10 seconds
-        tell application id "com.apple.mail" to check for new mail
-      end timeout
-    end run
-    """
-
-    /// `argv`: account IDs. Asks Mail to send pending changes, such as read status, to each server now.
-    /// An account that cannot sync, such as one that is offline, does not stop the others.
-    public static let synchronize = """
-    on run argv
-      with timeout of 20 seconds
-        tell application id "com.apple.mail"
-          repeat with a in argv
-            try
-              synchronize with (first account whose id is (a as text))
-            end try
-          end repeat
-        end tell
-      end timeout
-    end run
-    """
-
-    /// Opens the message in Mail itself.
-    public static let open = onMessage("      open m\n      activate")
 }

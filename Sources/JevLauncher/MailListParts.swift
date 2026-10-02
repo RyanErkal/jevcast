@@ -23,6 +23,11 @@ struct MailMessageList: View {
                     ProgressView().controlSize(.small).frame(maxWidth: .infinity)
                         .task(id: model.bottom) { model.loadNextPage() }
                         .selectionDisabled()
+                } else if model.olderOnServer, !model.messages.isEmpty {
+                    // The end of what this Mac has: a Jevcast account reads the next older batch.
+                    ProgressView().controlSize(.small).frame(maxWidth: .infinity)
+                        .task(id: model.bottom) { await model.loadOlder() }
+                        .selectionDisabled()
                 }
                 switch model.bodySearch {
                 case .more:
@@ -55,7 +60,9 @@ struct MailMessageList: View {
     }
 }
 
-/// Picks the list: Inbox (the default), All Mail, Unread, Flagged, or one mailbox by account.
+/// Picks the list: Inbox (the default), All Mail, Unread, Flagged, or one mailbox of an account.
+/// Each account has its own section, with Inbox, Drafts, Sent, Junk, Trash, and Archive first,
+/// and each mailbox shows its unread count, or for Junk and Trash how many messages it holds.
 struct MailPlacePicker: View {
     @ObservedObject var model: MailModel
     var body: some View {
@@ -66,8 +73,10 @@ struct MailPlacePicker: View {
             Button("Flagged") { model.place = .flagged }
             ForEach(model.accounts, id: \.self) { account in
                 Divider()
-                ForEach(model.mailboxes.filter { $0.accountID == account }.sorted { $0.path < $1.path }) { box in
-                    Button(box.path) { model.place = .mailbox(box.rowID) }
+                Section(model.accountTitle(account)) {
+                    ForEach(Self.ordered(model.mailboxes.filter { $0.accountID == account })) { box in
+                        Button(Self.label(box)) { model.place = .mailbox(box.rowID) }
+                    }
                 }
             }
         } label: {
@@ -75,6 +84,52 @@ struct MailPlacePicker: View {
         }
         .menuStyle(.borderlessButton).fixedSize()
         .help("Choose a mailbox")
+    }
+
+    private static let roleOrder: [MailMailbox.Role] = [.inbox, .drafts, .sent, .junk, .trash, .archive, .other]
+
+    static func ordered(_ boxes: [MailMailbox]) -> [MailMailbox] {
+        boxes.sorted { a, b in
+            let left = roleOrder.firstIndex(of: a.role) ?? roleOrder.count, right = roleOrder.firstIndex(of: b.role) ?? roleOrder.count
+            return left != right ? left < right : a.path.localizedStandardCompare(b.path) == .orderedAscending
+        }
+    }
+
+    /// "Inbox (12 unread)", "Bin (8)", or "Clients/Acme". Counts come from the server when it gave them.
+    static func label(_ box: MailMailbox) -> String {
+        let name = box.role == .inbox ? "Inbox" : box.path.hasPrefix("[Gmail]/") ? String(box.path.dropFirst("[Gmail]/".count)) : box.path
+        if box.role == .trash || box.role == .junk {
+            let total = box.serverTotal ?? box.total
+            return total > 0 ? "\(name) (\(total))" : name
+        }
+        let unread = box.serverUnread ?? box.unread
+        return unread > 0 ? "\(name) (\(unread) unread)" : name
+    }
+}
+
+/// Empty Trash or Empty Junk, beside the picker while one of them is on screen. It counts what is
+/// on the server first and asks; only the messages counted are removed, for good.
+struct MailEmptyButton: View {
+    @ObservedObject var model: MailModel
+    var body: some View {
+        if let box = model.emptiableMailbox {
+            Button(model.preparingEmpty ? "Counting…" : "Empty \(MailPlacePicker.label(box).split(separator: " (").first.map(String.init) ?? box.name)") {
+                model.prepareEmpty()
+            }
+            .buttonStyle(.borderless).font(.caption).disabled(model.preparingEmpty)
+            .help("Deletes every message in \(box.name) permanently. You see the count and confirm first.")
+            .alert(Text(alertTitle), isPresented: Binding(get: { model.emptyRequest != nil }, set: { if !$0 { model.emptyRequest = nil } })) {
+                Button("Cancel", role: .cancel) { model.emptyRequest = nil }
+                Button("Delete Permanently", role: .destructive) { model.confirmEmpty() }
+            } message: {
+                Text("They are removed from the server for good. This cannot be undone. Mail that arrives after this count stays.")
+            }
+        }
+    }
+
+    private var alertTitle: String {
+        guard let request = model.emptyRequest else { return "" }
+        return "Delete \(request.uids.count) message\(request.uids.count == 1 ? "" : "s") in \(request.mailbox.name) permanently?"
     }
 }
 

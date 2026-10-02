@@ -190,7 +190,7 @@ final class IMAPProtocolTests: XCTestCase {
         XCTAssertTrue(byLength.allSatisfy { $0.description.count <= 100 })
         XCTAssertEqual(byLength.reduce(0) { $0 + $1.count }, scattered.count)
         XCTAssertEqual(MailAccountSync.missing([1, 2, 3, 7, 9], from: IMAPSequenceSet([2, 3, 8, 9])), [1, 7])
-        XCTAssertEqual(MailAccountSync.highest(IMAPSequenceSet([1, 2, 3, 10, 11]), count: 3), [3, 10, 11])
+        XCTAssertEqual(MailAccountSync.runs([1, 2, 3, 7, 9], size: 2), [[1, 2], [3, 7], [9]])
     }
 
     func testDates() {

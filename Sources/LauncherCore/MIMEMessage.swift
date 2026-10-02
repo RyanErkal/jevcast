@@ -3,7 +3,7 @@ import Foundation
 /// A parsed email: headers, the best text and HTML bodies, and attachment names.
 /// Built for reading Apple Mail's `.emlx` files. It never runs or loads anything.
 public struct MIMEMessage: Equatable, Sendable {
-    public struct Attachment: Equatable, Sendable {
+    public struct Attachment: Codable, Equatable, Sendable {
         public let name: String
         public let mimeType: String
         public let size: Int
@@ -14,7 +14,7 @@ public struct MIMEMessage: Equatable, Sendable {
     public var attachments: [Attachment] = []
     /// Images carried inside the message and shown in its HTML as `cid:` links, by Content-ID.
     public var inlineImages: [String: InlineImage] = [:]
-    public struct InlineImage: Equatable, Sendable {
+    public struct InlineImage: Codable, Equatable, Sendable {
         public let mimeType: String
         public let data: Data
         public init(mimeType: String, data: Data) { self.mimeType = mimeType; self.data = data }
@@ -105,6 +105,50 @@ public struct MIMEMessage: Equatable, Sendable {
         let text = decodeText(decoded, charset: params["charset"])
         if type == "text/html" { if message.html == nil { message.html = text } }
         else if message.plainText == nil { message.plainText = text }
+    }
+
+    /// An attached file with its bytes, for forwarding it as it came.
+    public struct File: Equatable, Sendable {
+        public let name: String
+        public let mimeType: String
+        public let data: Data
+    }
+
+    /// The files `attachments` lists, with their bytes, read from the raw message by the same rules.
+    public static func files(_ data: Data) -> [File] {
+        var parts = 0
+        var found: [File] = []
+        let (headerData, body) = splitHeaders(Data(data))
+        collectFiles(headers: parseHeaders(headerData), body: body, into: &found, depth: 0, parts: &parts)
+        return found
+    }
+
+    private static func collectFiles(headers: [(name: String, value: String)], body: Data, into found: inout [File], depth: Int, parts: inout Int) {
+        parts += 1
+        guard depth < maxDepth, parts <= maxParts else { return }
+        let (type, params) = parameters(value(headers, "Content-Type") ?? "text/plain")
+        let disposition = value(headers, "Content-Disposition").map(parameters)
+        let filename = disposition?.1["filename"] ?? params["name"]
+        let encoding = (value(headers, "Content-Transfer-Encoding") ?? "7bit").lowercased().trimmingCharacters(in: .whitespaces)
+        if type.hasPrefix("multipart/"), let boundary = params["boundary"] {
+            for part in split(body, boundary: boundary) {
+                let (partHeaders, partBody) = splitHeaders(part)
+                collectFiles(headers: parseHeaders(partHeaders), body: partBody, into: &found, depth: depth + 1, parts: &parts)
+            }
+            return
+        }
+        let decoded = decode(body, encoding)
+        if type == "message/rfc822" {
+            let (innerHeaders, innerBody) = splitHeaders(decoded)
+            collectFiles(headers: parseHeaders(innerHeaders), body: innerBody, into: &found, depth: depth + 1, parts: &parts)
+            return
+        }
+        if type.hasPrefix("image/"), let cid = value(headers, "Content-ID")?.trimmingCharacters(in: CharacterSet(charactersIn: "<> ")), !cid.isEmpty,
+           decoded.count <= 5_000_000 { return }
+        let isAttachment = disposition?.0 == "attachment" || (filename != nil && !type.hasPrefix("text/"))
+        if (isAttachment || !(type == "text/plain" || type == "text/html")), let filename {
+            found.append(File(name: EncodedWords.decode(filename), mimeType: type, data: decoded))
+        }
     }
 
     /// Splits at the first blank line. The line break before it stays out of the headers, so the

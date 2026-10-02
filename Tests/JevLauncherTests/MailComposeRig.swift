@@ -57,7 +57,8 @@ final class MailComposeRig {
                               sendDraft: { draft, _ in
                                   outbox.add(draft)
                                   if let error = outbox.failure { throw error }
-                              }, undoDelay: delay)
+                              }, undoDelay: delay, draftStore: nil)
+        model.senders = [.init(accountID: "GMAIL-1", address: "me@example.com", name: "Me", signature: "")]
         model.refreshStatus()
         try await wait { model.selectedID != nil && !model.isLoading }
         return model

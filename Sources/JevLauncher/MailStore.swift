@@ -13,6 +13,7 @@ enum MailStore {
     /// Where Mail keeps its data, and whether Jevcast may read it. With Jevcast accounts as the
     /// mail source, this is Jevcast's own store, which has the same layout.
     static func status() -> Status {
+        guard !MailIOPolicy.isOffline else { return .noMail }
         if NativeMailCenter.isActive { return NativeMailCenter.status() }
         let base = NSHomeDirectory() + "/Library/Mail"
         guard FileManager.default.fileExists(atPath: base) else { return .noMail }
@@ -92,10 +93,13 @@ enum MailStore {
         let total = columns.contains("total_count") ? "total_count" : "0"
         // Only Jevcast's own store has `role`: the server's special use for the mailbox.
         let role = columns.contains("role") ? "role" : "NULL"
-        let boxes: [MailMailbox] = try db.rows("SELECT ROWID, url, \(unread), \(total), \(role) FROM mailboxes").compactMap { row in
-            guard row.count == 5, let id = row[0].int, let url = row[1].text else { return nil }
+        let serverTotal = columns.contains("server_total") ? "server_total" : "NULL"
+        let serverUnread = columns.contains("server_unread") ? "server_unread" : "NULL"
+        let boxes: [MailMailbox] = try db.rows("SELECT ROWID, url, \(unread), \(total), \(role), \(serverTotal), \(serverUnread) FROM mailboxes").compactMap { row in
+            guard row.count == 7, let id = row[0].int, let url = row[1].text else { return nil }
             return MailMailbox(rowID: id, url: url, unread: Int(row[2].int ?? 0), total: Int(row[3].int ?? 0),
-                               serverRole: row[4].text.flatMap(MailMailbox.Role.init(rawValue:)))
+                               serverRole: row[4].text.flatMap(MailMailbox.Role.init(rawValue:)),
+                               serverTotal: row[5].int.map(Int.init), serverUnread: row[6].int.map(Int.init))
         }
         // A Gmail inbox holds no rows of its own: its messages sit in All Mail with an Inbox label.
         // Its unread count is read through the labels, so it matches the list.
@@ -107,7 +111,8 @@ enum MailStore {
             guard try gmail || !db.rows("SELECT 1 FROM labels WHERE \(labels.mailbox) = ? LIMIT 1", [.int(box.rowID)]).isEmpty else { return box }
             let (sql, arguments) = membershipCount(cols, [box.rowID], filter: "\(c.read) = 0", distinct: false)
             let count = Int(try db.rows(sql, arguments).first?.first?.int ?? 0)
-            return MailMailbox(rowID: box.rowID, url: box.url, unread: count, total: box.total)
+            return MailMailbox(rowID: box.rowID, url: box.url, unread: count, total: box.total, serverRole: box.serverRole,
+                               serverTotal: box.serverTotal, serverUnread: box.serverUnread)
         }
     }
 

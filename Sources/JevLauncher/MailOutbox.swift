@@ -5,7 +5,7 @@ import Foundation
 enum MailOutbox {
     /// Waits until the Outbox is empty: `tries` counts, `interval` seconds apart, about a minute by
     /// default. Returns false when it still holds mail at the end. A count that fails (nil) keeps the
-    /// last one read. When Mail gives none at all, the Outbox counts as empty, so Mail quits as before.
+    /// last one read. An unknown count never means empty.
     static func waitUntilEmpty(tries: Int = 30, interval: TimeInterval = 2,
                                count: () async -> Int? = { await MailActions.outboxCount() }) async -> Bool {
         var last: Int?
@@ -15,6 +15,6 @@ enum MailOutbox {
             last = await count() ?? last
             if last == 0 { return true }
         }
-        return (last ?? 0) == 0
+        return last == 0
     }
 }

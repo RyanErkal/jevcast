@@ -2,6 +2,20 @@ import Foundation
 import LauncherCore
 
 extension Diagnostics {
+    /// Reads local setup only. No authorization, token refresh, mail transport, or Apple Events.
+    static func mailSetup() {
+        for provider in MailOAuthProvider.allCases {
+            let valid = (try? MailOAuthSetup.client(provider)) != nil
+            print(provider.title + " client ID: " + (valid ? "valid" : "missing or invalid"))
+        }
+        do {
+            let secret = try KeychainStore.read(account: MailOAuthSetup.googleSecretKey)
+            print("Google desktop secret: " + (secret?.isEmpty == false ? "saved and readable" : "not saved"))
+        } catch {
+            print("Google desktop secret: unreadable; save it again in Settings > Mail")
+        }
+    }
+
     /// `--diagnose-native-mail`: for each Jevcast account, signs in to IMAP and SMTP with the saved
     /// password and prints the server's capabilities, mailbox roles and counts, and timings. It
     /// changes nothing and never prints mailbox names, subjects, or addresses.
@@ -22,7 +36,7 @@ extension Diagnostics {
     }
 
     private static func check(_ account: NativeMailAccount) async {
-        let credential: @Sendable () async throws -> MailCredential = { try NativeMailCenter.credential(for: account) }
+        let credential: @Sendable () async throws -> MailCredential = { try await NativeMailCenter.credential(for: account) }
         let client = IMAPClient(settings: .init(server: account.imap, username: account.imapUsername), credential: credential)
         func ms(_ start: CFAbsoluteTime) -> Int { Int((CFAbsoluteTimeGetCurrent() - start) * 1000) }
         do {
@@ -39,9 +53,14 @@ extension Diagnostics {
             let inbox = try await client.select("INBOX")
             print("  INBOX: \(inbox.exists) messages, UIDNEXT \(inbox.uidNext.map(String.init) ?? "none"), "
                   + "HIGHESTMODSEQ \(inbox.highestModSeq == nil ? "none" : "yes"), selected in \(ms(start)) ms")
-            start = CFAbsoluteTimeGetCurrent()
-            let all = try await client.search("ALL", in: "INBOX", validity: inbox.uidValidity)
-            print("  INBOX UIDs found: \(all.count) in \(ms(start)) ms" + (all.count < Int(inbox.exists) ? " (fewer than the message count)" : ""))
+            if let limit = await client.messageLimit, Int(inbox.exists) > limit {
+                // One SEARCH over the whole folder would pass the limit and be refused.
+                print("  INBOX UIDs: not listed; the server's MESSAGELIMIT is \(limit)")
+            } else {
+                start = CFAbsoluteTimeGetCurrent()
+                let all = try await client.search("ALL", in: "INBOX", validity: inbox.uidValidity)
+                print("  INBOX UIDs found: \(all.count) in \(ms(start)) ms" + (all.count < Int(inbox.exists) ? " (fewer than the message count)" : ""))
+            }
             await client.logout()
         } catch {
             print("  IMAP failed: " + error.localizedDescription)

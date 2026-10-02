@@ -12,7 +12,7 @@ final class MailModel: ObservableObject {
     }
     @Published private(set) var status: MailStore.Status = .noMail
     @Published private(set) var mailboxes: [MailMailbox] = []
-    @Published var place: Place = .inbox { didSet { if oldValue != place { selectedID = nil; reload() } } }
+    @Published var place: Place = .inbox { didSet { if oldValue != place { selectedID = nil; reload(); syncPlace() } } }
     @Published var search = "" { didSet { if oldValue != search { reloadSoon() } } }
     /// The search field shows only while searching.
     @Published var searching = false
@@ -23,11 +23,7 @@ final class MailModel: ObservableObject {
     /// True while the mail window has the keyboard, so a message counts as read only when seen.
     /// Coming back to the window counts the message on screen.
     var windowIsKey = false { didSet { if windowIsKey != oldValue { armRead() } } }
-    /// True when Jevcast started Apple Mail for this session, so it can quit it again after.
-    private var startedMail = false
     private var readTimer: Task<Void, Never>?
-    /// Quits Apple Mail a moment after closing, unless the inbox opens again first.
-    private var quit: Task<Void, Never>?
     @Published private(set) var messages: [MailSummary] = [] {
         didSet { pageTriggerID = messages.count > 30 ? messages[messages.count - 30].rowID : messages.last?.rowID }
     }
@@ -35,6 +31,19 @@ final class MailModel: ObservableObject {
     private(set) var pageTriggerID: Int64?
     /// True while an older page may exist below the list.
     @Published private(set) var hasMore = false
+    /// Empty Trash or Junk: the mailbox and exactly the messages counted, waiting for your yes.
+    struct EmptyRequest: Identifiable {
+        let mailbox: MailMailbox
+        let uids: [UInt32]
+        let validity: UInt32
+        var id: Int64 { mailbox.rowID }
+    }
+    @Published var emptyRequest: EmptyRequest?
+    @Published private(set) var preparingEmpty = false
+
+    /// True while a Jevcast account's server may hold older mail than this Mac has for the list.
+    @Published private(set) var olderOnServer = false
+    private var loadingOlder = false
     /// False when Apple Mail is not running, so new mail is not reaching its index.
     @Published private(set) var mailRunning = true
     /// The message on screen counts as read however it got there: from the list, the keyboard, or
@@ -72,6 +81,7 @@ final class MailModel: ObservableObject {
     /// the first Escape of a discard.
     @Published var draft: Draft? {
         didSet {
+            persistComposition()
             guard oldValue?.id != draft?.id || oldValue?.fields != draft?.fields else { return }
             discardArmed = false
             if composeNote != nil { composeNote = nil }
@@ -92,7 +102,13 @@ final class MailModel: ObservableObject {
     /// Sends not finished yet: waiting for Undo or on their way to Mail.
     @Published var sendsInFlight = 0
     /// Drafts that did not go, oldest first. The banner offers Show.
-    @Published var unsent: [Unsent] = []
+    @Published var unsent: [Unsent] = [] { didSet { persistComposition() } }
+    @Published var deliveries: [MailDelivery] = [] { didSet { persistComposition() } }
+    @Published var showsOutbox = false
+    @Published var senders: [MailSendingIdentity] = []
+    let draftStore: MailDraftStore?
+    @Published var persistenceProblem: String?
+    var persistenceWork: Task<Void, Never>?
     /// Tickets of waiting sends that Undo took back.
     var undoneSends: Set<UUID> = []
     /// The latest send. Each send waits for the one before, so waiting for this waits for all.
@@ -148,12 +164,24 @@ final class MailModel: ObservableObject {
 
     init(quill: @escaping (QuillRequest) async throws -> QuillReply, quillAllowed: @escaping () -> Bool, statusProvider: @escaping @Sendable () -> MailStore.Status = { MailStore.status() },
          setRead: @escaping (Bool, MailSummary, MailMailbox, MailMailbox?) async throws -> Void = { try await MailActions.setRead($0, $1, in: $2, fallback: $3) },
-         sendDraft: @escaping (Draft, MailMailbox?) async throws -> Void = { try await MailModel.deliver($0, $1) }, undoDelay: TimeInterval = 5) {
+         sendDraft: @escaping (Draft, MailMailbox?) async throws -> Void = { try await MailModel.deliver($0, $1) }, undoDelay: TimeInterval = 5,
+         draftStore: MailDraftStore? = MailDraftStore.standard) {
+        self.draftStore = draftStore
         self.statusProvider = statusProvider
         self.setReadAction = setRead
         self.sendDraft = sendDraft
         self.undoDelay = undoDelay
         self.quill = quill; self.quillAllowed = quillAllowed
+        if let draftStore {
+            do {
+                let stored = try draftStore.load()
+                draft = stored.active; unsent = stored.unsent; deliveries = stored.deliveries
+                try draftStore.save(stored)
+            } catch {
+                persistenceProblem = "Saved drafts could not be read: " + error.localizedDescription
+                banner = persistenceProblem
+            }
+        }
         // Settings › Mail writes the same default; follow it while this window exists.
         defaultsObserver = NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .receive(on: DispatchQueue.main)
@@ -166,6 +194,7 @@ final class MailModel: ObservableObject {
             .debounce(for: .milliseconds(120), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self, self.poll != nil else { return }
+                self.loadSenders()
                 // A change of mail source, or a first account, needs the store found again.
                 if NativeMailCenter.isActive, let root = self.root, NativeMailCenter.isNativeRoot(root) { self.refresh() } else { self.refreshStatus() }
             }
@@ -186,7 +215,12 @@ final class MailModel: ObservableObject {
         }
     }
     var inboxes: [MailMailbox] { mailboxes.filter { $0.role == .inbox } }
-    var accounts: [String] { Array(Set(mailboxes.map(\.accountID))).sorted() }
+    var accounts: [String] { Array(Set(mailboxes.map(\.accountID))).sorted { accountTitle($0).localizedStandardCompare(accountTitle($1)) == .orderedAscending } }
+
+    /// The account's address for headings, such as in the mailbox picker; its ID when unknown.
+    func accountTitle(_ account: String) -> String {
+        senders.first { $0.accountID == account }?.address ?? account
+    }
     var unreadInInbox: Int { inboxes.map(\.unread).reduce(0, +) }
     var canUseQuill: Bool { quillAllowed() }
 
@@ -194,9 +228,7 @@ final class MailModel: ObservableObject {
 
     /// Checks access, loads mailboxes, and starts watching Mail's index while the window is open.
     func start() {
-        // Opening again soon after closing keeps Mail: the pending quit is dropped, and Mail is
-        // still the one Jevcast started.
-        if let quit { quit.cancel(); self.quit = nil; startedMail = true }
+        loadSenders()
         refreshStatus()
         poll?.cancel()
         poll = Task { @MainActor [weak self] in
@@ -217,38 +249,19 @@ final class MailModel: ObservableObject {
         }
     }
 
-    /// Closing the inbox quits Apple Mail when Jevcast started it, once pending changes are done,
-    /// so nothing extra runs between checks.
+    /// Closing never quits Apple Mail. Its own quit settings can permanently purge Trash.
     func stop() {
         poll?.cancel(); poll = nil; readTimer?.cancel()
         statusWork?.cancel(); statusWork = nil
         openWork?.cancel(); openWork = nil; pendingOpen = nil
         let accounts = Array(changedAccounts)
         changedAccounts = []
-        guard startedMail else { return }
-        startedMail = false
-        let pending = actionChain, sendingNow = sendTask
-        quit = Task { @MainActor [weak self] in
+        let pending = actionChain
+        Task {
             await pending?.value
-            // A message in its undo time still goes out through Mail before Mail quits.
-            await sendingNow?.value
-            // Mail sends changes such as read status to the server after it makes them. Quitting
-            // first would leave your phone out of step until Mail runs again.
             if !accounts.isEmpty { try? await MailActions.synchronize(accounts: accounts) }
-            // An action that started after closing, or Mail opened by you, keeps it running.
-            try? await Task.sleep(nanoseconds: accounts.isEmpty ? 1_500_000_000 : 15_000_000_000)
-            guard !Task.isCancelled else { return }
-            // `send` only puts a message in Mail's Outbox. Mail quits once the Outbox is empty; with
-            // mail still there after about a minute, Mail keeps running so it can deliver it.
-            let delivered = await MailOutbox.waitUntilEmpty()
-            guard !Task.isCancelled else { return }
-            if delivered, let mail = NSRunningApplication.runningApplications(withBundleIdentifier: MailActions.bundleID).first,
-               !MailActions.openedByUser {
-                // `quit` stays set until Mail has ended, so opening the inbox meanwhile starts Mail again hidden, as Jevcast's own.
-                await MailActions.quit(mail)
-            }
-            if !Task.isCancelled { self?.quit = nil }
         }
+        do { try saveComposition() } catch { banner = error.localizedDescription }
     }
 
     /// Starts Apple Mail hidden, if needed, and asks it to fetch new mail. New mail reaches the
@@ -257,7 +270,7 @@ final class MailModel: ObservableObject {
         // Jevcast's own accounts sync by themselves; Apple Mail is never started for them.
         if NativeMailCenter.isActive { checkForNewMail(); return }
         let wasRunning = AppleScript.isRunning(MailActions.bundleID)
-        if !wasRunning { startedMail = true; MailActions.openedByUser = false }
+        if !wasRunning { MailActions.openedByUser = false }
         checkForNewMail()
     }
     /// One "check for new mail" at a time. A failure shows once, not on every repeat.
@@ -344,6 +357,7 @@ final class MailModel: ObservableObject {
         generation += 1
         loadingMore = false; refreshing = false; reloading = true
         bodySearch = .off; bodyCursor = nil
+        olderOnServer = search.isEmpty && NativeMailCenter.activeEngine != nil
         let generation = self.generation
         updateMailRunning()
         loadWork = Task { @MainActor [weak self] in
@@ -425,6 +439,38 @@ final class MailModel: ObservableObject {
                 self.loadNextPage()
             }
         }
+    }
+
+    /// Selects the newest message of the list, as the launcher panel opens on it.
+    func showNewest() {
+        if selectedID != nil { select(nil, byUser: false) }
+        reload()
+    }
+
+    /// A Jevcast account reads a folder when it opens; until then the folder costs nothing.
+    private func syncPlace() {
+        guard case .mailbox(let id) = place, let engine = NativeMailCenter.activeEngine else { return }
+        Task { await engine.sync(MailSyncRequest(mailboxes: [id])) }
+    }
+
+    /// Reads older mail from a Jevcast account's server once the list shows all this Mac has.
+    func loadOlder() async {
+        guard olderOnServer, !loadingOlder, !hasMore, search.isEmpty, let engine = NativeMailCenter.activeEngine else { return }
+        loadingOlder = true
+        defer { loadingOlder = false }
+        let ids = Self.query(place, search, mailboxes).mailboxes, generation = self.generation
+        var more = false
+        do {
+            for id in ids { more = try await engine.loadOlder(id) || more }
+        } catch {
+            guard self.generation == generation else { return }
+            olderOnServer = false
+            banner = "Older mail could not be read: " + error.localizedDescription
+            return
+        }
+        guard self.generation == generation else { return }
+        olderOnServer = more
+        refresh()
     }
 
     /// Reads older rows for body matches, for about `budget` seconds or 200 matches.
@@ -715,10 +761,14 @@ final class MailModel: ObservableObject {
             // The next message shows and counts as read, as in Mail.
             select(messages.indices.contains(index) ? messages[index].rowID : messages.last?.rowID, byUser: false)
         } else if let index, let update { update(&messages[index]) }
+        let backend = MailBackend.current
         let previous = actionChain
         actionChain = Task { @MainActor [weak self] in
             await previous?.value
-            do { try await action() }
+            do {
+                guard backend == MailBackend.current else { throw LauncherError("The mail source changed. Nothing was changed.") }
+                try await action()
+            }
             catch {
                 // After a failed change the index decides the row again.
                 self?.removing.removeValue(forKey: message.rowID)
@@ -748,18 +798,72 @@ final class MailModel: ObservableObject {
         if selectedID != rowID { select(rowID, byUser: false) }
         delete()
     }
+    /// Delete moves a message to Trash. In the Trash of a Jevcast account it removes the message for good.
     func delete() {
         guard let message = selected, let box = actionBox(message) else { return }
-        perform("delete", removes: true) { try await MailActions.delete(message, in: box) }
+        let permanently = box.role == .trash && NativeMailCenter.isActive
+        perform(permanently ? "delete permanently" : "delete", removes: true) { try await MailActions.delete(message, in: box, permanently: permanently) }
     }
     /// Deletes every message in the list from the selected message's sender: for clearing out junk.
     func deleteAllFromSender() {
+        if let message = selected, actionBox(message)?.role == .trash {
+            banner = "In \(actionBox(message)?.name ?? "Trash"), delete messages one at a time, or use Empty."
+            return
+        }
         guard let sender = selected?.senderAddress, !sender.isEmpty else { return }
         let targets = messages.filter { $0.senderAddress.caseInsensitiveCompare(sender) == .orderedSame }
         for message in targets { delete(message.rowID) }
         banner = "Deleting \(targets.count) message" + (targets.count == 1 ? "" : "s") + " from \(sender)."
     }
     var selectedSender: String? { selected?.senderAddress }
+
+    /// True when the selected message is in its account's Junk mailbox.
+    var selectedIsJunk: Bool { selected.flatMap(actionBox)?.role == .junk }
+
+    /// Moves the selected message into its account's one Junk mailbox, or from Junk to its Inbox.
+    func setJunk(_ junk: Bool) {
+        guard let message = selected, let box = actionBox(message) else { return }
+        let targets = mailboxes.filter { $0.accountID == box.accountID && $0.role == (junk ? .junk : .inbox) }
+        guard targets.count == 1, let target = targets.first, target.rowID != box.rowID else {
+            banner = junk ? "This account has no single Junk mailbox." : "This account has no single Inbox."; return
+        }
+        perform(junk ? "mark as junk" : "move to Inbox", removes: true) { try await MailActions.move(message, from: box, to: target) }
+    }
+
+    /// The Trash or Junk mailbox on screen, when Empty can clear it: Jevcast accounts only.
+    var emptiableMailbox: MailMailbox? {
+        guard NativeMailCenter.isActive, case .mailbox(let id) = place, let box = mailbox(id), box.role == .trash || box.role == .junk else { return nil }
+        return box
+    }
+
+    /// Counts what Empty would remove, on the server, then asks. Only that list is removed.
+    func prepareEmpty() {
+        guard let box = emptiableMailbox, let engine = NativeMailCenter.activeEngine, !preparingEmpty else { return }
+        preparingEmpty = true
+        Task { @MainActor [weak self] in
+            defer { self?.preparingEmpty = false }
+            do {
+                let found = try await engine.contents(of: box.rowID)
+                guard let self else { return }
+                if found.uids.isEmpty { self.banner = "\(box.name) is already empty."; return }
+                self.emptyRequest = EmptyRequest(mailbox: box, uids: found.uids, validity: found.validity)
+            } catch { self?.banner = "\(box.name) could not be read: " + error.localizedDescription }
+        }
+    }
+
+    func confirmEmpty() {
+        guard let request = emptyRequest, let engine = NativeMailCenter.activeEngine else { return }
+        emptyRequest = nil
+        let name = request.mailbox.name, count = request.uids.count
+        banner = "Emptying \(name)…"
+        Task { @MainActor [weak self] in
+            do {
+                try await engine.empty(request.mailbox.rowID, uids: request.uids, validity: request.validity)
+                self?.banner = "Deleted \(count) message\(count == 1 ? "" : "s") from \(name) permanently."
+                self?.reload()
+            } catch { self?.banner = "\(name) was not emptied: " + error.localizedDescription }
+        }
+    }
     func toggleFlag() {
         guard let message = selected, let box = actionBox(message) else { return }
         let flagged = !message.flagged

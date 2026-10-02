@@ -86,6 +86,15 @@ public actor NativeMailEngine {
         for sync in syncs.values { await sync.request(request) }
     }
 
+    /// Reads one older batch of a mailbox when its list reaches the end of what this Mac has.
+    /// Returns whether the server holds older mail still.
+    public func loadOlder(_ mailboxRowID: Int64) async throws -> Bool {
+        for sync in syncs.values {
+            if let more = try await sync.loadOlder(mailboxRowID) { return more }
+        }
+        return false
+    }
+
     // MARK: Changes
 
     private func target(_ rowID: Int64) async throws -> (NativeMailStore.Location, MailAccountSync) {
@@ -122,17 +131,47 @@ public actor NativeMailEngine {
         guard let destination = try await store.mailbox(mailboxRowID), destination.account == location.mailbox.account else {
             throw MailError.notFound("Messages move only within one account.")
         }
+        if destination.rowID == location.mailbox.rowID { return }
         try await hide(location) { try await sync.move(location, to: destination) }
     }
 
-    /// Moves a message to Trash, or deletes it for good when it is in Trash or there is no Trash.
-    public func delete(_ rowID: Int64) async throws {
+    /// Delete moves a message to its account's one Trash. A message already in Trash is removed for
+    /// good only with `permanently`, which the app passes after you confirm; without it, it is refused.
+    public func delete(_ rowID: Int64, permanently: Bool = false) async throws {
         let (location, sync) = try await target(rowID)
-        let trash = try await store.mailboxes(account: location.mailbox.account).first { $0.role == .trash }
-        try await hide(location) {
-            if let trash, trash.rowID != location.mailbox.rowID { try await sync.move(location, to: trash) }
-            else { try await sync.expunge(location) }
+        let candidates = try await store.mailboxes(account: location.mailbox.account).filter { $0.role == .trash }
+        guard candidates.count == 1, let trash = candidates.first else {
+            throw MailError.notFound("Select one Trash mailbox in Settings › Mail. Nothing was deleted.")
         }
+        guard trash.rowID != location.mailbox.rowID else {
+            guard permanently else { throw MailError.notFound("This message is already in Trash. Delete it again to remove it permanently.") }
+            try await hide(location) { try await sync.deletePermanently(location) }
+            return
+        }
+        try await hide(location) { try await sync.move(location, to: trash) }
+    }
+
+    /// What Empty would remove from a Trash or Junk mailbox now, for the confirmation's count.
+    public func contents(of mailboxRowID: Int64) async throws -> (uids: [UInt32], validity: UInt32) {
+        let (box, sync) = try await emptiable(mailboxRowID)
+        return try await sync.contents(of: box)
+    }
+
+    /// Removes exactly `uids`, the list you confirmed, from a Trash or Junk mailbox for good.
+    public func empty(_ mailboxRowID: Int64, uids: [UInt32], validity: UInt32) async throws {
+        let (box, sync) = try await emptiable(mailboxRowID)
+        try await sync.empty(box, uids: uids, validity: validity)
+        try await store.remove(uids: uids, from: box.rowID)
+        changed()
+        await sync.request(MailSyncRequest(mailboxes: [box.rowID]))
+    }
+
+    private func emptiable(_ rowID: Int64) async throws -> (NativeMailStore.Mailbox, MailAccountSync) {
+        guard let box = try await store.mailbox(rowID), box.role == .trash || box.role == .junk else {
+            throw MailError.notFound("Only Trash and Junk can be emptied. Nothing was deleted.")
+        }
+        guard let sync = syncs[box.account] else { throw MailError.notFound("This mailbox's account is not set up.") }
+        return (box, sync)
     }
 
     /// Hides the row at once and drops it after the server's change; shows it again on failure.
@@ -174,42 +213,103 @@ public actor NativeMailEngine {
 
     // MARK: Sending
 
-    /// A new message from `accountID`, or from the first account.
-    public func send(from accountID: String? = nil, to: [String], cc: [String], subject: String, body: String) async throws {
-        guard let account = accounts.first(where: { $0.id == accountID }) ?? accounts.first, let sync = syncs[account.id] else {
-            throw MailError.notFound("Add a mail account in Settings › Mail first.")
-        }
-        var message = OutgoingMessage(from: account.sender, to: to.map { MailContact(address: $0) }, subject: subject, body: body)
-        message.cc = cc.map { MailContact(address: $0) }
+    /// Who a message goes to, as the composer shows it, with display names.
+    public struct Recipients: Sendable, Equatable {
+        public var to: [MailContact], cc: [MailContact], bcc: [MailContact]
+        public init(to: [MailContact], cc: [MailContact] = [], bcc: [MailContact] = []) { self.to = to; self.cc = cc; self.bcc = bcc }
+    }
+
+    /// A new message from the explicitly selected account. `recipients`, when given, replaces `to`
+    /// and `cc` and adds Bcc.
+    public func send(from accountID: String, to: [String], cc: [String], subject: String, body: String,
+                     html: String? = nil, attachments: [OutgoingMessage.Attachment] = [], messageID: String? = nil,
+                     recipients: Recipients? = nil) async throws {
+        let sync = try sendingSync(accountID)
+        let account = sync.account
+        let chosen = recipients ?? Recipients(to: to.map { MailContact(address: $0) }, cc: cc.map { MailContact(address: $0) })
+        var message = OutgoingMessage(from: account.sender, to: chosen.to, subject: subject, body: body)
+        message.cc = chosen.cc; message.bcc = chosen.bcc
+        message.html = html; message.attachments = attachments
+        if let messageID { message.messageID = messageID }
         try await sync.send(message)
     }
 
-    public func reply(to rowID: Int64, text: String, all: Bool) async throws {
-        let (location, sync, _, original) = try await original(rowID)
-        let account = sync.account
-        let (to, cc) = MailReplies.recipients(of: original, all: all, own: [account.email])
-        guard !to.isEmpty else { throw MailError.notFound("This message has no address to reply to.") }
+    /// A reply. The composer's `recipients` and `subject` win over the ones worked out from the
+    /// original. Without `quote`, only your text goes. `saved` is the original as the draft kept it:
+    /// it answers a message moved or deleted during the undo time.
+    public func reply(to rowID: Int64, text: String, all: Bool, from accountID: String, html: String? = nil,
+                      attachments: [OutgoingMessage.Attachment] = [], messageID: String? = nil, expectedMessageID: String? = nil,
+                      recipients: Recipients? = nil, subject: String? = nil, quote: Bool = true,
+                      saved: MIMEMessage? = nil, savedDate: Date? = nil) async throws {
+        let sending = try sendingSync(accountID)
+        let answered = try await answered(rowID, expectedMessageID: expectedMessageID, saved: saved, savedDate: savedDate, verb: "replying")
+        let original = answered.message
+        let worked = MailReplies.recipients(of: original, all: all, own: Set(accounts.map(\.email)))
+        let chosen = recipients ?? Recipients(to: worked.to, cc: worked.cc)
+        guard !chosen.to.isEmpty else { throw MailError.notFound("This message has no address to reply to.") }
+        let sender = original.header("From") ?? ""
         let threading = MailReplies.references(of: original)
-        var message = OutgoingMessage(from: account.sender, to: to, subject: MailReplies.replySubject(original.header("Subject") ?? ""),
-                                      body: MailReplies.replyBody(text, original: original, sender: original.header("From") ?? "", date: location.date))
-        message.cc = cc
+        var message = OutgoingMessage(from: sending.account.sender, to: chosen.to, subject: subject ?? MailReplies.replySubject(original.header("Subject") ?? ""),
+                                      body: MailReplies.replyBody(text, original: original, sender: sender, date: answered.date, quote: quote))
+        message.cc = chosen.cc; message.bcc = chosen.bcc
         message.inReplyTo = threading.inReplyTo
         message.references = threading.references
-        try await sync.send(message)
-        try? await sync.setFlag("\\Answered", true, at: location)
+        message.html = (html ?? MailHTML.plain(text))
+            + (quote ? MailHTML.quoted(original, attribution: MailReplies.replyAttribution(date: answered.date, sender: sender)) : "")
+        message.attachments = attachments + (quote ? Self.inlineAttachments(original) : [])
+        if let messageID { message.messageID = messageID }
+        try await sending.send(message)
+        if let location = answered.location, let sync = answered.sync { try? await sync.setFlag("\\Answered", true, at: location) }
     }
 
-    /// Forwards the message's text; its attachments go along as the original message, attached.
-    public func forward(_ rowID: Int64, text: String, to: [String]) async throws {
-        let (location, sync, raw, original) = try await original(rowID)
-        let account = sync.account
-        guard !to.isEmpty else { throw MailError.notFound("Add at least one recipient.") }
-        var message = OutgoingMessage(from: account.sender, to: to.map { MailContact(address: $0) },
-                                      subject: MailReplies.forwardSubject(original.header("Subject") ?? ""),
-                                      body: MailReplies.forwardBody(text, original: original, date: location.date))
-        if !original.attachments.isEmpty {
-            message.attachments = [.init(filename: "Forwarded message.eml", mimeType: "message/rfc822", data: raw)]
+    /// A forward: your text, the original's headers and HTML, and its attachments one by one.
+    public func forward(_ rowID: Int64, text: String, to: [String], from accountID: String, html: String? = nil,
+                        attachments: [OutgoingMessage.Attachment] = [], messageID: String? = nil, expectedMessageID: String? = nil,
+                        recipients: Recipients? = nil, subject: String? = nil, saved: MIMEMessage? = nil, savedDate: Date? = nil) async throws {
+        let sending = try sendingSync(accountID)
+        let answered = try await answered(rowID, expectedMessageID: expectedMessageID, saved: saved, savedDate: savedDate, verb: "forwarding")
+        let original = answered.message
+        let chosen = recipients ?? Recipients(to: to.map { MailContact(address: $0) })
+        guard !chosen.to.isEmpty else { throw MailError.notFound("Add at least one recipient.") }
+        let files = answered.raw.map(MIMEMessage.files) ?? []
+        // A file the forward cannot carry must not vanish without a word.
+        guard files.count >= original.attachments.count else {
+            throw MailError.notFound("The original message moved before it could be forwarded with its attachments. Open it again and forward it.")
         }
-        try await sync.send(message)
+        var message = OutgoingMessage(from: sending.account.sender, to: chosen.to, subject: subject ?? MailReplies.forwardSubject(original.header("Subject") ?? ""),
+                                      body: MailReplies.forwardBody(text, original: original, date: answered.date))
+        message.cc = chosen.cc; message.bcc = chosen.bcc
+        message.html = (html ?? MailHTML.plain(text)) + MailHTML.forwarded(original, date: MailReplies.attribution(answered.date))
+        message.attachments = attachments + Self.inlineAttachments(original)
+            + files.map { OutgoingMessage.Attachment(filename: $0.name, mimeType: $0.mimeType, data: $0.data) }
+        if let messageID { message.messageID = messageID }
+        try await sending.send(message)
+    }
+
+    /// The message being answered: from this Mac and its server, or, once it left this Mac, the copy
+    /// the draft kept. A message that changed under its row is refused.
+    private func answered(_ rowID: Int64, expectedMessageID: String?, saved: MIMEMessage?, savedDate: Date?, verb: String) async throws
+        -> (message: MIMEMessage, raw: Data?, date: Date, location: NativeMailStore.Location?, sync: MailAccountSync?) {
+        if let saved, try await store.location(of: rowID) == nil {
+            return (saved, nil, savedDate ?? Date(), nil, nil)
+        }
+        let (location, sync, raw, message) = try await original(rowID)
+        if let expectedMessageID, message.header("Message-ID") != expectedMessageID {
+            throw MailError.notFound("The original message changed. Open it again before \(verb).")
+        }
+        return (message, raw, location.date, location, sync)
+    }
+
+    private func sendingSync(_ id: String) throws -> MailAccountSync {
+        guard let sync = syncs[id], accounts.contains(where: { $0.id == id }) else {
+            throw MailError.notFound("The selected sending account is not available. Nothing was sent.")
+        }
+        return sync
+    }
+
+    private static func inlineAttachments(_ message: MIMEMessage) -> [OutgoingMessage.Attachment] {
+        message.inlineImages.sorted { $0.key < $1.key }.map { id, image in
+            .init(filename: "inline-image", mimeType: image.mimeType, data: image.data, contentID: id)
+        }
     }
 }

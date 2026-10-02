@@ -5,7 +5,9 @@ import Foundation
 /// use and again after the connection drops. Mailbox commands select their mailbox first.
 public actor IMAPClient {
     public typealias TransportFactory = @Sendable (_ host: String, _ port: Int, _ tls: Bool) -> MailTransport
-    public static let networkTransport: TransportFactory = { StreamTaskTransport(host: $0, port: $1, tls: $2) }
+    public static let networkTransport: TransportFactory = {
+        MailIOPolicy.isOffline ? OfflineMailTransport() : StreamTaskTransport(host: $0, port: $1, tls: $2)
+    }
 
     public struct Settings: Sendable, Equatable {
         public var server: MailServer
@@ -52,6 +54,12 @@ public actor IMAPClient {
     public var isConnected: Bool { transport != nil }
 
     public func has(_ capability: String) -> Bool { capabilities.contains(capability.uppercased()) }
+
+    /// The most messages one command may name or return (RFC 9738 MESSAGELIMIT), such as Yahoo's
+    /// 1000. A search that would find more is refused or cut short.
+    public var messageLimit: Int? {
+        capabilities.lazy.compactMap { $0.hasPrefix("MESSAGELIMIT=") ? Int($0.dropFirst("MESSAGELIMIT=".count)) : nil }.first
+    }
 
     // MARK: One command at a time
 
@@ -110,7 +118,7 @@ public actor IMAPClient {
 
     private func connect() async throws {
         disconnect()
-        let server = settings.server
+        let server = try settings.server.validated()
         let transport = makeTransport(server.host, server.port, server.security == .tls)
         self.transport = transport
         do {
@@ -178,8 +186,8 @@ public actor IMAPClient {
                     return sent ? Data() : Data(payload.utf8)
                 }
             }
-        } catch MailError.commandFailed(_, _, let text) {
-            throw MailError.signInFailed(text)
+        } catch MailError.commandFailed {
+            throw MailError.signInFailed("Check the sign-in details and the account's IMAP access.")
         }
     }
 

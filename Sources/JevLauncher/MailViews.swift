@@ -16,22 +16,20 @@ struct MailRootView: View {
             }
         }
         .frame(minWidth: 760, minHeight: 480)
-        .sheet(item: Binding(get: { model.draft.map { DraftBox(draft: $0) } }, set: { if $0 == nil { model.draft = nil } })) { _ in
-            // A new draft in the same sheet starts with its own focus.
-            ComposeView(model: model).id(model.draft?.id)
-        }
+        .sheet(isPresented: Binding(get: { model.showsOutbox && model.draft == nil }, set: { model.showsOutbox = $0 })) { MailDeliveryView(model: model) }
     }
 
     private var split: some View {
         HSplitView {
             MailList(model: model).frame(minWidth: 280, idealWidth: 340, maxWidth: 460)
-            MailReader(model: model).frame(minWidth: 380, maxWidth: .infinity)
+            // A reply, forward, or new message takes the reading pane, not a separate window.
+            Group {
+                if model.draft != nil { ComposeView(model: model).id(model.draft?.id) } else { MailReader(model: model) }
+            }.frame(minWidth: 420, maxWidth: .infinity)
         }
         .overlay(alignment: .bottom) { MailBanner(model: model).padding(.bottom, 14) }
     }
 }
-
-private struct DraftBox: Identifiable { let draft: MailModel.Draft; var id: String { "draft" } }
 
 struct MailSetupView: View {
     @ObservedObject var model: MailModel
@@ -86,10 +84,12 @@ struct MailList: View {
             HStack(spacing: 10) {
                 MailPlacePicker(model: model).font(.headline)
                 if model.unreadInInbox > 0 { Text("\(model.unreadInInbox) unread").foregroundStyle(.secondary) }
+                MailEmptyButton(model: model)
                 Spacer()
                 Button { model.searching.toggle() } label: { Image(systemName: "magnifyingglass") }.help("Search (⌘F)")
                 Button { model.checkMail() } label: { Image(systemName: "arrow.clockwise") }.help("Check for new mail")
                 Button { model.compose() } label: { Image(systemName: "square.and.pencil") }.help("New message (⌘N)")
+                Button { model.showsOutbox = true } label: { Image(systemName: "tray.and.arrow.up") }.help("Outbox and send history")
             }
             .buttonStyle(.borderless)
             MailClosedNote(model: model)
@@ -272,6 +272,7 @@ struct MailReader: View {
                 if !composing {
                     Button(inPanel ? "Forward (⇧⌘F)" : "Forward (F)") { model.forward() }
                     Button((model.selected?.flagged == true ? "Unflag" : "Flag") + (inPanel ? "" : " (S)")) { model.toggleFlag() }
+                    Button(model.selectedIsJunk ? "Not Junk: Move to Inbox" : "Mark as Junk") { model.setJunk(!model.selectedIsJunk) }
                     let destinations = model.moveDestinations
                     if !destinations.isEmpty {
                         Menu("Move To") {

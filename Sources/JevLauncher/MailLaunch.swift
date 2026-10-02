@@ -45,13 +45,6 @@ extension MailActions {
         return apps.allSatisfy { $0.processIdentifier == quittingPID } ? .quitting : .running
     }
 
-    /// Asks Mail to quit and waits until it has, up to 10 seconds. A launch meanwhile waits too.
-    @MainActor static func quit(_ app: NSRunningApplication) async {
-        quittingPID = app.processIdentifier
-        app.terminate()
-        await waitForQuit()
-    }
-
     @MainActor private static func waitForQuit() async {
         var tries = 0
         while mailState() == .quitting, !Task.isCancelled, tries < 100 {
@@ -64,6 +57,7 @@ extension MailActions {
 
     /// Starts Mail hidden, without taking focus, and waits until it answers.
     @MainActor private static func openHidden() async throws {
+        try MailIOPolicy.requireOnline()
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
             throw LauncherError("Apple Mail is not installed.")
         }

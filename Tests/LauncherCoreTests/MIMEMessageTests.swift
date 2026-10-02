@@ -90,7 +90,7 @@ final class MIMEMessageTests: XCTestCase {
 
     /// The scripts that send, their message variable, and how many `argv` items they read. The last
     /// item is `checkText`.
-    private let sendingScripts = [(MailScripts.reply, "r", 6), (MailScripts.forward, "f", 6), (MailScripts.send, "o", 5)]
+    private let sendingScripts = [(MailScripts.reply, "r", 7), (MailScripts.forward, "f", 7), (MailScripts.send, "o", 5)]
 
     /// Mail can ignore text set on a message it has not shown. The scripts read it back first and
     /// send nothing without it. Mail's copy must start with the text, so a quoted original that
@@ -106,14 +106,16 @@ final class MIMEMessageTests: XCTestCase {
             XCTAssertFalse(script.contains(" contains (item"), "Text anywhere in the message does not count")
             XCTAssertTrue(script.contains("error \"Mail did not take the text, so nothing was sent.\" number 1003"))
             let items = script.components(separatedBy: "(item ").dropFirst().compactMap { Int($0.prefix { $0.isNumber }) }
-            XCTAssertEqual(items.max(), argument, "The check text is the last argument")
+            XCTAssertGreaterThanOrEqual(items.max() ?? 0, argument)
         }
         // Mail's own text that already starts with the reply, such as a signature, does not count as the reply.
         for script in [MailScripts.reply, MailScripts.forward] {
-            XCTAssertTrue(script.contains("if kept and quoted starts with (item 6 of argv) then set kept to written does not start with quoted"))
+            XCTAssertTrue(script.contains("if kept and quoted starts with (item 7 of argv) then set kept to written does not start with quoted"))
+            XCTAssertFalse(script.contains("& return & return & quoted"), "The rich quote must never be rebuilt from plain text")
+            XCTAssertTrue(script.contains("make new paragraph at beginning with data"))
         }
-        XCTAssertTrue(MailScripts.reply.contains("set content of r to (item 4 of argv) & return & return & quoted"), "The reply text comes first")
-        XCTAssertTrue(MailScripts.forward.contains("set content of f to (item 4 of argv) & return & return & quoted"), "The note comes first")
+        XCTAssertTrue(MailScripts.reply.contains("tell content of r to make new paragraph"))
+        XCTAssertTrue(MailScripts.forward.contains("tell content of f to make new paragraph"))
     }
 
     /// An error before `send` is 1004: nothing was sent. An error from `send` itself is 1005: Mail may

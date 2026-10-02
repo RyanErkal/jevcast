@@ -19,6 +19,7 @@ struct JevLauncherApp {
         if CommandLine.arguments.contains("--hyper-led-test") { HyperKeyController.runLightTest(); return }
         if CommandLine.arguments.contains("--diagnose-mail") { Diagnostics.mail(); return }
         if CommandLine.arguments.contains("--diagnose-native-mail") { Diagnostics.nativeMail(); return }
+        if CommandLine.arguments.contains("--diagnose-mail-setup") { Diagnostics.mailSetup(); return }
         if CommandLine.arguments.contains("--cleanup") { Diagnostics.cleanup(apply: CommandLine.arguments.contains("--apply")); return }
         if let index = CommandLine.arguments.firstIndex(of: "--diagnose-source"), CommandLine.arguments.indices.contains(index + 1) {
             Diagnostics.source(CommandLine.arguments[index + 1]); return
@@ -296,7 +297,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             steps.append(("", 0.05, { nil }, { NotchSnapshots.writeAll(to: directory) }))
             let shots: [(String, AnyView, NSSize)] = [
                 ("automations-approval", AnyView(AutomationsWindow.snapshotApproval()), NSSize(width: 760, height: 640)),
-                ("automations-editor", AnyView(AutomationsWindow.snapshotEditor(.dataRefresh).frame(width: 720, height: 820)), NSSize(width: 720, height: 820))
+                ("automations-editor", AnyView(AutomationsWindow.snapshotEditor(.dataRefresh).frame(width: 720, height: 820)), NSSize(width: 720, height: 820)),
+                ("mail-compose", AnyView(MailSnapshots.composer()), NSSize(width: 640, height: 520)),
+                ("mail-reply", AnyView(MailSnapshots.reply()), NSSize(width: 820, height: 760)),
+                ("mail-outbox", AnyView(MailSnapshots.outbox()), NSSize(width: 540, height: 310)),
+                ("mail-add-account", AnyView(AddMailAccountSheet(demo: true)), NSSize(width: 520, height: 640))
             ]
             for (name, view, size) in shots {
                 steps.append((name, 1.2, { [weak self] in self?.automationSnapshotWindow?.contentView }, { [weak self] in

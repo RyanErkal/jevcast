@@ -18,9 +18,23 @@ extension MailAccountSync {
         await signal.post(MailSyncRequest(mailboxes: [destination.rowID]))
     }
 
-    /// Deletes for good, as from Trash, or when the account has no Trash.
-    public func expunge(_ location: NativeMailStore.Location) async throws {
-        try await actionClient.expunge(uids: IMAPSequenceSet([location.uid]), in: location.mailbox.name, validity: try validity(location))
+    /// Removes one message for good, by its UID. Only for a message already in Trash, after the user confirmed.
+    public func deletePermanently(_ location: NativeMailStore.Location) async throws {
+        try await actionClient.deletePermanently(uids: IMAPSequenceSet([location.uid]), in: location.mailbox.name, validity: try validity(location))
+    }
+
+    /// Every message in `box` on the server now, by UID, read in ranges inside its MESSAGELIMIT.
+    /// The list is what Empty removes, so mail that arrives after the count stays.
+    public func contents(of box: NativeMailStore.Mailbox) async throws -> (uids: [UInt32], validity: UInt32) {
+        let info = try await actionClient.select(box.name)
+        if let known = box.uidValidity, known != info.uidValidity { throw MailError.uidValidityChanged(mailbox: box.name) }
+        let found = try await newestUIDs(.max, below: info.uidNext ?? .max, above: 0, in: box.name, validity: info.uidValidity, client: actionClient)
+        return (found.uids, info.uidValidity)
+    }
+
+    /// Removes exactly `uids` from `box` for good.
+    public func empty(_ box: NativeMailStore.Mailbox, uids: [UInt32], validity: UInt32) async throws {
+        try await actionClient.deletePermanently(uids: IMAPSequenceSet(uids), in: box.name, validity: validity)
     }
 
     /// The whole message from the server, for opening, replying, or forwarding.
@@ -39,8 +53,9 @@ extension MailAccountSync {
         let data = MailComposer.render(message)
         try await smtp.send(from: account.email, recipients: message.recipients, message: data)
         guard account.savesSentCopy else { return }
-        guard let sent = mailboxes.first(where: { $0.role == .sent }) else {
-            notice(account.id, "Sent, but this account has no Sent mailbox for a copy.")
+        let candidates = mailboxes.filter { $0.role == .sent }
+        guard candidates.count == 1, let sent = candidates.first else {
+            notice(account.id, "Sent, but no copy was saved. Select one Sent folder in Settings › Mail.")
             return
         }
         do {

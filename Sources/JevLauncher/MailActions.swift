@@ -11,7 +11,11 @@ enum MailActions {
     static var openedByUser = false
 
     /// The engine for Jevcast accounts, or nil when Apple Mail is the mail source.
-    private static func native() throws -> NativeMailEngine? {
+    private static func native(_ mailbox: MailMailbox? = nil) throws -> NativeMailEngine? {
+        try MailIOPolicy.requireOnline()
+        if let mailbox, (mailbox.serverRole != nil) != NativeMailCenter.isActive {
+            throw LauncherError("The mail source changed. Nothing was changed or sent.")
+        }
         guard NativeMailCenter.isActive else { return nil }
         guard let engine = NativeMailCenter.activeEngine else { throw LauncherError("Add a mail account in Settings › Mail first.") }
         return engine
@@ -19,18 +23,21 @@ enum MailActions {
 
     /// Starts Mail hidden, without taking focus, and waits until it answers. See `MailLaunch`.
     static func ensureRunning() async throws {
+        try MailIOPolicy.requireOnline()
         if NativeMailCenter.isActive { return }
         try await launcher.ensureRunning()
     }
 
     static func run(_ script: String, _ arguments: [String]) async throws {
         try await ensureRunning()
+        guard !NativeMailCenter.isActive else { throw LauncherError("The mail source changed. Nothing was changed.") }
         _ = try await AppleScript.run(script, arguments, app: bundleID, name: "Mail", timeout: 30)
     }
 
     /// Runs a script that sends mail. When Mail may have sent the message, the error is `MailMaybeSentError`.
     private static func runSending(_ script: String, _ arguments: [String]) async throws {
         try await ensureRunning()
+        guard !NativeMailCenter.isActive else { throw LauncherError("The mail source changed. Nothing was sent.") }
         // Nothing has reached Mail yet, so a cancel here means nothing was sent.
         try Task.checkCancellation()
         do { _ = try await AppleScript.run(script, arguments, app: bundleID, name: "Mail", timeout: 30) }
@@ -59,21 +66,32 @@ enum MailActions {
     /// The number of messages in Mail's Outbox: 0 when Mail is not running, nil when Mail does not
     /// answer. It never starts Mail.
     static func outboxCount() async -> Int? {
+        guard !MailIOPolicy.isOffline else { return nil }
         guard AppleScript.isRunning(bundleID) else { return 0 }
         guard let output = try? await AppleScript.run(MailScripts.outboxCount, app: bundleID, name: "Mail", timeout: 15),
               let count = Int(output.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
-        return max(count, 0)
+        return count >= 0 ? count : nil
     }
 
-    private static func target(_ message: MailSummary, _ mailbox: MailMailbox) -> [String] {
-        [mailbox.accountID, mailbox.path, String(message.rowID)]
+    static func target(_ message: MailSummary, _ mailbox: MailMailbox, expectedMessageID: String? = nil) async throws -> [String] {
+        try MailIOPolicy.requireOnline()
+        guard !NativeMailCenter.isActive, mailbox.serverRole == nil else { throw LauncherError("The mail source changed. Nothing was changed or sent.") }
+        guard case .ready(let root) = MailStore.status() else { throw LauncherError("The original message could not be verified. Nothing was changed.") }
+        let source = await Task.detached { MailStore.message(root: root, mailbox: mailbox, rowID: message.rowID) }.value
+        guard let source, let id = source.header("Message-ID"), !id.isEmpty,
+              (source.header("Subject") ?? "") == message.subject,
+              MailAddress.list(source.header("From") ?? "").first?.address.lowercased() == message.senderAddress.lowercased(),
+              expectedMessageID == nil || expectedMessageID == id else {
+            throw LauncherError("The original message could not be verified. Open it again before changing it.")
+        }
+        return [mailbox.accountID, mailbox.path, String(message.rowID), id.trimmingCharacters(in: CharacterSet(charactersIn: "<> \r\n\t"))]
     }
 
     /// Mail can miss a change in its first seconds after it starts, so a failed change is tried once
     /// more, in `fallback` when given: the row's own mailbox, such as Gmail's All Mail for an Inbox row.
     /// Read status belongs to the message, so either mailbox changes it on the server.
     static func setRead(_ read: Bool, _ message: MailSummary, in mailbox: MailMailbox, fallback: MailMailbox? = nil) async throws {
-        if let engine = try native() { return try await engine.setRead(message.rowID, read) }
+        if let engine = try native(mailbox) { return try await engine.setRead(message.rowID, read) }
         let value = read ? "true" : "false"
         do { try await run(MailScripts.setRead, target(message, mailbox) + [value]) }
         catch let problem as SourceProblem { throw problem }
@@ -84,38 +102,57 @@ enum MailActions {
     }
     /// Asks Mail to send pending changes for these accounts to their servers. Does nothing when Mail is not running.
     static func synchronize(accounts: [String]) async throws {
+        try MailIOPolicy.requireOnline()
         guard !accounts.isEmpty, !NativeMailCenter.isActive, AppleScript.isRunning(bundleID) else { return }
         _ = try await AppleScript.run(MailScripts.synchronize, accounts, app: bundleID, name: "Mail", timeout: 30)
     }
     static func setFlagged(_ flagged: Bool, _ message: MailSummary, in mailbox: MailMailbox) async throws {
-        if let engine = try native() { return try await engine.setFlagged(message.rowID, flagged) }
+        if let engine = try native(mailbox) { return try await engine.setFlagged(message.rowID, flagged) }
         try await run(MailScripts.setFlagged, target(message, mailbox) + [flagged ? "true" : "false"])
     }
-    static func delete(_ message: MailSummary, in mailbox: MailMailbox) async throws {
-        if let engine = try native() { return try await engine.delete(message.rowID) }
-        try await run(MailScripts.delete, target(message, mailbox))
+    /// `permanently` removes a message that is already in Trash for good, after you confirmed.
+    /// Only Jevcast's own accounts do that; Apple Mail's Trash is never purged from here.
+    static func delete(_ message: MailSummary, in mailbox: MailMailbox, permanently: Bool = false) async throws {
+        if let engine = try native(mailbox) { return try await engine.delete(message.rowID, permanently: permanently) }
+        guard mailbox.role != .trash else { throw LauncherError("This message is already in Trash. Jevcast does not delete mail permanently.") }
+        guard case .ready(let root) = MailStore.status() else { throw LauncherError("The Trash mailbox could not be read. Nothing was deleted.") }
+        let boxes = try await Task.detached { try MailStore.mailboxes(root: root) }.value
+        let candidates = boxes.filter { $0.accountID == mailbox.accountID && $0.role == .trash }
+        guard candidates.count == 1, let trash = candidates.first else { throw LauncherError("This account has no unique Trash mailbox. Nothing was deleted.") }
+        try await run(MailScripts.delete, target(message, mailbox) + [trash.path])
     }
     static func move(_ message: MailSummary, from mailbox: MailMailbox, to destination: MailMailbox) async throws {
         guard destination.accountID == mailbox.accountID else { throw LauncherError("Messages move only within one account.") }
-        if let engine = try native() { return try await engine.move(message.rowID, to: destination.rowID) }
+        if let engine = try native(mailbox) { return try await engine.move(message.rowID, to: destination.rowID) }
         try await run(MailScripts.move, target(message, mailbox) + [destination.path])
     }
     /// Apple Mail gets the text without leading white space, so Mail's copy starts with `checkText`.
-    static func reply(_ message: MailSummary, in mailbox: MailMailbox, text: String, all: Bool) async throws {
-        if let engine = try native() { return try await engine.reply(to: message.rowID, text: text, all: all) }
+    static func reply(_ message: MailSummary, in mailbox: MailMailbox, text: String, all: Bool, accountID: String, address: String,
+                      attachments: [OutgoingMessage.Attachment] = [], expectedMessageID: String? = nil) async throws {
+        if let engine = try native(mailbox) { return try await engine.reply(to: message.rowID, text: text, all: all, from: accountID, attachments: attachments, expectedMessageID: expectedMessageID) }
         let text = MailScripts.sendingText(text)
-        try await runSending(MailScripts.reply, target(message, mailbox) + [text, all ? "true" : "false", MailScripts.checkText(text)])
+        let stage = try MailAttachmentStaging(attachments)
+        try await runSending(MailScripts.reply, target(message, mailbox, expectedMessageID: expectedMessageID)
+            + [text, all ? "true" : "false", MailScripts.checkText(text), accountID, address, stage.paths.joined(separator: "\n")])
+        withExtendedLifetime(stage) {}
     }
-    static func forward(_ message: MailSummary, in mailbox: MailMailbox, text: String, to recipients: [String]) async throws {
-        if let engine = try native() { return try await engine.forward(message.rowID, text: text, to: recipients) }
+    static func forward(_ message: MailSummary, in mailbox: MailMailbox, text: String, to recipients: [String], accountID: String, address: String,
+                        attachments: [OutgoingMessage.Attachment] = [], expectedMessageID: String? = nil) async throws {
+        if let engine = try native(mailbox) { return try await engine.forward(message.rowID, text: text, to: recipients, from: accountID, attachments: attachments, expectedMessageID: expectedMessageID) }
         let text = MailScripts.sendingText(text)
-        try await runSending(MailScripts.forward, target(message, mailbox) + [text, recipients.joined(separator: "\n"), MailScripts.checkText(text)])
+        let stage = try MailAttachmentStaging(attachments)
+        try await runSending(MailScripts.forward, target(message, mailbox, expectedMessageID: expectedMessageID)
+            + [text, recipients.joined(separator: "\n"), MailScripts.checkText(text), accountID, address, stage.paths.joined(separator: "\n")])
+        withExtendedLifetime(stage) {}
     }
-    static func send(to: [String], cc: [String], subject: String, body: String) async throws {
+    static func send(to: [String], cc: [String], subject: String, body: String, accountID: String, address: String,
+                     attachments: [OutgoingMessage.Attachment] = []) async throws {
         guard !to.isEmpty else { throw LauncherError("Add at least one recipient.") }
-        if let engine = try native() { return try await engine.send(to: to, cc: cc, subject: subject, body: body) }
+        if let engine = try native() { return try await engine.send(from: accountID, to: to, cc: cc, subject: subject, body: body, attachments: attachments) }
         let body = MailScripts.sendingText(body)
-        try await runSending(MailScripts.send, [to.joined(separator: "\n"), cc.joined(separator: "\n"), subject, body, MailScripts.checkText(body)])
+        let stage = try MailAttachmentStaging(attachments)
+        try await runSending(MailScripts.send, [to.joined(separator: "\n"), cc.joined(separator: "\n"), subject, body, MailScripts.checkText(body), accountID, address, stage.paths.joined(separator: "\n")])
+        withExtendedLifetime(stage) {}
     }
     static func checkForNewMail() async throws {
         if let engine = try native() { return await engine.sync(.inboxOnly) }
@@ -127,6 +164,13 @@ enum MailActions {
     }
 
     /// "a@b.c, Name <d@e.f>; g@h.i" as addresses. Rejects text that is not an address.
+    /// The addresses with their names, such as "Sam Lee <sam@example.com>", checked as `addresses` checks them.
+    static func contacts(_ text: String) throws -> [MailContact] {
+        _ = try addresses(text)
+        let parts = text.replacingOccurrences(of: ";", with: ",").replacingOccurrences(of: "\n", with: ",")
+        return MailAddress.list(parts).filter { !$0.address.isEmpty }.map { MailContact(name: $0.name, address: $0.address) }
+    }
+
     static func addresses(_ text: String) throws -> [String] {
         let parts = text.replacingOccurrences(of: ";", with: ",").replacingOccurrences(of: "\n", with: ",")
         let found = MailAddress.list(parts).map(\.address).filter { !$0.isEmpty }

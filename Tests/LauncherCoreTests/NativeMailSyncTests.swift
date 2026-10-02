@@ -24,7 +24,7 @@ final class NativeMailSyncTests: XCTestCase {
 
     private let account = NativeMailAccount(id: "acct-1", provider: .yahoo, name: "Me", email: "me@yahoo.ie",
                                             imap: MailServer(host: "imap.example.com", port: 993, security: .tls),
-                                            smtp: MailServer(host: "smtp.example.com", port: 465, security: .tls))
+                                            smtp: MailServer(host: "smtp.example.com", port: 465, security: .tls), savesSentCopy: true)
 
     private var transport: IMAPClient.TransportFactory {
         let imap = server!, smtp = smtp!
@@ -67,26 +67,38 @@ final class NativeMailSyncTests: XCTestCase {
 
     // MARK: Sync
 
-    func testFirstSyncTakesTheNewestThenFillsInOlderMail() async throws {
+    func testFirstSyncTakesOnlyTheNewestAndOlderMailWaitsForTheList() async throws {
         for n in 1...5 { server.deliver(to: "INBOX", subject: "Inbox \(n)", date: Date(timeIntervalSince1970: 1_790_000_000 + Double(n))) }
         server.deliver(to: "Archive", subject: "Kept", flags: ["\\Seen"])
         var policy = MailSyncPolicy()
-        policy.firstInbox = 3; policy.headerBatch = 2; policy.backfillBatch = 1
+        policy.firstInbox = 3; policy.headerBatch = 2; policy.olderBatch = 1
         let sync = makeSync(policy)
         await pass(sync, .everything)
-        // The newest three first; a full pass also takes one older step.
-        let first = try subjects("INBOX")
-        XCTAssertTrue(["Inbox 3", "Inbox 4", "Inbox 5"].allSatisfy(first.contains))
-        XCTAssertFalse(first.contains("Inbox 1"))
-        XCTAssertEqual(try subjects("Archive"), ["Kept"])
-        XCTAssertEqual(try value("SELECT unread_count FROM mailboxes WHERE name = 'INBOX'"), Int64(first.count))
-        XCTAssertEqual(try value("SELECT unread_count FROM mailboxes WHERE name = 'Archive'"), 0)
+        await pass(sync, .everything)
+        // Only the newest three, however many passes run. A folder not yet opened costs nothing.
+        XCTAssertEqual(try subjects("INBOX"), ["Inbox 3", "Inbox 4", "Inbox 5"])
+        XCTAssertEqual(try subjects("Archive"), [])
+        XCTAssertEqual(try value("SELECT unread_count FROM mailboxes WHERE name = 'INBOX'"), 3)
         XCTAssertEqual(try value("SELECT complete FROM mailboxes WHERE name = 'INBOX'"), 0)
-        await pass(sync, MailSyncRequest(backfill: true))
-        await pass(sync, MailSyncRequest(backfill: true))
-        await pass(sync, MailSyncRequest(backfill: true))
+        // Older mail comes one batch at a time when the list asks.
+        let inbox = try XCTUnwrap(value("SELECT ROWID FROM mailboxes WHERE name = 'INBOX'"))
+        let firstStep = try await sync.loadOlder(inbox)
+        XCTAssertEqual(firstStep, true)
+        XCTAssertEqual(try subjects("INBOX"), ["Inbox 2", "Inbox 3", "Inbox 4", "Inbox 5"])
+        let lastStep = try await sync.loadOlder(inbox)
+        XCTAssertEqual(lastStep, false)
         XCTAssertEqual(try subjects("INBOX"), ["Inbox 1", "Inbox 2", "Inbox 3", "Inbox 4", "Inbox 5"])
         XCTAssertEqual(try value("SELECT complete FROM mailboxes WHERE name = 'INBOX'"), 1)
+        let afterEnd = try await sync.loadOlder(inbox)
+        XCTAssertEqual(afterEnd, false)
+        // Opening a folder reads it, and later passes keep it current.
+        let archive = try XCTUnwrap(value("SELECT ROWID FROM mailboxes WHERE name = 'Archive'"))
+        await pass(sync, MailSyncRequest(mailboxes: [archive]))
+        XCTAssertEqual(try subjects("Archive"), ["Kept"])
+        XCTAssertEqual(try value("SELECT unread_count FROM mailboxes WHERE name = 'Archive'"), 0)
+        server.deliver(to: "Archive", subject: "Later")
+        await pass(sync, .everything)
+        XCTAssertEqual(try subjects("Archive"), ["Kept", "Later"])
         // Roles come from the server's special-use flags.
         XCTAssertEqual(try reader.rows("SELECT role FROM mailboxes WHERE name = 'Archive'").first?.first?.text, "archive")
         XCTAssertEqual(try reader.rows("SELECT url FROM mailboxes WHERE name = 'INBOX'").first?.first?.text, "imap://acct-1/INBOX")
@@ -128,10 +140,11 @@ final class NativeMailSyncTests: XCTestCase {
         server.capabilities.append("UIDONLY")
         for n in 1...6 { server.deliver(to: "INBOX", subject: "Mail \(n)") }
         var policy = MailSyncPolicy()
-        policy.firstInbox = 4; policy.backfillBatch = 10
+        policy.firstInbox = 4; policy.olderBatch = 10
         let sync = makeSync(policy)
         await pass(sync, .everything)
-        await pass(sync, MailSyncRequest(backfill: true))
+        let older = try await sync.loadOlder(try XCTUnwrap(value("SELECT ROWID FROM mailboxes WHERE name = 'INBOX'")))
+        XCTAssertEqual(older, false)
         XCTAssertEqual(try subjects("INBOX"), (1...6).map { "Mail \($0)" })
         let client = await sync.syncClient
         let uidOnly = await client.uidOnly
@@ -144,6 +157,47 @@ final class NativeMailSyncTests: XCTestCase {
         XCTAssertEqual(try value("SELECT read FROM messages WHERE ROWID = ?", [.int(try row("Mail 1"))]), 1)
         XCTAssertEqual(uid, 7)
         XCTAssertEqual(server.commands("FETCH"), 0, "No message numbers with UIDONLY")
+        await sync.stop()
+    }
+
+    /// Yahoo refuses a UID SEARCH that would find more than MESSAGELIMIT messages, and reports a
+    /// mod-sequence without CONDSTORE. Sync must read a large, sparse folder in bounded steps.
+    func testMessageLimitIsKeptInALargeSparseFolder() async throws {
+        server.capabilities = ["IMAP4rev1", "LITERAL+", "UIDPLUS", "MOVE", "IDLE", "AUTH=PLAIN", "SASL-IR", "ENABLE", "UIDONLY", "MESSAGELIMIT=40"]
+        server.messageLimit = 40
+        server.visibleLimit = 40
+        server.modSeqWithoutCondstore = true
+        // Older mail is dense; newer mail has gaps, as after years of deletes and moves.
+        var uids: [Int: UInt32] = [:]
+        for n in 1...300 {
+            uids[n] = server.deliver(to: "INBOX", subject: "Mail \(n)")
+            if n > 150 { server.skipUIDs(9, in: "INBOX") }
+        }
+        var policy = MailSyncPolicy()
+        policy.firstInbox = 100; policy.checkBatch = 30; policy.olderBatch = 80
+        let sync = makeSync(policy)
+        await pass(sync, .everything)
+        XCTAssertEqual(try subjects("INBOX"), (201...300).map { "Mail \($0)" })
+        XCTAssertFalse(server.searches.contains { $0.uppercased() == "ALL" }, "Never one search over the whole folder")
+        // New mail, flag changes, and removals still arrive, without CHANGEDSINCE.
+        server.deliver(to: "INBOX", subject: "Mail 301")
+        server.setFlags(["\\Seen"], uid: try XCTUnwrap(uids[250]), in: "INBOX")
+        server.expungeExternally(uid: try XCTUnwrap(uids[260]), in: "INBOX")
+        await pass(sync, .inboxOnly)
+        let current = try subjects("INBOX")
+        XCTAssertEqual(current.count, 100)
+        XCTAssertEqual(current.last, "Mail 301")
+        XCTAssertFalse(current.contains("Mail 260"))
+        XCTAssertEqual(try value("SELECT read FROM messages WHERE ROWID = ?", [.int(try row("Mail 250"))]), 1)
+        // Older mail reaches the dense part; ranges the server refuses are halved.
+        let inbox = try XCTUnwrap(value("SELECT ROWID FROM mailboxes WHERE name = 'INBOX'"))
+        let more = try await sync.loadOlder(inbox)
+        XCTAssertEqual(more, true)
+        let loaded = try subjects("INBOX")
+        XCTAssertEqual(loaded.count, 180)
+        XCTAssertTrue(loaded.contains("Mail 121"))
+        XCTAssertFalse(loaded.contains("Mail 120"))
+        XCTAssertGreaterThan(server.refusedSearches, 0, "The test must reach a refused range")
         await sync.stop()
     }
 
@@ -224,9 +278,9 @@ final class NativeMailSyncTests: XCTestCase {
         XCTAssertEqual(server.mailbox("Trash")!.messages.count, 1)
         XCTAssertEqual(try subjects("INBOX"), ["Read me"])
         try await waitUntil("the trashed copy") { try self.subjects("Trash") == ["Delete me"] }
-        // Deleting from Trash deletes for good.
-        try await engine.delete(try row("Delete me"))
-        XCTAssertTrue(server.mailbox("Trash")!.messages.isEmpty)
+        do { try await engine.delete(try row("Delete me")); XCTFail("Trash must never be purged") }
+        catch MailError.notFound(let reason) { XCTAssertTrue(reason.contains("already in Trash")) }
+        XCTAssertEqual(server.mailbox("Trash")!.messages.count, 1)
         await engine.stopAll()
     }
 
@@ -243,25 +297,66 @@ final class NativeMailSyncTests: XCTestCase {
         XCTAssertEqual(try reader.rows("SELECT s.summary FROM messages m JOIN summaries s ON s.ROWID = m.summary WHERE m.ROWID = ?", [.int(question)]).first?.first?.text,
                        "Are you free?")
 
-        try await engine.reply(to: question, text: "Yes, Friday.", all: false)
+        try await engine.reply(to: question, text: "Yes, Friday.", all: false, from: account.id)
         let reply = try XCTUnwrap(smtp.delivered.last)
         XCTAssertEqual(reply.recipients, ["sam@example.com"])
         let sent = try XCTUnwrap(MIMEMessage.parse(reply.data))
         XCTAssertEqual(sent.header("Subject"), "Re: Question")
         XCTAssertEqual(sent.header("In-Reply-To"), "<q1@example.com>")
         XCTAssertTrue(sent.plainText?.contains("> Are you free?") == true)
-        XCTAssertEqual(server.mailbox("Sent")!.messages.count, 1, "Yahoo gets a copy in Sent")
+        XCTAssertEqual(server.mailbox("Sent")!.messages.count, 1, "An account set to save a copy gets one in Sent")
         XCTAssertTrue(server.mailbox("INBOX")!.messages[0].flags.contains("\\Answered"))
 
-        try await engine.forward(question, text: "FYI", to: ["ann@example.com"])
+        try await engine.forward(question, text: "FYI", to: ["ann@example.com"], from: account.id)
         let forward = try XCTUnwrap(smtp.delivered.last.flatMap { MIMEMessage.parse($0.data) })
         XCTAssertEqual(forward.header("Subject"), "Fwd: Question")
         XCTAssertTrue(forward.plainText?.contains("Begin forwarded message:") == true)
 
-        try await engine.send(to: ["bob@example.com"], cc: [], subject: "New", body: "Hello Bob")
+        try await engine.send(from: account.id, to: ["bob@example.com"], cc: [], subject: "New", body: "Hello Bob")
         XCTAssertEqual(smtp.delivered.last?.recipients, ["bob@example.com"])
         XCTAssertEqual(smtp.delivered.count, 3)
         await engine.stopAll()
+    }
+
+    func testExplicitAccountReplyKeepsThreadHeadersAndInvalidAccountDoesNotSend() async throws {
+        server.deliver(to: "INBOX", subject: "Question", from: "Sam <sam@example.com>", body: "Are you free?", messageID: "<q1@example.com>")
+        var other = account
+        other.id = "acct-2"; other.email = "other@example.com"; other.savesSentCopy = false
+        let engine = makeEngine()
+        await engine.setAccounts([account, other])
+        try await waitUntil("both accounts") { try self.value("SELECT COUNT(*) FROM messages") == 2 }
+        let question = try XCTUnwrap(reader.rows("SELECT m.ROWID FROM messages m JOIN mailboxes b ON b.ROWID = m.mailbox WHERE b.account = ?", [.text(account.id)]).first?.first?.int)
+        do {
+            try await engine.send(from: "missing", to: ["sam@example.com"], cc: [], subject: "Do not send", body: "Keep")
+            XCTFail("An unavailable account must not fall back")
+        } catch MailError.notFound {}
+        XCTAssertTrue(smtp.delivered.isEmpty)
+        try await engine.reply(to: question, text: "Friday works", all: false, from: other.id,
+                               html: "<p><b>Friday works</b></p>", expectedMessageID: "<q1@example.com>")
+        let reply = try XCTUnwrap(smtp.delivered.last.flatMap { MIMEMessage.parse($0.data) })
+        XCTAssertEqual(MailAddress.list(reply.header("From") ?? "").first?.address, other.email)
+        XCTAssertEqual(reply.header("In-Reply-To"), "<q1@example.com>")
+        XCTAssertEqual(reply.header("References"), "<q1@example.com>")
+        XCTAssertTrue(reply.html?.contains("<b>Friday works</b>") == true)
+        await engine.stopAll()
+    }
+
+    func testRefusedSignInDoesNotRestartOnBackgroundRequests() async throws {
+        var policy = MailSyncPolicy(); policy.periodic = 0.01
+        let sync = makeSync(policy, password: "wrong")
+        await sync.start()
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            if case .failed(_, signIn: true) = await sync.state { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        guard case .failed(_, signIn: true) = await sync.state else { return XCTFail("Sign-in must stop") }
+        let attempts = server.commands("AUTHENTICATE") + server.commands("LOGIN")
+        await sync.request(.everything); await sync.wake(); await sync.start()
+        try await Task.sleep(nanoseconds: 120_000_000)
+        XCTAssertEqual(server.commands("AUTHENTICATE") + server.commands("LOGIN"), attempts)
+        XCTAssertGreaterThan(attempts, 0)
+        await sync.stop()
     }
 
     func testIdleBringsNewMailWithoutAsking() async throws {

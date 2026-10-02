@@ -6,6 +6,15 @@ public struct MailServer: Codable, Sendable, Equatable, Hashable {
     public var port: Int
     public var security: MailSecurity
     public init(host: String, port: Int, security: MailSecurity) { self.host = host; self.port = port; self.security = security }
+
+    public func validated() throws -> MailServer {
+        guard !host.isEmpty, host.count <= 253, (1...65535).contains(port),
+              host.unicodeScalars.allSatisfy({ CharacterSet.alphanumerics.contains($0) || ".-:".unicodeScalars.contains($0) }),
+              !host.hasPrefix("."), !host.hasSuffix(".") else {
+            throw MailError.notFound("Enter a mail server host and a port from 1 to 65535. Use TLS or STARTTLS.")
+        }
+        return self
+    }
 }
 
 /// What signs in to a server. Values live only in memory and the Keychain; never in files or logs.
@@ -26,6 +35,7 @@ public enum MailError: Error, LocalizedError, Equatable {
     case unexpected(String)
     case smtp(code: Int, text: String)
     case notFound(String)
+    case deliveryUncertain
     /// The server has no IDLE, so new mail is found by asking every few minutes.
     case idleUnsupported
 
@@ -34,7 +44,7 @@ public enum MailError: Error, LocalizedError, Equatable {
         case let .commandFailed(command, status, text):
             return "The mail server answered \(status.rawValue) to \(command)" + (text.isEmpty ? "." : ": \(text)")
         case .signInFailed(let text):
-            return "The mail server refused the sign-in" + (text.isEmpty ? "." : ": \(text)") + " Yahoo, iCloud, and Gmail need an app password, not your normal password."
+            return "The mail account could not sign in" + (text.isEmpty ? "." : ": \(text)") + " Check Settings › Mail. Password accounts can require an app password."
         case .noSecureConnection(let host):
             return "\(host) does not offer a secure connection, so Jevcast did not sign in."
         case .serverClosed(let text):
@@ -47,6 +57,8 @@ public enum MailError: Error, LocalizedError, Equatable {
             return "The outgoing mail server answered \(code)" + (text.isEmpty ? "." : ": \(text)")
         case .notFound(let text):
             return text
+        case .deliveryUncertain:
+            return "The server may have accepted this message. Check Sent before you send it again."
         case .idleUnsupported:
             return "The mail server cannot report new mail as it arrives."
         }

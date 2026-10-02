@@ -19,6 +19,13 @@ final class FakeIMAPServer: @unchecked Sendable {
     var modSeq: UInt64 = 100
     /// Like Yahoo: without UIDONLY a mailbox shows only its newest this-many messages.
     var visibleLimit: Int?
+    /// Like Yahoo's MESSAGELIMIT: a UID SEARCH that finds more is refused, a FETCH is cut short.
+    var messageLimit: Int?
+    /// Like Yahoo: SELECT reports HIGHESTMODSEQ without CONDSTORE, which CHANGEDSINCE still needs.
+    var modSeqWithoutCondstore = false
+    /// UID SEARCH criteria in order, and how many were refused for passing the limit.
+    private(set) var searches: [String] = []
+    private(set) var refusedSearches = 0
     /// Command names in order, such as "UID FETCH", for asserting what the client did.
     private(set) var log: [String] = []
     private(set) var connections = 0
@@ -66,6 +73,19 @@ final class FakeIMAPServer: @unchecked Sendable {
         return uid
     }
 
+    /// Adds a message exactly as given, such as one with attachments.
+    @discardableResult
+    func deliverRaw(to name: String, _ raw: String, flags: Set<String> = []) -> UInt32 {
+        lock.withLock {
+            let box = mailbox(name)!
+            modSeq += 1
+            let uid = box.nextUID
+            box.nextUID += 1
+            box.messages.append(Message(uid: uid, flags: flags, raw: Data(raw.utf8), date: Date(timeIntervalSince1970: 1_790_000_000), modSeq: modSeq))
+            return uid
+        }
+    }
+
     func setFlags(_ flags: Set<String>, uid: UInt32, in name: String) {
         lock.withLock {
             modSeq += 1
@@ -78,7 +98,11 @@ final class FakeIMAPServer: @unchecked Sendable {
         lock.withLock { mailbox(name)!.messages.removeAll { $0.uid == uid } }
     }
 
+    /// Leaves a gap in a mailbox's UIDs, as deleted and moved mail does on a real server.
+    func skipUIDs(_ count: UInt32, in name: String) { lock.withLock { mailbox(name)!.nextUID += count } }
+
     func record(_ name: String) { log.append(name) }
+    func recordSearch(_ criteria: String, refused: Bool) { searches.append(criteria); if refused { refusedSearches += 1 } }
     func commands(_ name: String) -> Int { lock.withLock { log.filter { $0 == name }.count } }
 }
 
@@ -205,16 +229,21 @@ final class FakeIMAPTransport: MailTransport, @unchecked Sendable {
         case "LOGIN":
             if args.count == 2, args[1].text == server.password { send("\(tag) OK signed in\r\n") } else { send("\(tag) NO [AUTHENTICATIONFAILED] bad\r\n") }
         case "LIST":
+            let withStatus = server.capabilities.contains("LIST-STATUS") && args.contains { $0.text?.uppercased() == "RETURN" }
             for box in server.mailboxes {
                 send("* LIST (\\HasNoChildren\(box.attributes.map { " " + $0 }.joined())) \"/\" \"\(box.name)\"\r\n")
+                if withStatus { send(status(box)) }
             }
             send("\(tag) OK list\r\n")
+        case "STATUS":
+            guard let name = args.first?.text, let box = server.mailbox(name) else { send("\(tag) NO no such mailbox\r\n"); return }
+            send(status(box) + "\(tag) OK status\r\n")
         case "SELECT":
             guard let name = args.first?.text, let box = server.mailbox(name) else { send("\(tag) NO no such mailbox\r\n"); return }
             selected = box
             let highest = box.messages.map(\.modSeq).max() ?? server.modSeq
             send("* \(visible(box).count) EXISTS\r\n* OK [UIDVALIDITY \(box.uidValidity)] ok\r\n* OK [UIDNEXT \(box.nextUID)] ok\r\n")
-            if server.capabilities.contains("CONDSTORE") { send("* OK [HIGHESTMODSEQ \(highest)] ok\r\n") }
+            if server.capabilities.contains("CONDSTORE") || server.modSeqWithoutCondstore { send("* OK [HIGHESTMODSEQ \(highest)] ok\r\n") }
             send("\(tag) OK [READ-WRITE] selected\r\n")
         case "IDLE":
             idleTag = tag
@@ -232,6 +261,10 @@ final class FakeIMAPTransport: MailTransport, @unchecked Sendable {
             send("\(tag) OK [APPENDUID \(box.uidValidity) \(uid)] appended\r\n")
         default: send("\(tag) BAD unknown \(name)\r\n")
         }
+    }
+
+    private func status(_ box: FakeIMAPServer.Mailbox) -> String {
+        "* STATUS \"\(box.name)\" (MESSAGES \(box.messages.count) UNSEEN \(box.messages.filter { !$0.flags.contains("\\Seen") }.count))\r\n"
     }
 
     /// The messages this connection may see: all with UIDONLY or no limit, else the newest few.
@@ -263,6 +296,9 @@ final class FakeIMAPTransport: MailTransport, @unchecked Sendable {
             if let index = args.firstIndex(where: { $0.text?.uppercased() == "UID" }), index + 1 < args.count, let set = args[index + 1].text {
                 found = uids(set, in: box)
             }
+            let refused = server.messageLimit.map { found.count > $0 } ?? false
+            server.recordSearch(args.compactMap(\.text).joined(separator: " "), refused: refused)
+            if refused { send("\(tag) NO UID SEARCH has partial results\r\n"); return }
             if args.first?.text?.uppercased() == "RETURN" {
                 let set = IMAPSequenceSet(found)
                 send("* ESEARCH (TAG \"\(tag)\") UID" + (set.isEmpty ? "" : " ALL \(set)") + "\r\n")
@@ -275,7 +311,8 @@ final class FakeIMAPTransport: MailTransport, @unchecked Sendable {
             let itemText = (items.list ?? [items]).compactMap(\.text).joined(separator: " ").uppercased()
             var changedSince: UInt64?
             if let last = args.last?.list, last.first?.text?.uppercased() == "CHANGEDSINCE" { changedSince = last.dropFirst().first?.number }
-            let chosen: [UInt32]
+            if changedSince != nil, !server.capabilities.contains("CONDSTORE") { send("\(tag) BAD CHANGEDSINCE needs CONDSTORE\r\n"); return }
+            var chosen: [UInt32]
             if name == "FETCH" {
                 let ends = setText.split(separator: ":").compactMap { Int($0) }
                 let shown = visible(box)
@@ -283,6 +320,7 @@ final class FakeIMAPTransport: MailTransport, @unchecked Sendable {
             } else {
                 chosen = uids(setText, in: box)
             }
+            if let limit = server.messageLimit { chosen = Array(chosen.prefix(limit)) }
             for (index, message) in box.messages.enumerated() where chosen.contains(message.uid) {
                 if let changedSince, message.modSeq <= changedSince { continue }
                 var parts = ["UID \(message.uid)", "FLAGS (\(message.flags.sorted().joined(separator: " ")))"]

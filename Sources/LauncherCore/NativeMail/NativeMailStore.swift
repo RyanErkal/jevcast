@@ -81,6 +81,23 @@ public actor NativeMailStore {
             BEGIN DELETE FROM summaries WHERE ROWID = old.summary; END;
         PRAGMA user_version=1;
         """)
+        // The server's own counts, which cover mail that is not on this Mac. Added to older stores.
+        let columns = Set(try db.rows("PRAGMA table_info(mailboxes)").compactMap { $0.count > 1 ? $0[1].text : nil })
+        if !columns.contains("server_total") {
+            try db.exec("ALTER TABLE mailboxes ADD COLUMN server_total INTEGER; ALTER TABLE mailboxes ADD COLUMN server_unread INTEGER;")
+        }
+    }
+
+    /// Records the server's message and unread counts, by mailbox row.
+    public func setServerCounts(_ counts: [Int64: (total: Int, unread: Int)]) throws {
+        guard !counts.isEmpty else { return }
+        try db.transaction {
+            for (rowID, count) in counts {
+                try db.run("UPDATE mailboxes SET server_total = ?, server_unread = ? WHERE ROWID = ?",
+                           [.int(Int64(count.total)), .int(Int64(count.unread)), .int(rowID)])
+            }
+        }
+        touched()
     }
 
     // MARK: Mailboxes
@@ -105,7 +122,7 @@ public actor NativeMailStore {
     /// Records the server's mailboxes for `account` and removes the ones it no longer has, with
     /// their messages. Returns the account's mailboxes, inbox first.
     @discardableResult
-    public func replaceMailboxes(account: String, with entries: [IMAPListEntry]) throws -> [Mailbox] {
+    public func replaceMailboxes(account: String, with entries: [IMAPListEntry], roles: [String: MailMailbox.Role] = [:]) throws -> [Mailbox] {
         let chosen = Self.syncedEntries(entries)
         try db.transaction {
             var urls: [String] = []
@@ -116,7 +133,7 @@ public actor NativeMailStore {
                     INSERT INTO mailboxes (url, account, name, delimiter, role) VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(url) DO UPDATE SET name = excluded.name, delimiter = excluded.delimiter, role = excluded.role
                     """, [.text(url), .text(account), .text(entry.name), entry.delimiter.map { .text($0) } ?? .null,
-                          Self.role(of: entry).map { .text($0.rawValue) } ?? .null])
+                          .text((roles[entry.name] ?? Self.role(of: entry) ?? .other).rawValue)])
             }
             let gone = try db.rows("SELECT ROWID, url FROM mailboxes WHERE account = ?", [.text(account)])
                 .filter { !urls.contains($0[1].text ?? "") }.compactMap { $0[0].int }
@@ -185,6 +202,11 @@ public actor NativeMailStore {
             """, [mailbox.uidValidity.map { .int(Int64($0)) } ?? .null, mailbox.uidNext.map { .int(Int64($0)) } ?? .null,
                   mailbox.highestModSeq.map { .int(Int64(bitPattern: $0)) } ?? .null, .int(mailbox.complete ? 1 : 0),
                   mailbox.lastFullCheck.map { .double($0.timeIntervalSince1970) } ?? .null, .int(mailbox.rowID)])
+    }
+
+    /// Notes that every older message of a mailbox is on this Mac.
+    public func setComplete(_ rowID: Int64) throws {
+        try db.run("UPDATE mailboxes SET complete = 1 WHERE ROWID = ?", [.int(rowID)])
     }
 
     /// The server renumbered the mailbox: every local copy is dropped, and sync reads it again.

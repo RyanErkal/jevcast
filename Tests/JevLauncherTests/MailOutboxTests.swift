@@ -41,7 +41,7 @@ final class MailOutboxTests: XCTestCase {
         let held = await wait([1, nil, nil])
         XCTAssertFalse(held.empty, "Mail still had mail when it last answered")
         let unknown = await wait([nil, nil, nil])
-        XCTAssertTrue(unknown.empty, "Mail that never answers quits as before")
+        XCTAssertFalse(unknown.empty, "An unknown count does not prove delivery")
         let later = await wait([nil, 0, 3])
         XCTAssertTrue(later.empty)
         XCTAssertEqual(later.reads, 2)

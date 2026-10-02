@@ -59,10 +59,21 @@ public enum MailReplies {
         return found.isEmpty ? nil : found
     }
 
-    /// Your text, then "On <date>, <sender> wrote:" and the original text quoted with "> ".
-    public static func replyBody(_ text: String, original: MIMEMessage, sender: String, date: Date) -> String {
+    /// Your text, then "On 2 Oct 2026, at 03:01, <sender> wrote:" and the original text quoted
+    /// with "> ". Without `quote`, only your text.
+    public static func replyBody(_ text: String, original: MIMEMessage, sender: String, date: Date, quote: Bool = true) -> String {
+        guard quote else { return text }
         let quoted = lines(original.readableText).map { $0.isEmpty ? ">" : "> " + $0 }.joined(separator: "\n")
-        return text + "\n\nOn \(attribution(date)), \(sender) wrote:\n\n" + quoted + "\n"
+        return text + "\n\n" + replyAttribution(date: date, sender: sender) + "\n\n" + quoted + "\n"
+    }
+
+    /// The line above a quote, as Apple Mail writes it: "On 2 Oct 2026, at 03:01, Sam <sam@example.com> wrote:".
+    /// The same words go in the plain and the HTML part.
+    public static func replyAttribution(date: Date, sender: String) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "d MMM yyyy', at 'HH:mm"
+        return "On " + formatter.string(from: date) + ", " + sender + " wrote:"
     }
 
     /// Your text, then the original's headers and text, as a forward in Apple Mail looks.
@@ -85,7 +96,8 @@ public enum MailReplies {
         return result
     }
 
-    static func attribution(_ date: Date) -> String {
+    /// "2 Oct 2026 at 03:01", for a forward's Date line.
+    public static func attribution(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "d MMM yyyy 'at' HH:mm"

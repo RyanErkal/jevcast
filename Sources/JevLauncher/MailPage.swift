@@ -44,8 +44,10 @@ final class MailPage: ObservableObject, LauncherPage {
     func opened() {
         guard let mail else { return }
         mail.start()
-        // A message picked in the search moves to its mailbox after this; otherwise the view starts on the inbox.
+        // A message picked in the search moves to its mailbox after this; otherwise the view starts
+        // on the inbox, at its newest message. An open reply keeps its place.
         mail.place = .inbox
+        if mail.draft == nil { mail.showNewest() }
         expanded = MailReading.split == .messageOnly
         // The preview is always on screen, so a message you move to counts as read after a moment.
         mail.windowIsKey = true
@@ -149,24 +151,18 @@ private struct MailPageView: View {
         Group {
             if !ready {
                 MailSetupView(model: mail, needsAccess: needsAccess)
-            } else if composing && mail.draft?.mode == .new {
-                ComposeView(model: mail, docked: true).id(mail.draft?.id)
+            } else if composing {
+                // The composer takes the panel, as Apple Mail's does; a reply shows its original inside.
+                ComposeView(model: mail).id(mail.draft?.id)
             } else {
                 GeometryReader { geo in
                     HStack(spacing: 0) {
-                        // A reply keeps its message in view; the list steps aside for the room.
-                        if !composing && !(page.expanded && mail.selected != nil) {
+                        if !(page.expanded && mail.selected != nil) {
                             list.frame(width: geo.size.width * split.listFraction)
                             Divider()
                         }
-                        VStack(spacing: 0) {
-                            MailReader(model: mail, expanded: composing ? nil : $page.expanded, draft: composing ? mail.draft : nil, inPanel: true)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            if composing {
-                                Divider()
-                                ComposeView(model: mail, docked: true).id(mail.draft?.id).frame(height: max(230, geo.size.height * 0.46))
-                            }
-                        }
+                        MailReader(model: mail, expanded: $page.expanded, inPanel: true)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
             }
@@ -175,6 +171,7 @@ private struct MailPageView: View {
         .onChange(of: composing) { _, now in if !now { DispatchQueue.main.async { page.focusFilter?() } } }
         // Above the composer's footer while one is open, so the note never covers Send.
         .overlay(alignment: .bottom) { MailBanner(model: mail).padding(.bottom, composing ? 58 : 12) }
+        .sheet(isPresented: Binding(get: { mail.showsOutbox && !composing }, set: { mail.showsOutbox = $0 })) { MailDeliveryView(model: mail) }
     }
 
     private var composing: Bool { mail.draft != nil && !page.draftHidden }
@@ -187,7 +184,9 @@ private struct MailPageView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     MailPlacePicker(model: mail).font(.headline)
+                    MailEmptyButton(model: mail)
                     Spacer()
+                    Button { mail.showsOutbox = true } label: { Image(systemName: "tray.and.arrow.up") }.buttonStyle(.borderless).help("Outbox and send history")
                 }
                 MailClosedNote(model: mail)
             }

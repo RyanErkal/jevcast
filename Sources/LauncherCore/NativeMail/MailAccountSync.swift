@@ -2,7 +2,8 @@ import Foundation
 
 /// Keeps one account's mail on this Mac in step with its server. It uses three connections: one
 /// for sync, one for changes you make, so they never wait behind a long sync, and one that waits
-/// in IDLE for new mail. The newest mail comes first; older mail and bodies follow in small steps.
+/// in IDLE for new mail. Only the newest mail of the inbox and of folders you open is read. Older
+/// mail comes when the list scrolls to it, and other bodies when a message opens.
 public actor MailAccountSync {
     public enum State: Sendable, Equatable {
         case starting
@@ -30,8 +31,7 @@ public actor MailAccountSync {
     private var idler: Task<Void, Never>?
     var mailboxes: [NativeMailStore.Mailbox] = []
     private var listedAt: Date?
-    /// Older UIDs still to read, per mailbox, highest first, from one SEARCH.
-    private var older: [Int64: [UInt32]] = [:]
+    private var countedAt: Date?
     public private(set) var state: State = .starting
 
     public init(account: NativeMailAccount, store: NativeMailStore, policy: MailSyncPolicy = MailSyncPolicy(),
@@ -95,11 +95,13 @@ public actor MailAccountSync {
             switch await pass(request) {
             case .done(let more):
                 failures = 0
-                // More work goes on in short steps; new mail from IDLE still comes first.
-                if more { request = await signal.wait(timeout: 0.5) ?? MailSyncRequest(backfill: true) }
+                // Read-ahead bodies come in short steps; new mail from IDLE still comes first.
+                if more { request = await signal.wait(timeout: 0.5) ?? MailSyncRequest() }
                 else { request = await signal.wait(timeout: policy.periodic) ?? .everything }
             case .signIn:
-                request = await signal.wait(timeout: 3600) ?? .everything
+                idler?.cancel(); idler = nil
+                await idleClient.drop()
+                return
             case .failed:
                 failures += 1
                 request = await signal.wait(timeout: min(600, 10 * pow(2, Double(min(failures, 6))))) ?? .everything
@@ -119,10 +121,10 @@ public actor MailAccountSync {
             }
             startIdleIfNeeded()
             let now = Date()
-            var targets: [NativeMailStore.Mailbox] = request.all ? mailboxes : []
-            if !request.all {
-                if request.inbox { targets += mailboxes.filter { $0.role == .inbox } }
-                targets += mailboxes.filter { request.mailboxes.contains($0.rowID) && $0.role != .inbox }
+            // A folder is read once it has been opened; until then it costs nothing.
+            let targets = mailboxes.filter { box in
+                (request.all && (box.role == .inbox || box.uidValidity != nil))
+                    || (request.inbox && box.role == .inbox) || request.mailboxes.contains(box.rowID)
             }
             for box in targets {
                 try Task.checkCancellation()
@@ -130,8 +132,8 @@ public actor MailAccountSync {
                 try await sync(box, full: full)
                 await announce()
             }
-            var more = try await prefetchBodies()
-            if request.backfill || request.all { more = try await backfill() || more }
+            if visible { await refreshServerCounts() }
+            let more = try await prefetchBodies()
             if case .ready = state, !visible {} else { setState(.ready(Date())) }
             return .done(more: more)
         } catch is CancellationError {
@@ -154,9 +156,26 @@ public actor MailAccountSync {
 
     private func list() async throws {
         let entries = try await syncClient.listMailboxes()
-        mailboxes = try await store.replaceMailboxes(account: account.id, with: entries)
+        mailboxes = try await store.replaceMailboxes(account: account.id, with: entries, roles: account.mailboxRoles ?? [:])
         listedAt = Date()
-        older = older.filter { entry in mailboxes.contains { $0.rowID == entry.key } }
+        await announce()
+    }
+
+    /// The server's message and unread counts for every mailbox, at most once a minute: one LIST
+    /// with LIST-STATUS, or one STATUS per mailbox. Counts are a view aid, so a failure is left for the next pass.
+    private func refreshServerCounts() async {
+        if let countedAt, Date().timeIntervalSince(countedAt) < 60 { return }
+        countedAt = Date()
+        var counts: [Int64: (total: Int, unread: Int)] = [:]
+        if await syncClient.has("LIST-STATUS"), let all = try? await syncClient.listStatus() {
+            for box in mailboxes { if let count = all[box.name] { counts[box.rowID] = (count.messages, count.unseen) } }
+        } else {
+            for box in mailboxes {
+                guard !Task.isCancelled, let count = try? await syncClient.status(box.name) else { continue }
+                counts[box.rowID] = (count.messages, count.unseen)
+            }
+        }
+        try? await store.setServerCounts(counts)
         await announce()
     }
 
@@ -172,7 +191,7 @@ public actor MailAccountSync {
         if let index = mailboxes.firstIndex(where: { $0.rowID == box.rowID }) { mailboxes[index] = box }
     }
 
-    private func items() async -> String { SyncedMessage.fetchItems(gmail: await syncClient.has("X-GM-EXT-1")) }
+    private func items(_ client: IMAPClient) async -> String { SyncedMessage.fetchItems(gmail: await client.has("X-GM-EXT-1")) }
 
     // MARK: One mailbox
 
@@ -187,49 +206,55 @@ public actor MailAccountSync {
         }
         if let known = box.uidValidity, known != info.uidValidity {
             box = try await store.reset(box, uidValidity: info.uidValidity)
-            older[box.rowID] = nil
         }
         box.uidValidity = info.uidValidity
         let validity = info.uidValidity
-        let items = await items()
+        let items = await items(syncClient)
         let before = try await store.extent(box.rowID)
         var firstSync = false
 
         if let maxUID = before.maxUID {
-            if maxUID < UInt32.max, info.uidNext.map({ $0 > maxUID + 1 }) ?? true {
+            if let next = info.uidNext {
+                // All new mail, so what this Mac has stays one unbroken run of the newest.
+                if next > maxUID + 1 {
+                    let fresh = try await newestUIDs(.max, below: next, above: maxUID, in: box.name, validity: validity, client: syncClient)
+                    try await fetchHeaders(fresh.uids, into: box, validity: validity, items: items, client: syncClient)
+                }
+            } else if maxUID < UInt32.max {
                 let fetched = try await syncClient.fetch(from: maxUID + 1, items: items, in: box.name, validity: validity)
                 try await store.upsert(fetched.compactMap(SyncedMessage.init(fetch:)), into: box.rowID)
             }
         } else if info.exists > 0 {
             firstSync = true
-            let all = try await syncClient.search("ALL", in: box.name, validity: validity)
-            let newest = Self.highest(all, count: box.role == .inbox ? policy.firstInbox : policy.firstOther)
-            for chunk in IMAPSequenceSet(newest).chunked(maxCount: policy.headerBatch) {
-                let fetched = try await syncClient.fetch(uids: chunk, items: items, in: box.name, validity: validity)
-                try await store.upsert(fetched.compactMap(SyncedMessage.init(fetch:)), into: box.rowID)
-                await announce()
-            }
-            box.complete = newest.count >= all.count
-            older[box.rowID] = box.complete ? nil : Self.below(newest.min(), in: all)
+            let count = box.role == .inbox ? policy.firstInbox : policy.firstOther
+            let newest = try await newestUIDs(count, below: info.uidNext ?? .max, above: 0, in: box.name, validity: validity, client: syncClient)
+            try await fetchHeaders(newest.uids, into: box, validity: validity, items: items, client: syncClient)
+            box.complete = newest.reachedFloor
         } else {
             box.complete = true
         }
 
-        let stored = try await store.extent(box.rowID)
-        if !firstSync, let low = stored.minUID, let high = stored.maxUID {
-            let range = IMAPSequenceSet(ranges: [low...high])
-            if let known = box.highestModSeq, let current = info.highestModSeq {
-                if current > known {
-                    let changes = try await syncClient.fetch(uids: range, items: "(UID FLAGS)", changedSince: known, in: box.name, validity: validity)
-                    try await store.updateFlags(changes.compactMap { data in data.uid.map { ($0, data.flags ?? []) } }, in: box.rowID)
+        if !firstSync {
+            // CHANGEDSINCE needs CONDSTORE. Yahoo reports a mod-sequence without offering it.
+            let known = await syncClient.has("CONDSTORE") ? box.highestModSeq : nil
+            // Runs of stored messages, so no reply can pass the server's MESSAGELIMIT.
+            let size = min(policy.checkBatch, await syncClient.messageLimit ?? .max)
+            for run in Self.runs(try await store.uids(box.rowID), size: size) {
+                guard let low = run.first, let high = run.last else { continue }
+                let range = IMAPSequenceSet(ranges: [low...high])
+                if let known, let current = info.highestModSeq {
+                    if current > known {
+                        let changes = try await syncClient.fetch(uids: range, items: "(UID FLAGS)", changedSince: known, in: box.name, validity: validity)
+                        try await store.updateFlags(changes.compactMap { data in data.uid.map { ($0, data.flags ?? []) } }, in: box.rowID)
+                    }
+                } else if full {
+                    let flags = try await syncClient.fetch(uids: range, items: "(UID FLAGS)", in: box.name, validity: validity)
+                    try await store.updateFlags(flags.compactMap { data in data.uid.map { ($0, data.flags ?? []) } }, in: box.rowID)
                 }
-            } else if full {
-                let flags = try await syncClient.fetch(uids: range, items: "(UID FLAGS)", in: box.name, validity: validity)
-                try await store.updateFlags(flags.compactMap { data in data.uid.map { ($0, data.flags ?? []) } }, in: box.rowID)
-            }
-            if full {
-                let present = try await syncClient.search("UID \(low):\(high)", in: box.name, validity: validity)
-                try await store.remove(uids: Self.missing(try await store.uids(box.rowID), from: present), from: box.rowID)
+                if full {
+                    let present = try await syncClient.search("UID \(low):\(high)", in: box.name, validity: validity)
+                    try await store.remove(uids: Self.missing(run, from: present), from: box.rowID)
+                }
             }
         }
         if full { box.lastFullCheck = Date() }
@@ -239,53 +264,84 @@ public actor MailAccountSync {
         replace(box)
     }
 
-    /// Older messages, one batch per mailbox per step, newest of them first.
-    private func backfill() async throws -> Bool {
-        var more = false
-        for original in mailboxes where !original.complete {
-            try Task.checkCancellation()
-            var box = original
-            guard let validity = box.uidValidity else { continue }
-            if older[box.rowID] == nil {
-                let extent = try await store.extent(box.rowID)
-                if let low = extent.minUID, low > 1 {
-                    older[box.rowID] = try await syncClient.search("UID 1:\(low - 1)", in: box.name, validity: validity).numbers.reversed()
-                } else {
-                    older[box.rowID] = []
-                }
-            }
-            let queue = older[box.rowID] ?? []
-            guard !queue.isEmpty else {
-                box.complete = true
-                older[box.rowID] = nil
-                try await store.saveSyncState(box)
-                replace(box)
-                continue
-            }
-            let batch = Array(queue.prefix(policy.backfillBatch))
-            older[box.rowID] = Array(queue.dropFirst(batch.count))
-            let items = await items()
-            for chunk in IMAPSequenceSet(batch).chunked(maxCount: policy.headerBatch) {
-                let fetched = try await syncClient.fetch(uids: chunk, items: items, in: box.name, validity: validity)
-                try await store.upsert(fetched.compactMap(SyncedMessage.init(fetch:)), into: box.rowID)
-            }
-            await announce()
-            more = true
-        }
-        return more
+    /// One older batch of a mailbox, read when its list reaches the end of what this Mac has.
+    /// Returns whether the server holds older mail still, or nil when the mailbox is not this account's.
+    public func loadOlder(_ rowID: Int64) async throws -> Bool? {
+        guard let box = mailboxes.first(where: { $0.rowID == rowID }) else { return nil }
+        guard !box.complete, let validity = box.uidValidity else { return false }
+        let low = try await store.extent(rowID).minUID ?? box.uidNext ?? 1
+        guard low > 1 else { try await markComplete(rowID); return false }
+        let older = try await newestUIDs(policy.olderBatch, below: low, above: 0, in: box.name, validity: validity, client: actionClient)
+        try await fetchHeaders(older.uids, into: box, validity: validity, items: await items(actionClient), client: actionClient)
+        if older.reachedFloor { try await markComplete(rowID) }
+        return !older.reachedFloor
     }
 
-    /// Bodies of the newest messages, one batch per step: the inbox first, then Sent and Archive.
-    private func prefetchBodies() async throws -> Bool {
-        for box in mailboxes {
-            let within: Int
-            switch box.role {
-            case .inbox: within = policy.prefetchInbox
-            case .sent, .archive: within = policy.prefetchOther
-            default: within = 0
+    private func markComplete(_ rowID: Int64) async throws {
+        try await store.setComplete(rowID)
+        if let index = mailboxes.firstIndex(where: { $0.rowID == rowID }) { mailboxes[index].complete = true }
+    }
+
+    /// Up to `count` of the highest UIDs above `floor` and below `ceiling`, lowest first. Each UID
+    /// SEARCH covers a range sized from the one before, so its reply stays inside the server's
+    /// MESSAGELIMIT; a refused range is halved. `reachedFloor` is true when nothing below the
+    /// lowest UID returned is left unread.
+    func newestUIDs(_ count: Int, below ceiling: UInt32, above floor: UInt32, in mailbox: String,
+                    validity: UInt32, client: IMAPClient) async throws -> (uids: [UInt32], reachedFloor: Bool) {
+        guard floor < UInt32.max - 1, ceiling > floor + 1 else { return ([], true) }
+        let limit = await client.messageLimit
+        let first = count >= Int(UInt32.max / 2) ? Int(UInt32.max) : max(count, 1) * 2
+        var span = UInt32(clamping: min(limit ?? first, first))
+        var found: [UInt32] = []
+        var top = ceiling - 1
+        while true {
+            try Task.checkCancellation()
+            let low = top - floor > span ? top - span + 1 : floor + 1
+            let set: IMAPSequenceSet
+            do {
+                set = try await client.search("UID \(low):\(top)", in: mailbox, validity: validity)
+            } catch MailError.commandFailed(_, .no, _) where top - low >= 16 {
+                // More than the server returns at once, such as Yahoo's "partial results".
+                span = (top - low + 1) / 2
+                continue
             }
-            guard within > 0, let validity = box.uidValidity else { continue }
-            let missing = try await store.missingBodies(in: box.rowID, within: within, limit: policy.bodyBatch, maxSize: policy.prefetchMaxSize)
+            let hits = set.numbers.filter { $0 >= low && $0 <= top }
+            found += hits.reversed()
+            let reachedFloor = low == floor + 1
+            if found.count >= count || reachedFloor {
+                return (Array(found.prefix(count).reversed()), reachedFloor && found.count <= count)
+            }
+            let searched = Double(top - low + 1)
+            top = low - 1
+            if hits.isEmpty {
+                span = span > UInt32.max / 2 ? UInt32.max : span * 2
+            } else {
+                let density = Double(hits.count) / searched
+                var next = Double(count - found.count) * 1.25 / density
+                if let limit { next = min(next, Double(limit) * 0.8 / density) }
+                span = UInt32(min(max(next.rounded(.up), 1), Double(UInt32.max)))
+            }
+        }
+    }
+
+    /// Headers of `uids`, newest first, so the top of the list fills in before the rest. A server
+    /// cuts a FETCH short past its MESSAGELIMIT, so no batch is larger.
+    func fetchHeaders(_ uids: [UInt32], into box: NativeMailStore.Mailbox, validity: UInt32, items: String, client: IMAPClient) async throws {
+        let size = min(policy.headerBatch, await client.messageLimit ?? .max)
+        for chunk in IMAPSequenceSet(uids).chunked(maxCount: size).reversed() {
+            try Task.checkCancellation()
+            let fetched = try await client.fetch(uids: chunk, items: items, in: box.name, validity: validity)
+            try await store.upsert(fetched.compactMap(SyncedMessage.init(fetch:)), into: box.rowID)
+            await announce()
+        }
+    }
+
+    /// Bodies of the newest inbox messages, one batch per step, so new mail opens at once.
+    private func prefetchBodies() async throws -> Bool {
+        guard policy.prefetchInbox > 0 else { return false }
+        for box in mailboxes where box.role == .inbox {
+            guard let validity = box.uidValidity else { continue }
+            let missing = try await store.missingBodies(in: box.rowID, within: policy.prefetchInbox, limit: policy.bodyBatch, maxSize: policy.prefetchMaxSize)
             guard !missing.isEmpty else { continue }
             try await fetchBodies(missing, in: box, validity: validity, client: syncClient)
             return true
@@ -338,25 +394,9 @@ public actor MailAccountSync {
 
     // MARK: Helpers
 
-    /// The `count` highest numbers of a set, lowest first.
-    static func highest(_ set: IMAPSequenceSet, count: Int) -> [UInt32] {
-        var result: [UInt32] = []
-        for range in set.ranges.reversed() {
-            var value = range.upperBound
-            while result.count < count {
-                result.append(value)
-                if value == range.lowerBound { break }
-                value -= 1
-            }
-            if result.count >= count { break }
-        }
-        return result.reversed()
-    }
-
-    /// Numbers of `set` below `limit`, highest first.
-    static func below(_ limit: UInt32?, in set: IMAPSequenceSet) -> [UInt32] {
-        guard let limit else { return [] }
-        return set.numbers.filter { $0 < limit }.reversed()
+    /// `uids` in order, in runs of at most `size`.
+    static func runs(_ uids: [UInt32], size: Int) -> [[UInt32]] {
+        stride(from: 0, to: uids.count, by: max(size, 1)).map { Array(uids[$0..<min($0 + max(size, 1), uids.count)]) }
     }
 
     /// Stored UIDs (lowest first) that the server's set no longer has, in one walk of both.

@@ -19,6 +19,42 @@ final class MailSendTests: XCTestCase {
 
     // MARK: Undo and the send queue
 
+    func testUnavailableSendingAccountRefusesWithoutUsingAnotherAccount() async throws {
+        let model = try await rig.model(delay: 0)
+        model.compose(to: "sam@example.com"); model.draft?.body = "Keep this draft"
+        model.draft?.fromAccountID = "removed-account"
+        XCTAssertEqual(model.send(), "Select an available sending account.")
+        XCTAssertFalse(model.sending)
+        XCTAssertTrue(rig.outbox.all.isEmpty)
+    }
+
+    func testSourceChangeRefusesAQueuedSendAndKeepsTheDraft() async throws {
+        let defaults = UserDefaults.standard, previous = defaults.object(forKey: MailBackend.key)
+        defer {
+            if let previous { defaults.set(previous, forKey: MailBackend.key) }
+            else { defaults.removeObject(forKey: MailBackend.key) }
+        }
+        defaults.set(MailBackend.appleMail.rawValue, forKey: MailBackend.key)
+        let model = try await rig.model(delay: 30)
+        replyWith("Keep this reply", in: model)
+        XCTAssertNil(model.send())
+        defaults.set(MailBackend.jevcast.rawValue, forKey: MailBackend.key)
+        await model.finishSends()
+        XCTAssertTrue(rig.outbox.all.isEmpty)
+        XCTAssertEqual(model.draft?.body, "Keep this reply")
+        XCTAssertEqual(model.deliveries.last?.state, .failed)
+        XCTAssertTrue(model.banner?.contains("mail source changed") == true)
+    }
+
+    func testReplySelectsTheOriginalAccountInsteadOfTheFirstAccount() async throws {
+        let model = try await rig.model(delay: 0)
+        model.senders.insert(.init(accountID: "other-account", address: "other@example.com", name: "Other", signature: ""), at: 0)
+        model.reply(all: true)
+        XCTAssertEqual(model.draft?.fromAccountID, "GMAIL-1")
+        XCTAssertEqual(model.draft?.fromAddress, "me@example.com")
+        XCTAssertEqual(Set(model.draft?.ownAddresses ?? []), ["me@example.com", "other@example.com"])
+    }
+
     func testUndoBringsTheDraftBackAndSendsNothing() async throws {
         let model = try await rig.model(delay: 30)
         replyWith("See you Friday", in: model)
@@ -61,7 +97,7 @@ final class MailSendTests: XCTestCase {
         let model = try await rig.model(delay: 30)
         replyWith("First", in: model)
         model.send()
-        model.draft = MailModel.Draft(mode: .new, to: "ann@example.com", subject: "Second")
+        model.draft = MailModel.Draft(fromAccountID: "GMAIL-1", fromAddress: "me@example.com", mode: .new, to: "ann@example.com", subject: "Second")
         model.send()
         XCTAssertEqual(model.pendingSend?.subject, "Second", "The new message waits for Undo")
         try await rig.wait { rig.outbox.all.map(\.body) == ["First"] }
@@ -129,6 +165,10 @@ final class MailSendTests: XCTestCase {
         XCTAssertEqual(model.draft?.body, "Maybe sent")
         XCTAssertEqual(model.banner, MailMaybeSentError().errorDescription)
         XCTAssertFalse(model.banner?.hasPrefix("Not sent") == true)
+        XCTAssertTrue(model.draft?.uncertainSend == true)
+        XCTAssertEqual(model.deliveries.last?.state, .uncertain)
+        XCTAssertNotNil(model.send(), "An uncertain send needs explicit review before resend")
+        XCTAssertEqual(rig.outbox.all.count, 1)
     }
 
     // MARK: Quitting

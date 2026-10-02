@@ -7,9 +7,9 @@ public enum MailProvider: String, Codable, CaseIterable, Sendable, Identifiable 
     case yahoo
     /// iCloud Mail. Needs an app-specific password. SMTP is STARTTLS on 587 only.
     case icloud
-    /// Gmail with an app password (2-Step Verification must be on).
+    /// Gmail with Google Sign-In, or an app password when 2-Step Verification is on.
     case gmail
-    /// Outlook.com and Hotmail accept only OAuth since September 2024, which Jevcast does not offer yet.
+    /// Outlook.com and Hotmail use Microsoft OAuth sign-in.
     case outlook
     /// Any other IMAP and SMTP service.
     case other
@@ -50,8 +50,9 @@ public enum MailProvider: String, Codable, CaseIterable, Sendable, Identifiable 
     public var needsOAuth: Bool { self == .outlook }
 
     /// True when the server files a copy of each sent message by itself, so Jevcast must not add
-    /// another. Gmail and Outlook do. For the others Jevcast adds the copy to Sent.
-    public var serverSavesSent: Bool { self == .gmail || self == .outlook }
+    /// another. Gmail, Outlook, and Yahoo do; Yahoo's cannot be turned off. For the others Jevcast
+    /// adds the copy to Sent.
+    public var serverSavesSent: Bool { self == .gmail || self == .outlook || self == .yahoo }
 
     /// Where to make an app password.
     public var appPasswordURL: URL? {
@@ -68,7 +69,7 @@ public enum MailProvider: String, Codable, CaseIterable, Sendable, Identifiable 
         case .yahoo: return "In Yahoo Account Security, choose Generate app password. Yahoo allows this only in a browser that has been signed in to Yahoo for several days, not in a private window."
         case .icloud: return "At account.apple.com, open Sign-In and Security, then App-Specific Passwords."
         case .gmail: return "Turn on 2-Step Verification, then make an app password at myaccount.google.com/apppasswords."
-        case .outlook: return "Outlook.com needs OAuth sign-in, which Jevcast does not offer yet."
+        case .outlook: return "Use Microsoft Sign-In. Work accounts can require administrator approval and SMTP AUTH to be enabled."
         case .other: return "Use the password your mail service gives for mail apps."
         }
     }
@@ -104,6 +105,11 @@ public struct NativeMailAccount: Codable, Sendable, Equatable, Identifiable, Has
     public var smtpUsername: String
     /// Adds each sent message to the Sent mailbox after sending.
     public var savesSentCopy: Bool
+    public var signature: String?
+    public var authentication: Authentication?
+    /// Explicit server mailbox names selected in Settings. Special-use flags apply to the rest.
+    public var mailboxRoles: [String: MailMailbox.Role]?
+    public enum Authentication: String, Codable, Sendable { case password, oauth }
 
     public init(id: String = UUID().uuidString.lowercased(), provider: MailProvider, name: String, email: String,
                 imap: MailServer, smtp: MailServer, imapUsername: String? = nil, smtpUsername: String? = nil, savesSentCopy: Bool? = nil) {
@@ -121,4 +127,22 @@ public struct NativeMailAccount: Codable, Sendable, Equatable, Identifiable, Has
     }
 
     public var sender: MailContact { MailContact(name: name, address: email) }
+
+    public func validated() throws -> NativeMailAccount {
+        guard NativeMailStore.isSafeName(id), SMTPClient.isSafeAddress(email), !imapUsername.isEmpty, !smtpUsername.isEmpty,
+              !imapUsername.contains(where: { $0.isNewline || $0 == "\u{0}" }),
+              !smtpUsername.contains(where: { $0.isNewline || $0 == "\u{0}" }),
+              authentication != .oauth || [.gmail, .outlook].contains(provider) else {
+            throw MailError.notFound("Check the account address, user names, and sign-in method in Settings › Mail.")
+        }
+        _ = try imap.validated(); _ = try smtp.validated()
+        if authentication == .oauth {
+            let incoming = provider == .gmail ? ["imap.gmail.com"] : ["outlook.office365.com"]
+            let outgoing = provider == .gmail ? ["smtp.gmail.com"] : ["smtp-mail.outlook.com", "smtp.office365.com"]
+            guard incoming.contains(imap.host.lowercased()), outgoing.contains(smtp.host.lowercased()) else {
+                throw MailError.notFound("OAuth mail sign-in uses only the provider's own IMAP and SMTP servers.")
+            }
+        }
+        return self
+    }
 }

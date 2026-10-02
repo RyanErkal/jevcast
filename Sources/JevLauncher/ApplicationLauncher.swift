@@ -18,7 +18,8 @@ struct ApplicationLauncher: ApplicationLaunching {
                     completion(.failure(LauncherError("macOS opened a different copy of this app. Check its location in Finder.")))
                     return
                 }
-                // A menu-bar app does not become frontmost. Regular apps must.
+                // Allow time for initial activation. A slow foreground transition
+                // does not make a live app returned by LaunchServices a failed launch.
                 let deadline = ContinuousClock.now.advanced(by: .seconds(2))
                 while running.activationPolicy == .regular && !running.isActive && !running.isTerminated && ContinuousClock.now < deadline {
                     try? await Task.sleep(for: .milliseconds(50))
@@ -27,8 +28,8 @@ struct ApplicationLauncher: ApplicationLaunching {
                     print("[Jev interaction] app-open pid=\(running.processIdentifier) active=\(running.isActive) terminated=\(running.isTerminated)")
                     fflush(stdout)
                 }
-                guard !running.isTerminated, running.activationPolicy != .regular || running.isActive else {
-                    completion(.failure(LauncherError("\(app.name) opened, but did not come to the front. Try opening it from Finder.")))
+                guard !running.isTerminated else {
+                    completion(.failure(LauncherError("\(app.name) closed while it was opening. Try opening it from Finder.")))
                     return
                 }
                 completion(.success(()))

@@ -312,6 +312,7 @@ final class LauncherModel: ObservableObject {
         preferences.$clipboardSettings.removeDuplicates().sink { [weak self] settings in self?.clipboard.apply(settings) }.store(in: &subscriptions)
     }
     func begin() {
+        applicationLaunchToken = nil; launchingAppID = nil
         let targetApp = NSWorkspace.shared.frontmostApplication
         targetName = targetApp?.localizedName ?? "Active Window"
         windows.clearTarget()
@@ -349,6 +350,7 @@ final class LauncherModel: ObservableObject {
         if !speech.isStarting && !speech.isListening { voiceError = speech.status }
     }
     func end() {
+        applicationLaunchToken = nil; launchingAppID = nil
         visible = false; isComposingSearch = false; revision = UUID(); sourceTask?.cancel(); dismissQuill()
         startWork?.cancel(); speech.stop(); work?.cancel(); aiWork?.cancel(); files.stop()
         aiStatus = ""; aiError = nil
@@ -478,14 +480,14 @@ final class LauncherModel: ObservableObject {
         // between an exact match (100) and the best non-exact match (90).
         let now = Date(), frecency = preferences.frecency
         rows = rows.map { row in
-            guard row.learnsFromUse else { return row }
             var row = row
+            if (0...100).contains(row.score) { row.localMatchScore = row.score }
+            guard row.learnsFromUse else { return row }
             let favourite: Double
             if case .app = row.action { favourite = preferences.favourites.contains(row.id) ? 4 : 0 }
             else { favourite = 0 }
             let boost = favourite + frecency.boost(for: row.id, query: q, now: now) * Self.maxBoost
             if (0...100).contains(row.score) {
-                row.localMatchScore = row.score
                 row.score = SearchRanking.boosted(row.score, by: boost)
             } else { row.score += boost }
             return row
@@ -505,8 +507,9 @@ final class LauncherModel: ObservableObject {
         if !isFileSearch {
             if let web = webRow(q) { rows.append(web) }
         }
+        reconcilePromotedResult(with: rows)
         // A pick can replace a plain row with a richer one, such as a site search with the request's words.
-        if let semanticResult {
+        if let semanticResult, isEligibleCandidate(semanticResult.id) {
             rows.removeAll { $0.id == semanticResult.id }
             rows.append(semanticResult)
         }

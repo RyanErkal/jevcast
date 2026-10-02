@@ -3,13 +3,27 @@ import LauncherCore
 extension LauncherModel {
     /// Confidence uses the lexical match, never a favourite or usage boost.
     var hasClearLocalAnswer: Bool {
-        guard let top = results.first(where: \.isCurrent) else { return false }
-        if top.score >= Self.bareKeywordScore { return true }
-        guard let score = top.localMatchScore else { return false }
-        if score == Self.exactScore { return true }
-        guard score >= 90 else { return false }
-        let next = results.filter { $0.isCurrent && $0.id != top.id }.compactMap(\.localMatchScore).max() ?? 0
-        return score - next >= 10
+        clearLocalAnswer(in: results) != nil
+    }
+
+    private func clearLocalAnswer(in rows: [LauncherResult]) -> LauncherResult? {
+        guard let top = rows.filter(\.isCurrent).max(by: { $0.score < $1.score }) else { return nil }
+        if top.score >= Self.bareKeywordScore { return top }
+        guard let score = top.localMatchScore else { return nil }
+        if score == Self.exactScore { return top }
+        guard score >= 90 else { return nil }
+        let next = rows.filter { $0.isCurrent && $0.id != top.id }.compactMap(\.localMatchScore).max() ?? 0
+        return score - next >= 10 ? top : nil
+    }
+
+    /// A catalogue or preference update can invalidate a pick already on screen.
+    func reconcilePromotedResult(with localRows: [LauncherResult]) {
+        guard let promotedID else { return }
+        let eligible = isEligibleCandidate(promotedID)
+        let conflict = !manualSelection && clearLocalAnswer(in: localRows).map { $0.id != promotedID } == true
+        guard !eligible || conflict else { return }
+        self.promotedID = nil; semanticResult = nil; jevPick = nil
+        aiStatus = conflict ? "Kept local match" : ""
     }
 
     /// Every path, including memory and cache, obeys hidden-app and pane scope.
@@ -23,6 +37,6 @@ extension LauncherModel {
 
     func canPromote(_ id: String) -> Bool {
         guard visible, page == nil, !manualSelection, !isComposingSearch, canResolve(id) else { return false }
-        return !hasClearLocalAnswer || results.first(where: \.isCurrent)?.id == id
+        return clearLocalAnswer(in: results).map { $0.id == id } ?? true
     }
 }

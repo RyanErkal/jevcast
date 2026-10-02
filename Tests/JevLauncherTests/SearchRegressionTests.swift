@@ -128,6 +128,32 @@ final class SearchRegressionTests: XCTestCase {
         XCTAssertEqual(model.selectedID, selected)
     }
 
+    func testAnExactMatchThatAppearsAfterASavedPickRestoresLocalRanking() async throws {
+        let model = try await makeModel(); defer { model.end() }
+        let safari = try XCTUnwrap(model.catalogue.entries.first { $0.name == "Safari" })
+        model.preferences.learn("launch reader", id: safari.id)
+        model.updateQuery("launch reader", typed: true)
+        try await Task.sleep(nanoseconds: 180_000_000)
+        XCTAssertEqual(model.selectedID, safari.id)
+        model.preferences.customCommands = [CustomCommand(name: "Launch Reader", command: "true")]
+        model.rebuild()
+        XCTAssertEqual(model.selected?.title, "Launch Reader")
+        XCTAssertNil(model.jevPick)
+    }
+
+    func testHidingAnAlreadyPromotedAppRemovesItFromSearch() async throws {
+        let model = try await makeModel(); defer { model.end() }
+        let safari = try XCTUnwrap(model.catalogue.entries.first { $0.name == "Safari" })
+        model.preferences.learn("launch reader", id: safari.id)
+        model.updateQuery("launch reader", typed: true)
+        try await Task.sleep(nanoseconds: 180_000_000)
+        XCTAssertEqual(model.selectedID, safari.id)
+        model.preferences.hiddenApps = [safari.id]
+        model.rebuild()
+        XCTAssertFalse(model.results.contains { $0.id == safari.id })
+        XCTAssertNil(model.jevPick)
+    }
+
     func testHeldReturnCannotConfirmAnAction() async throws {
         let model = try await makeModel(); defer { model.end() }
         var runs = 0
@@ -215,6 +241,27 @@ final class SearchRegressionTests: XCTestCase {
         XCTAssertEqual(failures, 0)
         XCTAssertNil(model.message)
         XCTAssertNil(model.launchingAppID)
+    }
+
+    func testOldAppLaunchDoesNotBlockOrClearANewSessionsLaunch() async throws {
+        let model = try await makeModel(); defer { model.end() }
+        let launcher = HeldApplicationLauncher()
+        model.applicationLauncher = launcher
+        model.updateQuery("nightly", typed: true)
+        model.execute()
+        let oldCompletion = try XCTUnwrap(launcher.completion)
+        model.end(); model.begin()
+        XCTAssertNil(model.applicationLaunchToken)
+        XCTAssertNil(model.launchingAppID)
+        model.updateQuery("settings", typed: true)
+        model.execute()
+        XCTAssertEqual(launcher.calls, 2)
+        let newToken = model.applicationLaunchToken
+        oldCompletion(.success(()))
+        XCTAssertEqual(model.applicationLaunchToken, newToken)
+        XCTAssertEqual(model.launchingAppID, model.selectedID)
+        launcher.finish(.success(()))
+        XCTAssertNil(model.applicationLaunchToken)
     }
 }
 

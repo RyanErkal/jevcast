@@ -31,11 +31,13 @@ enum Diagnostics {
         let phrases = ["Safari", "open safari", "left half", "move this to the right half", "top left", "middle third", "tile all", "next monitor", "full screen", "terminal"]
         var timings: [Double] = []
         var outcomes: [[String: String]] = []
+        var appIndex = AppSearchIndex()
         for round in 0..<20 {
             for phrase in phrases {
                 let begin = CFAbsoluteTimeGetCurrent()
+                let query = SearchRanking.Query(phrase), settings = SettingsQuery(phrase)
                 var candidates: [(String, Double)] = apps.compactMap { app in
-                    guard let score = SearchRanking.score(query: phrase, title: app.name) else { return nil }
+                    guard let score = appIndex.score(app, query: query, settings: settings, aliases: []) else { return nil }
                     return (app.name, score)
                 }
                 candidates += WindowAction.allCases.compactMap { action in

@@ -7,35 +7,64 @@ import Foundation
 /// matches. A `nil` result means that there is no useful relationship between
 /// the query and the supplied action name.
 public enum SearchRanking {
+    public struct Query: Sendable {
+        let forms: [String]
+        public var intent: String { forms.first ?? "" }
+        public var literal: String { forms.last ?? "" }
+        public init(_ text: String) { forms = SearchRanking.forms(for: text) }
+        public init(literal text: String) {
+            let normalized = normalize(text)
+            forms = normalized.isEmpty ? [] : [normalized]
+        }
+    }
+
+    public enum CandidateStyle: Sendable { case action, name }
+
+    /// Names keep every meaningful word. Action labels can omit a leading verb.
+    public struct Candidate: Sendable {
+        let forms: [String]
+        public init(title: String, aliases: [String] = [], style: CandidateStyle = .action) {
+            forms = ([title] + aliases).flatMap { name in
+                let split = splitCamelCase(name)
+                let names = split == name ? [name] : [name, split]
+                return names.flatMap { style == .name ? [normalize($0)] : SearchRanking.forms(for: $0) }
+            }.filter { !$0.isEmpty }
+        }
+    }
+
     public static func score(
         query: String,
         title: String,
         aliases: [String] = []
     ) -> Double? {
-        let queryForms = forms(for: query)
-        guard !queryForms.isEmpty else { return nil }
+        score(query: Query(query), candidate: Candidate(title: title, aliases: aliases))
+    }
 
-        let candidates = [title] + aliases
+    public static func score(query: Query, candidate: Candidate) -> Double? {
+        guard !query.forms.isEmpty else { return nil }
         var best: Double?
-
-        for candidate in candidates {
-            // Also try CamelCase words, so "time" finds FaceTime.
-            let split = splitCamelCase(candidate)
-            let candidateForms = forms(for: candidate) + (split == candidate ? [] : forms(for: split))
-            guard !candidateForms.isEmpty else { continue }
-
-            for queryForm in queryForms {
-                for candidateForm in candidateForms {
-                    if let candidateScore = score(form: queryForm, against: candidateForm) {
-                        if best == nil || candidateScore > best! {
-                            best = candidateScore
-                        }
-                    }
+        for queryForm in query.forms {
+            for candidateForm in candidate.forms {
+                if let value = score(form: queryForm, against: candidateForm), value > (best ?? 0) {
+                    best = value
                 }
             }
         }
-
         return best
+    }
+
+    /// Personal use may reorder a tier, but never cross into a stronger tier.
+    public static func boosted(_ score: Double, by boost: Double) -> Double {
+        let ceiling: Double
+        switch score {
+        case 100...: return score + max(0, boost)
+        case 90..<100: ceiling = 100
+        case 56..<90: ceiling = 90
+        case 50..<56: ceiling = 56
+        case 40..<50: ceiling = 50
+        default: ceiling = 40
+        }
+        return min(score + max(0, boost), ceiling - 0.001)
     }
 
     private struct SearchForms {
@@ -142,8 +171,9 @@ public enum SearchRanking {
 
         // Spaces and brackets ignored: "t3code" finds "T3 Code (Nightly)", "facetime" finds "Face Time".
         let joinedQuery = query.replacingOccurrences(of: " ", with: "")
-        if joinedQuery.count >= 3, candidate.replacingOccurrences(of: " ", with: "").hasPrefix(joinedQuery) {
-            return 0.88
+        let joinedCandidate = candidate.replacingOccurrences(of: " ", with: "")
+        if joinedQuery.count >= 3, joinedCandidate.hasPrefix(joinedQuery) {
+            return joinedQuery == joinedCandidate ? 1 : 0.90
         }
 
         let queryTokens = query.split(separator: " ").map(String.init)
@@ -160,7 +190,10 @@ public enum SearchRanking {
             return total + (best.map { 0.85 + 0.10 * $0 } ?? 0)
         }
 
-        if matchWeight > 0 {
+        let matchedTokens = querySet.filter { token in
+            candidateSet.contains(token) || ((token.count >= 2 || querySet.count == 1) && candidateTokens.contains { $0.hasPrefix(token) })
+        }.count
+        if matchedTokens == querySet.count {
             let coverage = matchWeight / Double(querySet.count)
             let precision = min(1, matchWeight / Double(candidateSet.count))
             // This range is deliberately below the prefix score, even when
@@ -186,8 +219,9 @@ public enum SearchRanking {
             return 0.40 + 0.08 * density
         }
 
-        guard isSubsequence(compactQuery, of: compactCandidate) else { return nil }
-        return 0.28 + 0.10 * density
+        if isSubsequence(compactQuery, of: compactCandidate) { return 0.28 + 0.10 * density }
+        // A shared word with unrelated words is a weak suggestion, never a word match.
+        return matchedTokens > 0 ? 0.28 + 0.10 * Double(matchedTokens) / Double(querySet.count) : nil
     }
 
     private static func isSubsequence(_ query: String, of candidate: String) -> Bool {

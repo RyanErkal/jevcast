@@ -26,6 +26,14 @@ enum Frontmost {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { bring() }
     }
 
+    /// Use the exact instance returned by LaunchServices, including its windows.
+    private static func activate(_ application: NSRunningApplication) {
+        guard application.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
+        NSApp.yieldActivation(to: application)
+        application.unhide()
+        application.activate(from: .current, options: [.activateAllWindows])
+    }
+
     @discardableResult
     static func open(_ url: URL) -> Bool {
         let id = bundleID(of: handler(for: url))
@@ -41,7 +49,7 @@ enum Frontmost {
         yield(to: id)
         configuration.activates = true
         let running = try await NSWorkspace.shared.open(urls, withApplicationAt: app, configuration: configuration)
-        activate(id)
+        activate(running)
         return running
     }
 
@@ -51,8 +59,10 @@ enum Frontmost {
         yield(to: id)
         configuration.activates = true
         NSWorkspace.shared.openApplication(at: url, configuration: configuration) { running, error in
-            Task { @MainActor in if error == nil { activate(id) } }
-            completionHandler?(running, error)
+            Task { @MainActor in
+                if error == nil, let running { activate(running) }
+                completionHandler?(running, error)
+            }
         }
     }
 
@@ -62,7 +72,7 @@ enum Frontmost {
         yield(to: id)
         configuration.activates = true
         let running = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
-        activate(id)
+        activate(running)
         return running
     }
 

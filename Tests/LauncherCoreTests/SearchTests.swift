@@ -186,7 +186,7 @@ final class CalculatorTests: XCTestCase {
 
 final class JoinedNameTests: XCTestCase {
     func testNamesMatchWithoutSpaces() {
-        XCTAssertEqual(SearchRanking.score(query: "t3code", title: "T3 Code (Nightly)"), 0.88)
+        XCTAssertEqual(SearchRanking.score(query: "t3code", title: "T3 Code (Nightly)"), 0.90)
         XCTAssertNotNil(SearchRanking.score(query: "facetime", title: "Face Time"))
         XCTAssertGreaterThan(SearchRanking.score(query: "t3 code", title: "T3 Code (Nightly)") ?? 0, 0.88)
     }

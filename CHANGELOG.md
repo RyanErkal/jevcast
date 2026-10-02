@@ -2,7 +2,7 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
-## Unreleased
+## [1.16.1] - 2026-10-03
 
 ### Added
 
@@ -10,7 +10,15 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Fixed
 
+- **Settings search.** `settings` puts the System Settings app first. A pane appears only for a named request such as `bluetooth settings` or `focus settings`, and only matching panes appear.
+- **App matching and launch.** Compact names such as `t3code` rank with spaced names. Favourites and past use cannot lift a partial match above an exact name. Jevcast activates the app instance returned by macOS, checks its location, and records use only after a successful launch. A failed launch shows its reason.
+- **Late search answers.** Saved and cached picks obey hidden-app and settings-pane rules. A delayed Jev or saved answer cannot replace a clear local answer or the row you select.
+- **Typing and Return.** Search keeps input-method composition intact and stops pending matching until the text is committed. Holding Return cannot confirm an action a second time. A late app launch cannot close or block a new search, or replace its newer learned choice.
 - Clean Up keeps coding CLIs, IPC workers, regular apps, and protected child trees running. Changed or reused process IDs cannot be stopped from an old checklist.
+
+### Changed
+
+- Search prepares app names once and reuses them while you type. Requests with unrelated extra words receive a weaker match.
 
 ## [1.16.0] - 2026-10-02
 

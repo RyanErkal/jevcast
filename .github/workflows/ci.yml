@@ -48,8 +48,13 @@ jobs:
         # A hung test fails the job here, not at the job's limit.
         timeout-minutes: 20
         env:
+          # Tests use fixtures and must not reach real mail accounts or Apple Mail.
+          JEVCAST_MAIL_OFFLINE: "1"
           # A live mail model times out with the runner's Xcode 26; those tests run locally.
           JEVCAST_SKIP_LIVE_MAIL_MODEL: "1"
+          # Loading Mail's scripting dictionary can hang osacompile on hosted Macs.
+          # The compile check runs locally with the required full test suite.
+          JEVCAST_SKIP_MAIL_DICTIONARY: "1"
           # Writes each test line at once, so a cancelled run's log shows the test that hung.
           NSUnbufferedIO: "YES"
         run: swift test

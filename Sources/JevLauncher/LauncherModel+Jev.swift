@@ -30,23 +30,22 @@ extension LauncherModel {
     /// memory or asks Jev. Skips requests that already have one clear local answer.
     func scheduleJev(_ trimmed: String, revision current: UUID) {
         guard !isFileSearch, !isClipboardSearch, portQuery == nil, sourceQuery == nil, trimmed.count >= 2 else { return }
-        let top = results.first(where: \.isCurrent)?.score ?? 0
-        guard top < Self.exactScore else { return }
+        guard !hasClearLocalAnswer, !manualSelection, !isComposingSearch else { return }
         // Memory needs no key and no network, so it works even with Jev off.
         if let id = preferences.learned.lookup(trimmed), canResolve(id) {
             aiWork = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 120_000_000)
-                guard !Task.isCancelled, let self, self.revision == current else { return }
+                guard !Task.isCancelled, let self, self.revision == current, self.canPromote(id) else { return }
                 self.aiStatus = "Remembered"
                 self.usage?.recordSaved()
                 self.promote(id, remembered: true)
             }
             return
         }
-        guard preferences.jevEnabled, top < Self.definiteScore else { return }
+        guard preferences.jevEnabled else { return }
         let key = LearnedIntents.normalize(trimmed)
         if let cached = replyCache[key], Date().timeIntervalSince(cached.at) < Self.replyLifetime {
-            if let id = cached.id, canResolve(id) {
+            if let id = cached.id, canPromote(id) {
                 aiStatus = "Jev matched"
                 promote(id, remembered: false)
             }
@@ -79,7 +78,8 @@ extension LauncherModel {
             if chosen == Self.clockCandidateID {
                 // Not cached or remembered: the answer depends on the time of day.
                 let row = try await clockRow(for: text, key: key)
-                guard !Task.isCancelled, visible, self.revision == current else { return }
+                guard !Task.isCancelled, visible, self.revision == current,
+                      !manualSelection, !isComposingSearch, !hasClearLocalAnswer else { return }
                 aiStatus = row == nil ? "No clear AI match" : "Jev matched"
                 guard let row else { return }
                 usage?.recordMatch()
@@ -91,10 +91,7 @@ extension LauncherModel {
             if jevWindowTarget == nil { replyCache[LearnedIntents.normalize(text)] = (chosen, Date()) }
             aiStatus = chosen == nil ? "No clear AI match" : "Jev matched"
             guard let chosen else { return }
-            // A whole-name match the user typed stays first.
-            if let top = results.first(where: \.isCurrent), top.score >= Self.exactScore, top.id != chosen, !chosen.hasPrefix("route:"), chosen != Self.portsCandidateID {
-                aiStatus = "Kept exact match"; return
-            }
+            guard canPromote(chosen) else { aiStatus = manualSelection ? "" : "Kept local match"; return }
             usage?.recordMatch()
             promote(chosen, remembered: false)
         } catch {
@@ -240,7 +237,7 @@ extension LauncherModel {
         let running = Set(catalogue.runningApplications.compactMap(\.bundleURL).map(\.path))
         let likely = Set(preferences.favourites + preferences.recentIDs)
         let hidden = Set(preferences.hiddenApps)
-        let apps = catalogue.entries.filter { !hidden.contains($0.id) }.sorted { lhs, rhs in
+        let apps = catalogue.entries.filter { !hidden.contains($0.id) && isEligibleCandidate($0.id) }.sorted { lhs, rhs in
             let l = (likely.contains(lhs.id) ? 2 : 0) + (running.contains(lhs.path) ? 1 : 0)
             let r = (likely.contains(rhs.id) ? 2 : 0) + (running.contains(rhs.path) ? 1 : 0)
             return l != r ? l > r : lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
@@ -271,9 +268,10 @@ extension LauncherModel {
     }
 
     func canResolve(_ id: String) -> Bool {
+        guard isEligibleCandidate(id) else { return false }
         if id == Self.portsCandidateID || Self.routes.contains(where: { $0.id == id }) { return true }
         if id.hasPrefix("menu:") { return menuCommands.contains { $0.id == id } }
-        if results.contains(where: { $0.id == id }) { return true }
+        if results.contains(where: { $0.id == id && $0.isCurrent }) { return true }
         if id == Self.askID { return quillReady }
         if id == Self.customSelectionID { return customSelectionRow(query) != nil }
         if id.hasPrefix("this:") { return allContextRows().contains { $0.id == id } }
@@ -286,6 +284,7 @@ extension LauncherModel {
     /// Puts a pick first. A pick outside the current rows is added, then the list regroups around it.
     /// Some picks become richer rows: an app plus a window layout, or a site search with the request's text.
     func promote(_ chosen: String, remembered: Bool) {
+        guard canPromote(chosen) else { return }
         if chosen == Self.portsCandidateID {
             loadPorts(PortQuery(port: PortQuery.firstPort(in: query)), revision: revision, promoteFirst: true)
             return
@@ -342,14 +341,17 @@ extension LauncherModel {
     /// Remembers what a request meant when Jev or memory was involved, or when the user
     /// chose something other than the first row. A later identical request then skips Jev.
     func learnFromExecution(_ result: LauncherResult) {
+        if shouldLearnFromExecution(result) { preferences.learn(query, id: result.id) }
+    }
+
+    func shouldLearnFromExecution(_ result: LauncherResult) -> Bool {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         // A Jev-chosen window target is not remembered: the ID alone would move the active window.
         // "/" and "$" lists name functions directly; there is nothing to learn.
-        guard !q.isEmpty, Self.prefix(for: q) == nil, Self.isLearnable(result), jevWindowTarget == nil else { return }
+        guard !q.isEmpty, Self.prefix(for: q) == nil, Self.isLearnable(result), jevWindowTarget == nil else { return false }
         let firstRow = results.first(where: \.isCurrent)?.id
-        let exact = (results.first(where: \.isCurrent)?.score ?? 0) >= Self.exactScore && firstRow == result.id
-        guard !exact, jevPick != nil || result.id != firstRow || aiStatus == "No clear AI match" else { return }
-        preferences.learn(q, id: result.id)
+        let exact = results.first(where: \.isCurrent)?.localMatchScore == Self.exactScore && firstRow == result.id
+        return !exact && (jevPick != nil || result.id != firstRow || aiStatus == "No clear AI match")
     }
 
     private static func isLearnable(_ result: LauncherResult) -> Bool {

@@ -33,6 +33,8 @@ struct LauncherResult: Identifiable {
     let symbol: String
     let action: Action
     var score: Double
+    /// Lexical score before favourites and use. It is not an AI confidence value.
+    var localMatchScore: Double?
     var isCurrent = true
     /// Hover text, such as "Picked by Jev. ⌘Z undoes." on a Jev or memory pick.
     var help: String?
@@ -117,6 +119,7 @@ final class LauncherModel: ObservableObject {
     var isSearchingFiles: Bool { isFileSearch && fileStatus.hasPrefix("Searching") }
     /// Work the footer shows a spinner for, or nil.
     var loadingStatus: String? {
+        if launchingAppID != nil { return "Opening application…" }
         if isSearchingFiles { return "Searching files…" }
         if aiStatus == Self.interpreting { return "Thinking…" }
         if quillAnswer?.isLoading == true { return "Quill is writing…" }
@@ -195,6 +198,9 @@ final class LauncherModel: ObservableObject {
     private let files: FileSearching
     let jev: JevChoosing
     let usage: JevUsageLog?
+    var applicationLauncher: ApplicationLaunching = ApplicationLauncher()
+    var applicationLaunchToken: UUID?
+    @Published var launchingAppID: String?
     let timers = TimerCenter.shared
     /// Menu items of the app that was in front when the launcher opened.
     var menuCommands: [MenuCommand] = []
@@ -218,6 +224,8 @@ final class LauncherModel: ObservableObject {
     var manualSelection = false
     var promotedID: String?
     var semanticResult: LauncherResult?
+    var appSearchIndex = AppSearchIndex()
+    var isComposingSearch = false
     /// The port query in the search field, if any, and what lsof found for it.
     var portQuery: PortQuery?
     var listeners: [ListeningPort] = []
@@ -304,11 +312,12 @@ final class LauncherModel: ObservableObject {
         preferences.$clipboardSettings.removeDuplicates().sink { [weak self] settings in self?.clipboard.apply(settings) }.store(in: &subscriptions)
     }
     func begin() {
+        applicationLaunchToken = nil; launchingAppID = nil
         let targetApp = NSWorkspace.shared.frontmostApplication
         targetName = targetApp?.localizedName ?? "Active Window"
         windows.clearTarget()
         windows.gap = preferences.gap
-        visible = true; acceptsSpeech = true; manualSelection = false; query = ""; message = nil; voiceError = nil
+        visible = true; acceptsSpeech = true; manualSelection = false; isComposingSearch = false; query = ""; message = nil; voiceError = nil
         parsedFileQuery = FileSearchQuery(text: ""); fileStatus = ""
         previousFileResults = []; fileResults = []; promotedID = nil; semanticResult = nil; revision = UUID()
         portQuery = nil; listeners = []; portDetails = [:]; stoppedNotice = nil; isLoadingPorts = false; pendingConfirmID = nil
@@ -341,14 +350,19 @@ final class LauncherModel: ObservableObject {
         if !speech.isStarting && !speech.isListening { voiceError = speech.status }
     }
     func end() {
-        visible = false; revision = UUID(); sourceTask?.cancel(); dismissQuill()
+        applicationLaunchToken = nil; launchingAppID = nil
+        visible = false; isComposingSearch = false; revision = UUID(); sourceTask?.cancel(); dismissQuill()
         startWork?.cancel(); speech.stop(); work?.cancel(); aiWork?.cancel(); files.stop()
         aiStatus = ""; aiError = nil
     }
-    func updateQuery(_ text: String, typed: Bool) {
+    func cancelSearchWork() {
+        work?.cancel(); aiWork?.cancel(); sourceTask?.cancel(); files.stop()
+        aiStatus = ""; aiError = nil
+    }
+    func updateQuery(_ text: String, typed: Bool, force: Bool = false) {
         guard visible else { return }
         if typed { acceptsSpeech = false; speech.stop() }
-        guard text != query else { return }
+        guard text != query || force else { return }
         dismissQuill()
         let wasFileSearch = isFileSearch
         // "/cal" lists functions, not files under "/cal".
@@ -422,13 +436,14 @@ final class LauncherModel: ObservableObject {
             return
         }
         let aliasesByApp = self.aliasesByApp
+        let rankingQuery = SearchRanking.Query(q), settingsQuery = SettingsQuery(q)
+        appSearchIndex.retain(Set(catalogue.entries.map(\.id)))
         var rows: [LauncherResult] = []
         let hidden = Set(preferences.hiddenApps)
         for app in catalogue.entries where !isFileSearch && !hidden.contains(app.id) {
             let aliases = aliasesByApp[app.id] ?? []
-            guard let score = SearchRanking.score(query: q, title: app.name, aliases: aliases) else { continue }
-            let favourite = preferences.favourites.contains(app.id) ? 4.0 : 0
-            rows.append(Self.appRow(app, running: running.contains(app.path), score: score * 100 + favourite))
+            guard let score = appSearchIndex.score(app, query: rankingQuery, settings: settingsQuery, aliases: aliases) else { continue }
+            rows.append(Self.appRow(app, running: running.contains(app.path), score: score * 100))
         }
         let namedTarget = namedTarget(in: q)
         for action in WindowAction.allCases where !isFileSearch {
@@ -465,9 +480,17 @@ final class LauncherModel: ObservableObject {
         // between an exact match (100) and the best non-exact match (90).
         let now = Date(), frecency = preferences.frecency
         rows = rows.map { row in
+            var row = row
+            if (0...100).contains(row.score) { row.localMatchScore = row.score }
             guard row.learnsFromUse else { return row }
-            let boost = frecency.boost(for: row.id, query: q, now: now) * Self.maxBoost
-            return boost > 0 ? row.adding(boost) : row
+            let favourite: Double
+            if case .app = row.action { favourite = preferences.favourites.contains(row.id) ? 4 : 0 }
+            else { favourite = 0 }
+            let boost = favourite + frecency.boost(for: row.id, query: q, now: now) * Self.maxBoost
+            if (0...100).contains(row.score) {
+                row.score = SearchRanking.boosted(row.score, by: boost)
+            } else { row.score += boost }
+            return row
         }
         if let bareKeyword, let index = rows.firstIndex(where: { $0.id == bareKeyword }),
            let lowest = rows.filter({ exactIDs.contains($0.id) }).map(\.score).min() {
@@ -484,8 +507,9 @@ final class LauncherModel: ObservableObject {
         if !isFileSearch {
             if let web = webRow(q) { rows.append(web) }
         }
+        reconcilePromotedResult(with: rows)
         // A pick can replace a plain row with a richer one, such as a site search with the request's words.
-        if let semanticResult {
+        if let semanticResult, isEligibleCandidate(semanticResult.id) {
             rows.removeAll { $0.id == semanticResult.id }
             rows.append(semanticResult)
         }
@@ -613,15 +637,20 @@ final class LauncherModel: ObservableObject {
         guard !available.isEmpty else { return }
         let index = available.firstIndex(where: { $0.id == selectedID }) ?? 0
         selectedID = available[min(max(index + delta, 0), available.count - 1)].id
-        manualSelection = true; pendingConfirmID = nil; stoppedNotice = nil; sourceNote = nil
+        userSelected(); pendingConfirmID = nil; stoppedNotice = nil; sourceNote = nil
     }
     func select(_ id: String) {
         guard results.contains(where: { $0.id == id && $0.isCurrent }) else { selectedID = nil; return }
         if selectedID != id { pendingConfirmID = nil }
-        selectedID = id; manualSelection = true
+        selectedID = id; userSelected()
+    }
+    private func userSelected() {
+        manualSelection = true
+        aiWork?.cancel(); aiStatus = ""; aiError = nil
     }
     var selected: LauncherResult? { results.first { $0.id == selectedID && $0.isCurrent } }
     func execute(paste: Bool = false) {
+        guard applicationLaunchToken == nil, !isComposingSearch else { return }
         if quillAnswer != nil { finishQuillAnswer(paste: paste); return }
         guard let result = selected else { message = "Choose an action first."; return }
         if result.needsConfirmation && pendingConfirmID != result.id { pendingConfirmID = result.id; return }
@@ -635,12 +664,8 @@ final class LauncherModel: ObservableObject {
                 guard let url = app.launchURL.flatMap(URL.init(string:)), Frontmost.open(url) else { throw LauncherError("That settings pane could not be opened.") }
             case .app(let app):
                 guard FileManager.default.fileExists(atPath: app.path) else { throw LauncherError("This app moved or was removed. Refresh apps in Settings › Search › Advanced.") }
-                let url = URL(fileURLWithPath: app.path)
-                let config = NSWorkspace.OpenConfiguration(); config.activates = true
-                Frontmost.openApplication(at: url, configuration: config) { [weak self] _, error in
-                    guard let error else { return }
-                    Task { @MainActor in self?.showFailure(error.localizedDescription) }
-                }
+                launchApplication(app, result: result)
+                return
             case .file(let file):
                 guard Frontmost.open(URL(fileURLWithPath: file.path)) else { throw LauncherError("The file could not be opened.") }
             case .window(let action, let pid): try windows.execute(action, appPID: pid)

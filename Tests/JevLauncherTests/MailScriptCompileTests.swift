@@ -5,6 +5,8 @@ import LauncherCore
 final class MailScriptCompileTests: XCTestCase {
     /// Compile the fixed scripts against the local Mail dictionary. Do not execute them.
     func testScriptsCompileWithoutExecutingMailActions() async throws {
+        try XCTSkipIf(ProcessInfo.processInfo.environment["JEVCAST_SKIP_MAIL_DICTIONARY"] == "1",
+                      "Loading Apple Mail's scripting dictionary can hang on hosted Macs. Run this check locally.")
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mail-script-compile-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }

@@ -183,6 +183,7 @@ extension LauncherModel {
             if !page.back() { leaveView() }
             return true
         }
+        if event.isARepeat && (event.keyCode == 36 || event.keyCode == 76) { return true }
         if event.keyCode != 53, page.handleEvent(event) { return true }
         switch event.keyCode {
         case 53:

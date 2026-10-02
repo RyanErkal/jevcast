@@ -45,6 +45,16 @@ final class LauncherPagesTests: XCTestCase {
                          characters: "", charactersIgnoringModifiers: "", isARepeat: repeating, keyCode: code)!
     }
 
+    @MainActor func testHeldReturnDoesNotOpenARowAgain() {
+        let page = SpyPage()
+        let (model, done) = makeModel(page); defer { done() }
+        model.showView(.mail)
+        XCTAssertTrue(model.handleViewKey(key(36)))
+        XCTAssertEqual(page.keys, [.open(shift: false)])
+        XCTAssertTrue(model.handleViewKey(key(36, repeating: true)))
+        XCTAssertEqual(page.keys, [.open(shift: false)])
+    }
+
     @MainActor func testHeldDeleteNeverDeletesButOnePressDoes() {
         let page = SpyPage()
         let (model, done) = makeModel(page); defer { done() }

@@ -172,7 +172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             if self.model.quillAnswer != nil {
                 switch event.keyCode {
                 case 53: self.model.dismissQuill(); return nil
-                case 36, 76: self.model.execute(paste: event.modifierFlags.contains(.shift)); return nil
+                case 36, 76: self.model.handleSearchReturn(event); return nil
                 case 125, 126, 51: return event.keyCode == 51 ? event : nil
                 default: if event.modifierFlags.contains(.command) { return event.charactersIgnoringModifiers == "c" ? event : nil }
                 }
@@ -181,7 +181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             case 53:
                 self.hide()
                 return nil
-            case 36, 76: self.model.execute(paste: event.modifierFlags.contains(.shift)); return nil
+            case 36, 76: self.model.handleSearchReturn(event); return nil
             case 51:
                 // ⌫ stops a port's process once the row is picked; ⌘⌫ stops it at once. Otherwise ⌫ edits the search.
                 guard case .stopProcess = self.model.selected?.action,

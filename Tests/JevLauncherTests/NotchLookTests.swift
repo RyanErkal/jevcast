@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 import LauncherCore
 @testable import JevLauncher
@@ -187,6 +188,28 @@ final class NotchLookTests: XCTestCase {
         XCTAssertEqual(NotchAlertController.nextMode(previous: list, previousMode: .detail, next: running("other"), replyTarget: nil), .pill)
     }
 
+    /// The `--notch-demo` timeline: one run's card is open when two more start. The real queue turns the card into a
+    /// stack, and the open card becomes the open list instead of snapping back to the pill.
+    @MainActor func testAnOpenRunningCardStaysOpenWhenMoreRunsJoin() throws {
+        var q = NotchQueue()
+        q.add(running("one"))
+        let card = try XCTUnwrap(q.presentation)
+        q.add(running("two")); q.add(running("three"))
+        let list = try XCTUnwrap(q.presentation)
+        XCTAssertTrue(list.isStack)
+        XCTAssertEqual(NotchAlertController.nextMode(previous: card, previousMode: .detail, next: list, replyTarget: nil), .detail)
+        XCTAssertEqual(NotchAlertController.nextMode(previous: card, previousMode: .pill, next: list, replyTarget: nil), .pill,
+                       "a minimized pill stays minimized")
+        XCTAssertEqual(NotchAlertController.nextMode(previous: card, previousMode: .detail,
+                                                     next: NotchQueue.stack([running("two"), running("three")]), replyTarget: nil), .pill,
+                       "the open run left: the new ones rest")
+        XCTAssertEqual(NotchAlertController.presentedAlerts(list, mode: .detail), [], "running rows are never counted as shown")
+        // Work that needs the user takes over as its own card, never an open list.
+        q.add(NotchAlert(id: "run:q/1", kind: .question, symbol: "x", title: "q", message: "?", runID: "1"))
+        XCTAssertEqual(NotchAlertController.nextMode(previous: list, previousMode: .detail, next: try XCTUnwrap(q.presentation),
+                                                     replyTarget: nil), .card)
+    }
+
     func testRunningCardIsCompact() {
         let g = NotchGeometry(screenFrame: CGRect(x: 0, y: 0, width: 1512, height: 982), notchWidth: 200, notchHeight: 32)
         let single = running("one")
@@ -194,62 +217,92 @@ final class NotchLookTests: XCTestCase {
         XCTAssertEqual(g.width(.detail), NotchGeometry.cardWidth)
     }
 
-    // MARK: Material
+    // MARK: Surface
 
-    func testMaterialIsLiveOnlyOnScreenAndSolidWithReduceTransparency() {
-        XCTAssertEqual(NotchMaterial.choose(live: true, reduceTransparency: false, glassAvailable: true), .glass)
-        XCTAssertEqual(NotchMaterial.choose(live: true, reduceTransparency: false, glassAvailable: false), .blur)
-        XCTAssertEqual(NotchMaterial.choose(live: false, reduceTransparency: false, glassAvailable: true), .smokeOnly,
-                       "an offscreen render never claims glass")
-        for live in [true, false] {
-            for glass in [true, false] {
-                XCTAssertEqual(NotchMaterial.choose(live: live, reduceTransparency: true, glassAvailable: glass), .solid)
+    /// The whole island is pure, opaque black in every state and setting; only a quiet rim catches light.
+    func testTheSurfaceIsOpaqueBlackWithAQuietRimClearBesideTheNotch() {
+        let black = NotchSurface.fill.resolve(in: EnvironmentValues())
+        XCTAssertEqual([black.red, black.green, black.blue, black.opacity], [0, 0, 0, 1], "pure black, fully opaque")
+
+        let rim = NotchRim.make(increaseContrast: false)
+        let firm = NotchRim.make(increaseContrast: true)
+        for height: CGFloat in [0, 20, 32, 40, 64, 128, 272] {
+            for band: CGFloat in [0, 32] {
+                for edge in [rim, firm] {
+                    let stops = edge.stops(height: height, band: band)
+                    XCTAssertEqual(stops.map(\.location), stops.map(\.location).sorted(), "stops run top to bottom")
+                    XCTAssertTrue(stops.allSatisfy { (0...1).contains($0.location) && (0...1).contains($0.opacity) })
+                    if band > 0 {
+                        XCTAssertTrue(stops.filter { height == 0 || $0.location <= min(1, band / height) }.allSatisfy { $0.opacity == 0 },
+                                      "no rim light along the notch or the menu bar, height \(height)")
+                    }
+                }
             }
         }
-        XCTAssertTrue(NotchSmoke.make(.solid, increaseContrast: false).fill(height: 160, band: 32, openness: 1).allSatisfy { $0.opacity == 1 },
-                      "Reduce Transparency draws opaque black")
+        XCTAssertLessThanOrEqual(max(rim.upper, rim.middle, rim.lower), 0.25, "the rim is a hint, not an outline")
+        XCTAssertGreaterThan(rim.upper, rim.middle, "light catches below the notch")
+        XCTAssertGreaterThan(rim.lower, rim.middle, "and again along the lower edge, like glass")
+        XCTAssertLessThan(rim.inner, 1, "the inner band is fainter than the line")
+        XCTAssertTrue(firm.upper > rim.upper && firm.middle > rim.middle && firm.lower > rim.lower && firm.width > rim.width,
+                      "Increase Contrast firms every part of the rim")
     }
 
-    /// Beside the hardware notch the island is always opaque black, closed or open, so no seam or hole shows there.
-    func testTheNotchBandStaysBlackAndOnlyTheBodyIsTranslucent() {
-        for material in [NotchMaterial.glass, .blur, .smokeOnly] {
-            let smoke = NotchSmoke.make(material, increaseContrast: false)
-            for height: CGFloat in [20, 32, 64, 128, 272] {
-                for openness: CGFloat in [0, 0.4, 1] {
-                    let stops = smoke.fill(height: height, band: 32, openness: openness)
-                    XCTAssertEqual(stops.map(\.location), stops.map(\.location).sorted(), "stops run top to bottom")
-                    XCTAssertTrue(stops.allSatisfy { (0...1).contains($0.location) })
-                    XCTAssertTrue(stops.filter { $0.location <= min(1, 32 / height) }.allSatisfy { $0.opacity == 1 }, "the band is opaque")
-                    if openness == 0 { XCTAssertTrue(stops.allSatisfy { $0.opacity == 1 }, "the pill joins the notch in black") }
-                }
-                XCTAssertTrue(smoke.edge(height: height, band: 32).filter { $0.location <= min(1, 32 / height) }.allSatisfy { $0.opacity == 0 },
-                              "no edge light along the notch or the menu bar")
+    /// Rendered over a white desktop, an open card's background is pure black where no text or control draws: the
+    /// notch band, the padding, and between the rows. Outside the outline the desktop shows.
+    @MainActor func testAnOpenCardRendersPureBlackOverABrightDesktop() throws {
+        let g = NotchGeometry(screenFrame: CGRect(x: 0, y: 0, width: 1512, height: 982), notchWidth: 200, notchHeight: 32)
+        let review = NotchAlert(id: "run:v/1", kind: .review, symbol: "chart.bar.xaxis", accent: AutomationAccent.purple.rawValue,
+                                title: "Weekly sample report", message: "Needs review: Sample weekly summary",
+                                actions: [.init("Review", id: "review", primary: true), .init("Later", id: "later")])
+        let size = NotchStyle.size(.card, review, g)
+        XCTAssertEqual(size, CGSize(width: 400, height: 128))
+        let width: CGFloat = 480, scale: CGFloat = 2
+        let scene = ZStack(alignment: .top) {
+            Color.white
+            NotchIsland(alert: review, geometry: g, mode: .card, liveField: false)
+        }
+        .frame(width: width, height: size.height + 40)
+        .environment(\.colorScheme, .dark)
+        .environment(\.notchLiveSurface, false)
+        let renderer = ImageRenderer(content: scene)
+        renderer.scale = scale
+        let image = try XCTUnwrap(renderer.cgImage, "offscreen render")
+        let pixels = try Pixels(image)
+        let left = (width - size.width) / 2
+        // Points in the island's coordinates: left of the notch in its band, the bottom padding, and the right padding
+        // between the header and the footer.
+        for (x, y) in [(left + 30, 16.0), (left + 30, size.height - 8), (left + size.width - 8, 78)] as [(CGFloat, CGFloat)] {
+            let p = pixels.rgba(x: Int(x * scale), y: Int(y * scale))
+            XCTAssertEqual([p.0, p.1, p.2, p.3], [0, 0, 0, 255], "pure opaque black at \(x), \(y)")
+        }
+        let desktop = pixels.rgba(x: 2 * Int(scale), y: Int((size.height - 8) * scale))
+        XCTAssertGreaterThan(Int(desktop.0), 240, "outside the outline the desktop shows")
+    }
+
+    /// Reads a rendered image as 8-bit sRGB RGBA, top row first.
+    private struct Pixels {
+        let width: Int
+        let bytes: [UInt8]
+
+        init(_ image: CGImage) throws {
+            width = image.width
+            var data = [UInt8](repeating: 0, count: image.width * image.height * 4)
+            let drawn = data.withUnsafeMutableBytes { buffer -> Bool in
+                guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+                      let context = CGContext(data: buffer.baseAddress, width: image.width, height: image.height, bitsPerComponent: 8,
+                                              bytesPerRow: image.width * 4, space: space,
+                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+                context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+                return true
             }
-            let open = smoke.fill(height: 128, band: 32, openness: 1)
-            XCTAssertLessThan(open.last!.opacity, 1, "the open body lets light through")
-            XCTAssertGreaterThanOrEqual(open.last!.opacity, 0.6, "and stays dark enough for white text")
-            let plain = smoke.fill(height: 128, band: 0, openness: 1)
-            XCTAssertTrue(plain.allSatisfy { $0.opacity < 1 }, "without a notch the whole card is translucent")
-            XCTAssertTrue(smoke.fill(height: 128, band: 0, openness: 0).allSatisfy { $0.opacity == 1 })
+            guard drawn else { throw XCTSkip("no bitmap context") }
+            bytes = data
         }
-        // Both switches on: Reduce Transparency picks the opaque surface with no material behind it, and Increase
-        // Contrast must not lighten it, or the desktop would show through. Only the edge gets firmer.
-        let both = NotchSmoke.make(NotchMaterial.choose(live: true, reduceTransparency: true, glassAvailable: true), increaseContrast: true)
-        for height: CGFloat in [20, 60, 128, 272] {
-            for band: CGFloat in [0, 32] {
-                XCTAssertTrue(both.fill(height: height, band: band, openness: 1).allSatisfy { $0.opacity == 1 },
-                              "opaque with Reduce Transparency and Increase Contrast, height \(height), band \(band)")
-            }
+
+        func rgba(x: Int, y: Int) -> (UInt8, UInt8, UInt8, UInt8) {
+            let i = (y * width + x) * 4
+            return (bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3])
         }
-        XCTAssertGreaterThan(both.edgeBottom, NotchSmoke.make(.solid, increaseContrast: false).edgeBottom)
-        XCTAssertGreaterThan(both.edgeWidth, NotchSmoke.make(.solid, increaseContrast: false).edgeWidth)
-        for material in [NotchMaterial.glass, .blur, .smokeOnly, .solid] {
-            let plain = NotchSmoke.make(material, increaseContrast: false), firm = NotchSmoke.make(material, increaseContrast: true)
-            XCTAssertTrue(firm.top >= plain.top && firm.bottom >= plain.bottom, "Increase Contrast never lightens \(material)")
-        }
-        let contrast = NotchSmoke.make(.glass, increaseContrast: true)
-        XCTAssertGreaterThan(contrast.bottom, NotchSmoke.make(.glass, increaseContrast: false).bottom, "Increase Contrast is darker")
-        XCTAssertGreaterThan(contrast.edgeBottom, NotchSmoke.make(.glass, increaseContrast: false).edgeBottom, "with a firmer edge")
     }
 
     // MARK: Native demo

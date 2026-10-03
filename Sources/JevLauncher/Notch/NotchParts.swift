@@ -400,7 +400,7 @@ enum NotchOverflowMenu {
             menu.addItem(entry)
         }
         NotchMenuGuard.ownMenuOpen = true
-        defer { NotchMenuGuard.ownMenuOpen = false }
+        defer { NotchMenuGuard.ownMenuOpen = false; NotchMenuGuard.ownMenuClosed = Date() }
         menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
 

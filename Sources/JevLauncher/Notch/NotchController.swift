@@ -4,6 +4,8 @@ import SwiftUI
 /// Shows notch alerts: one alert, a stack, or a running pill, out of the MacBook notch.
 /// On a screen without a notch the shape drops from the top centre.
 /// The panel takes keyboard focus only after the user clicks Reply. It plays no sound.
+/// A press outside an open card, list, or reply closes it (`outsideClick`): running work returns to its pill, other alerts
+/// go as Later does.
 /// It hides, without losing anything, while the session is locked or a menu is open under it.
 @MainActor
 final class NotchAlertController {
@@ -48,6 +50,8 @@ final class NotchAlertController {
     private var announced: Set<String> = []
     /// Alerts already reported through `onPresented`, by ID.
     private var presented: Set<String> = []
+    /// Watches for a press outside the island only while an open card, list, or reply is on screen.
+    private lazy var outside = NotchOutsideClick { [weak self] point in self?.pressed(at: point) }
 
     deinit { pointerTimer?.invalidate() }
 
@@ -113,6 +117,8 @@ final class NotchAlertController {
             setMode(state.mode == .detail ? Self.restingMode(for: shown) : .detail)
             return
         case NotchAlert.collapseAction:
+            // Cancel or Escape in a reply discards what was typed.
+            if state.mode == .reply, let target = state.replyTarget { state.forgetDraft(target) }
             endReply()
             setMode(Self.restingMode(for: shown))
             return
@@ -141,6 +147,7 @@ final class NotchAlertController {
             }
         case .alert(let alert)?:
             if action.hasPrefix("reply:") { endReply() }
+            if action.hasPrefix("reply:") || action.hasPrefix("choice:") { state.forgetDraft(alert.id) }
             queue.remove(alert.id)
             remember([alert])
             onAction?(alert, action)
@@ -164,6 +171,62 @@ final class NotchAlertController {
         return .alert(alert)
     }
 
+    // MARK: A press outside
+
+    /// What a press outside the open island does.
+    enum OutsideClick: Equatable {
+        /// A running card or list returns to its pill. The runs go on.
+        case rest
+        /// Any other card, list, or reply closes as Later does: it leaves the screen and waits in Show notifications.
+        /// Nothing is answered, approved, retried, or cancelled, so a question or approval stays unfinished.
+        case later([NotchAlert])
+    }
+
+    /// Nil leaves the island as it is: a pill is already minimized. An open reply closes as Later with its question, and
+    /// its unsent text comes back when that exact question opens again. `later` names the alerts as the queue holds them.
+    static func outsideClick(shown: NotchAlert, mode: NotchState.Mode, queue: NotchQueue) -> OutsideClick? {
+        switch mode {
+        case .pill: return nil
+        case .card, .detail, .reply:
+            if restingMode(for: shown) == .pill { return .rest }
+            let members = (shown.isStack ? shown.stack : [shown]).compactMap { queue.alert($0.id) }
+            return members.isEmpty ? nil : .later(members)
+        }
+    }
+
+    /// A press anywhere while an open card, list, or reply shows. Acts only once the shape has settled (the same wait as pointer
+    /// input, so a press made as an alert appears does not close it), never while the island's own menu is open or has
+    /// just closed, and never for a press on the island itself.
+    private func pressed(at point: CGPoint) {
+        guard let panel, panel.isVisible, available, state.expanded, !state.closing, Date() >= inputReadyAt,
+              !NotchMenuGuard.ownMenuActive(now: Date()), let shown = state.alert,
+              !state.geometry.contains(point, mode: state.mode, alert: shown) else { return }
+        switch Self.outsideClick(shown: shown, mode: state.mode, queue: queue) {
+        case nil:
+            return
+        case .rest?:
+            setMode(Self.restingMode(for: shown))
+        case .later(let members)?:
+            // The draft is already kept; ending the reply gives keyboard focus back.
+            endReply()
+            _ = queue.removeAll { alert in members.contains { $0.id == alert.id } }
+            remember(members)
+            for member in members { onAction?(member, "later") }
+            refresh()
+        }
+    }
+
+    /// Watches for presses outside only while an open card, list, or reply is on screen, and stops otherwise.
+    private func updateOutsideWatch() {
+        let open = state.mode != .pill
+        if panel?.isVisible == true, state.alert != nil, !state.closing, available, open { outside.start() } else { outside.stop() }
+    }
+
+    /// A draft stays while its exact question can still come back: in the queue, or closed into Show notifications.
+    static func draftStillWaits(_ draft: NotchState.Draft, queue: NotchQueue, recent: [[NotchAlert]]) -> Bool {
+        queue.alert(draft.question.id) == draft.question || recent.contains { $0.contains(draft.question) }
+    }
+
     private func beginReply(_ target: String) {
         guard let panel, Self.replyAlert(in: state.alert, target: target) != nil else { return }
         state.replyTarget = target
@@ -176,6 +239,7 @@ final class NotchAlertController {
         let wasReply = state.mode == .reply
         state.endReply()
         if wasReply { deferPointerInput() }
+        updateOutsideWatch()
         guard let panel else { return }
         panel.allowsKey = false
         if panel.isKeyWindow { panel.resignKey() }
@@ -212,6 +276,9 @@ final class NotchAlertController {
         // An open list of running automations that drops to one keeps that one open, instead of snapping shut.
         if let previous, previous.isStack, previousMode == .detail, next.kind == .running, !next.isStack,
            previous.stack.contains(where: { $0.id == next.id }) { return .detail }
+        // And an open running card that more automations join opens as their list, instead of snapping to the pill.
+        if let previous, !previous.isStack, previous.kind == .running, previousMode == .detail, next.isStack, resting == .pill,
+           next.stack.contains(where: { $0.id == previous.id }) { return .detail }
         guard let previous, previous.id == next.id else { return resting }
         switch previousMode {
         case .reply:
@@ -235,6 +302,7 @@ final class NotchAlertController {
 
     /// Brings the screen in line with the queue.
     private func refresh() {
+        state.keepDrafts { [queue, recent] in Self.draftStillWaits($0, queue: queue, recent: recent) }
         guard let next = queue.presentation else { close(); return }
         guard available else {
             queue.pauseTimers()
@@ -286,6 +354,7 @@ final class NotchAlertController {
         if opening || !wasExpanded || previous != alert || previousMode != mode { deferPointerInput() }
         watchPointer()
         updatePointerInput()
+        updateOutsideWatch()
         announce(alert)
     }
 
@@ -316,6 +385,7 @@ final class NotchAlertController {
         withMotion({ state.mode = mode }, completion: { [weak self] in self?.reportPresented(ticket) })
         // Rows a list now draws start their time; rows it no longer draws wait again.
         scheduleTimers()
+        updateOutsideWatch()
     }
 
     /// Reports what is on screen now, once per alert, when it is really there: only for the presentation still
@@ -372,6 +442,7 @@ final class NotchAlertController {
         tickets.invalidate()
         closing.cancel()
         endReply()
+        outside.stop()
         // A hidden panel never sends the pointer's exit.
         hovering = false
         panel?.orderOut(nil)
@@ -386,6 +457,7 @@ final class NotchAlertController {
         timerTask?.cancel()
         menuTask?.cancel()
         endReply()
+        outside.stop()
         hovering = false
         tickets.invalidate()
         guard state.alert != nil, let panel, panel.isVisible else { finishClose(); return }
@@ -415,6 +487,7 @@ final class NotchAlertController {
     private func finishClose() {
         tickets.invalidate()
         closing.cancel()
+        outside.stop()
         panel?.orderOut(nil)
         state.alert = nil
         state.expanded = false

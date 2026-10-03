@@ -139,6 +139,85 @@ final class NotchInteractionTests: XCTestCase {
                        "a withdrawn question closes it too")
     }
 
+    // MARK: A press outside
+
+    func testAPressOutsideReturnsRunningWorkToItsPillAndNeverEndsIt() throws {
+        var q = NotchQueue()
+        let one = running("one")
+        q.add(one)
+        XCTAssertEqual(NotchAlertController.outsideClick(shown: one, mode: .detail, queue: q), .rest, "the open card rests; nothing is cancelled")
+        XCTAssertNil(NotchAlertController.outsideClick(shown: one, mode: .pill, queue: q), "the pill is already minimized")
+        q.add(running("two"))
+        let list = try XCTUnwrap(q.presentation)
+        XCTAssertEqual(NotchAlertController.outsideClick(shown: list, mode: .detail, queue: q), .rest)
+        XCTAssertNil(NotchAlertController.outsideClick(shown: list, mode: .pill, queue: q))
+    }
+
+    func testAPressOutsideClosesOtherAlertsAsLaterReplyIncluded() throws {
+        var q = NotchQueue()
+        q.add(running("busy"))
+        let asked = question("run:q/1")
+        q.add(asked)
+        XCTAssertEqual(NotchAlertController.outsideClick(shown: asked, mode: .card, queue: q), .later([asked]))
+        XCTAssertEqual(NotchAlertController.outsideClick(shown: asked, mode: .reply, queue: q), .later([asked]), "an open reply closes too")
+        let approval = alert("run:a/1", .approval, actions: [.init("Review", id: "review", primary: true), .init("Later", id: "later")])
+        q.add(approval)
+        let stack = try XCTUnwrap(q.presentation)
+        for mode in [NotchState.Mode.card, .detail, .reply] {
+            XCTAssertEqual(NotchAlertController.outsideClick(shown: stack, mode: mode, queue: q), .later([asked, approval]),
+                           "the whole stack goes, never the running card waiting behind it (\(mode))")
+        }
+        // The queue's current version goes, so an update that arrived after the last draw is not left behind.
+        var recounted = approval
+        recounted.message = "12 moves"
+        q.add(recounted)
+        XCTAssertEqual(NotchAlertController.outsideClick(shown: stack, mode: .card, queue: q), .later([asked, recounted]))
+        XCTAssertNil(NotchAlertController.outsideClick(shown: alert("run:f/1", .failure), mode: .card, queue: q),
+                     "an alert that has already gone closes nothing")
+    }
+
+    // MARK: An unsent reply comes back with its exact question
+
+    func testAnUnsentReplyReturnsOnlyWithItsExactQuestion() {
+        let state = NotchState()
+        let asked = question("run:q/1")
+        state.alert = asked
+        state.keepDraft("ignored")
+        XCTAssertTrue(state.drafts.isEmpty, "only an open reply keeps text")
+        state.replyTarget = asked.id
+        state.mode = .reply
+        state.keepDraft("Put them in Archive")
+        // A press outside closes it as Later.
+        state.endReply()
+        XCTAssertEqual(state.replyDraft, "", "no reply is open")
+        // Show notifications brings the question back, here inside a stack, and Reply opens again.
+        state.alert = NotchQueue.stack([asked, alert("run:f/1", .failure)])
+        state.replyTarget = asked.id
+        state.mode = .reply
+        XCTAssertEqual(state.replyDraft, "Put them in Archive")
+        state.alert = question("run:q/1", "Which folder now?")
+        XCTAssertEqual(state.replyDraft, "", "the same run asking something else never gets the old answer")
+        state.alert = asked
+        state.keepDraft("")
+        XCTAssertEqual(state.replyDraft, "", "clearing the field forgets it")
+        state.keepDraft("Archive")
+        state.forgetDraft(asked.id)
+        XCTAssertEqual(state.replyDraft, "")
+    }
+
+    func testADraftLastsOnlyWhileItsQuestionCanComeBack() {
+        let asked = question("run:q/1")
+        let draft = NotchState.Draft(question: asked, text: "Archive")
+        var q = NotchQueue()
+        q.add(asked)
+        XCTAssertTrue(NotchAlertController.draftStillWaits(draft, queue: q, recent: []), "on screen or queued")
+        q.remove(asked.id)
+        XCTAssertTrue(NotchAlertController.draftStillWaits(draft, queue: q, recent: [[asked]]), "closed as Later, in Show notifications")
+        XCTAssertFalse(NotchAlertController.draftStillWaits(draft, queue: q, recent: []), "answered elsewhere and gone")
+        q.add(question("run:q/1", "Which folder now?"))
+        XCTAssertFalse(NotchAlertController.draftStillWaits(draft, queue: q, recent: []), "the run asked something else")
+    }
+
     func testAReplyKeepsItsViewIdentityAcrossContainers() {
         let asked = question("run:q/1")
         let stack = NotchQueue.stack([asked, alert("run:f/1", .failure)])

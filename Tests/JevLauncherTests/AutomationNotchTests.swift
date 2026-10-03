@@ -167,6 +167,35 @@ final class AutomationNotchTests: XCTestCase {
         XCTAssertEqual(opened.first?.1, "20260926T080000Z-abcd")
     }
 
+    /// A press outside closes a question or approval as Later: the run still waits for the user, nothing is answered,
+    /// approved, or opened, no delivery is recorded by it, and Show notifications can bring the alert back.
+    func testLaterLeavesQuestionsAndApprovalsUnfinished() async throws {
+        let a = agent()
+        center.save(a)
+        let saved = try XCTUnwrap(center.automation(a.id))
+        var asked = RunRecord(id: RunID.make(), automation: saved, trigger: .manual, occurrence: nil)
+        asked.state = .needsInput; asked.finished = Date()
+        asked.questions = [RunQuestion(round: 1, text: "Which folder?", choices: ["Archive"])]
+        var waiting = RunRecord(id: RunID.make(), automation: saved, trigger: .manual, occurrence: nil)
+        waiting.state = .needsApproval; waiting.finished = Date()
+        try center.store.saveRun(asked)
+        try center.store.saveRun(waiting)
+        await center.reloadNow()
+        var opened = 0
+        center.openWindow = { _, _ in opened += 1 }
+        for run in [asked, waiting] {
+            let alert = AutomationCenter.makeAlert(run, automation: saved, hideNames: false)
+            XCTAssertTrue(alert.offers("later"))
+            XCTAssertTrue(center.handleAlertAction(alert.id, "later"))
+            let stored = try XCTUnwrap(center.store.run(automationID: a.id, runID: run.id))
+            XCTAssertEqual(stored.state, run.state, "still waiting for the user")
+            XCTAssertEqual(stored.questions.map(\.answer), run.questions.map(\.answer), "nothing answered")
+            XCTAssertFalse(AutomationAlertReceipt.wasDelivered(stored, store: center.store), "Later itself records no delivery")
+            XCTAssertTrue(center.alertStillApplies(alert), "Show notifications can bring it back")
+        }
+        XCTAssertEqual(opened, 0, "Later opens nothing")
+    }
+
     func testDeliveryIsPersistedPerState() throws {
         let a = agent()
         center.save(a)

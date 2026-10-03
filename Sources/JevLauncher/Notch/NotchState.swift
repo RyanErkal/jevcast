@@ -38,6 +38,33 @@ final class NotchState: ObservableObject {
         if mode == .reply { mode = alert.map(NotchAlertController.restingMode) ?? .card }
     }
 
+    /// Unsent reply text and the exact question it answers.
+    struct Draft: Equatable {
+        let question: NotchAlert
+        let text: String
+    }
+
+    /// Unsent replies by question ID, in memory only. Not published, so typing does not redraw the island. The controller
+    /// keeps a draft only while its exact question still waits on screen, in the queue, or in Show notifications.
+    private(set) var drafts: [String: Draft] = [:]
+
+    /// The text the reply field opens with: the draft typed for this exact question, or nothing.
+    var replyDraft: String {
+        guard let replyTarget, let question = NotchAlertController.replyAlert(in: alert, target: replyTarget),
+              let draft = drafts[replyTarget], draft.question == question else { return "" }
+        return draft.text
+    }
+
+    /// Keeps what the user has typed for the question the open reply answers. Empty text forgets it.
+    func keepDraft(_ text: String) {
+        guard mode == .reply, let replyTarget, let question = NotchAlertController.replyAlert(in: alert, target: replyTarget) else { return }
+        drafts[replyTarget] = text.isEmpty ? nil : Draft(question: question, text: text)
+    }
+
+    func forgetDraft(_ questionID: String) { drafts[questionID] = nil }
+
+    func keepDrafts(where stillWaits: (Draft) -> Bool) { drafts = drafts.filter { stillWaits($0.value) } }
+
     var bodyHeight: CGFloat { geometry.bodyHeight(mode, alert: alert) }
     var width: CGFloat { geometry.width(mode) }
 

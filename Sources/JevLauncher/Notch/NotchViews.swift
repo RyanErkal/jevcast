@@ -7,6 +7,8 @@ struct NotchHandlers {
     var perform: (String, String?) -> Void
     var submit: (String) -> Void
     var cancel: () -> Void
+    /// The reply field's text, as it changes, so an unsent answer can come back with its question.
+    var keep: (String) -> Void = { _ in }
 
     static let none = NotchHandlers(perform: { _, _ in }, submit: { _ in }, cancel: {})
 }
@@ -23,7 +25,7 @@ struct NotchAlertView: View {
         VStack(spacing: 0) {
             if let alert = state.alert {
                 NotchIsland(alert: alert, geometry: state.geometry, mode: mode, replyTarget: state.replyTarget,
-                            handlers: handlers, canvas: state.geometry.maxShapeSize,
+                            handlers: handlers, draft: state.replyDraft, canvas: state.geometry.maxShapeSize,
                             contentHidden: state.closing, retracting: !state.expanded)
                     // Reduce Motion: no growth out of the notch, only a cross-fade.
                     .opacity(reduceMotion && !state.expanded ? 0 : 1)
@@ -45,7 +47,8 @@ struct NotchAlertView: View {
         let action = self.action
         return NotchHandlers(perform: { id, row in row == nil ? action(id) : state.perform(id, on: row) },
                              submit: { state.submitReply($0) },
-                             cancel: { state.cancelReply() })
+                             cancel: { state.cancelReply() },
+                             keep: { state.keepDraft($0) })
     }
 }
 
@@ -60,7 +63,7 @@ struct NotchIsland: View {
     var handlers: NotchHandlers = .none
     /// False in snapshots: the reply field draws as text, since offscreen rendering cannot draw a live field.
     var liveField = true
-    /// Text shown in the reply field when it opens. Snapshots use it.
+    /// Text shown in the reply field when it opens: the unsent draft for this question on screen, or a snapshot's text.
     var draft = ""
     /// A fixed area to lay out in, larger than any mode. Nil sizes the view to the shape, for snapshots.
     var canvas: CGSize?
@@ -384,7 +387,7 @@ struct NotchIsland: View {
         return VStack(alignment: .leading, spacing: 12) {
             if hasNotch { band(collapse: false).padding(.bottom, -12) }
             header(target, lines: 2).frame(height: 48)
-            NotchReplyRow(live: liveField, initial: draft, submit: handlers.submit, cancel: handlers.cancel)
+            NotchReplyRow(live: liveField, initial: draft, submit: handlers.submit, cancel: handlers.cancel, keep: handlers.keep)
         }
         .modifier(IslandPadding(hasNotch: hasNotch))
     }
@@ -410,7 +413,7 @@ private extension EnvironmentValues {
 }
 
 /// Draws the surface behind the content and clips the content to it, at the animated size and radii.
-/// `openness` rides the height spring, so the material fades in as the shape grows out of the black notch.
+/// `openness` rides the height spring, so the rim fades in as the shape grows out of the black notch.
 private struct IslandOutline: ViewModifier, Animatable {
     var height: CGFloat
     var outline: NotchShape
@@ -451,6 +454,7 @@ private struct NotchReplyRow: View {
     let initial: String
     let submit: (String) -> Void
     let cancel: () -> Void
+    let keep: (String) -> Void
     @State private var text = ""
     @FocusState private var focused: Bool
 
@@ -486,5 +490,6 @@ private struct NotchReplyRow: View {
             text = initial
             if live { DispatchQueue.main.async { focused = true } }
         }
+        .onChange(of: text) { _, new in keep(new) }
     }
 }

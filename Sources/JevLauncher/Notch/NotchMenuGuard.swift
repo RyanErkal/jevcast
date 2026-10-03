@@ -5,6 +5,16 @@ import AppKit
 enum NotchMenuGuard {
     /// True while the island's own overflow menu is open, so it does not hide the island.
     nonisolated(unsafe) static var ownMenuOpen = false
+    /// When the island's own menu last closed. The press that closes a menu can arrive just after it has gone.
+    nonisolated(unsafe) static var ownMenuClosed = Date.distantPast
+    /// Seconds after the island's own menu closes in which a press outside still belongs to that menu.
+    static let ownMenuGrace: TimeInterval = 0.4
+
+    /// True while the island's own menu is open or has only just closed, so a press that closes the menu does not
+    /// also close the island.
+    static func ownMenuActive(now: Date) -> Bool {
+        ownMenuOpen || now.timeIntervalSince(ownMenuClosed) < ownMenuGrace
+    }
 
     static func menuOpen(over frame: CGRect, screen: CGRect) -> Bool {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {

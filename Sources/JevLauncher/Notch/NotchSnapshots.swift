@@ -108,14 +108,11 @@ enum NotchSnapshots {
             ("notch-pill-many", many, .compact),
             ("notch-list-many", many, .detail)
         ]
-        // Reduce Transparency draws the solid surface; Increase Contrast firms edges and controls; together, still solid.
-        let reduce = NotchAccessibilityOverride(reduceTransparency: true, increaseContrast: nil)
-        let contrast = NotchAccessibilityOverride(reduceTransparency: nil, increaseContrast: true)
-        let both = NotchAccessibilityOverride(reduceTransparency: true, increaseContrast: true)
+        // The surface is opaque black in every setting; Increase Contrast firms the rim and the controls.
+        let contrast = NotchAccessibilityOverride(increaseContrast: true)
         let accessible: [(String, NotchAlert, NotchMode, NotchAccessibilityOverride)] = [
-            ("notch-a11y-reduce-transparency", report, .detail, reduce),
             ("notch-a11y-increase-contrast", stack, .detail, contrast),
-            ("notch-a11y-both", review, .card, both)
+            ("notch-a11y-increase-contrast-card", review, .card, contrast)
         ]
         for (name, alert, mode, geometry, target) in shots {
             write(scene(alert, mode: mode, geometry: geometry, replyTarget: target), name: name, to: directory)
@@ -134,9 +131,7 @@ enum NotchSnapshots {
         analyst: AgentTask(prompt: "", workingDirectory: "/"), claim: "sample")
 
     /// A dark desktop with a menu bar, so the island reads in context. The notch is drawn as black.
-    /// Offscreen renders cannot draw window-server materials, so the island shows its smoke and edge over this
-    /// backdrop without the live blur (`NotchMaterial.smokeOnly`). The backdrop is smooth, so the missing blur
-    /// changes little; real Liquid Glass shows only on screen.
+    /// The island draws no window-server material: its black surface and rim render offscreen as they do on screen.
     private static func scene(_ alert: NotchAlert, mode: NotchMode, geometry: NotchGeometry, replyTarget: String?,
                               override: NotchAccessibilityOverride = NotchAccessibilityOverride()) -> some View {
         let menuBar: CGFloat = geometry.hasNotch ? geometry.notchHeight : 24

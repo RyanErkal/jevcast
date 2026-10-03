@@ -2,6 +2,13 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.17.2] - 2026-10-03
+
+### Fixed
+
+- **Window actions resize Chrome windows.** An app keeps enhanced accessibility on after VoiceOver or another assistive app turns it on, and Chrome and Finder often do. In that state the app animates frame changes and drops some of Jevcast's writes, so halves, thirds, and Maximise moved a window but kept its size. Jevcast now turns enhanced accessibility off for the change, then turns it back on and checks it.
+- **Full size on a larger display.** Just after a window moves to another display, the app can still hold it to the old display's edge, so a window moved to a larger display came out too narrow. When a window changes display, Jevcast now writes its size again, up to three times, 25 ms apart.
+
 ## [1.17.1] - 2026-10-03
 
 ### Fixed

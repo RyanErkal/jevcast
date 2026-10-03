@@ -103,6 +103,7 @@ public final class WindowManager {
         static let fullScreen = "AXFullScreen"
         static let children = "AXChildren"
         static let parent = "AXParent"
+        static let enhancedUserInterface = "AXEnhancedUserInterface"
     }
 
     /// Upper bound for one Accessibility message. The system default is
@@ -110,6 +111,10 @@ public final class WindowManager {
     private nonisolated static let messagingTimeout: Float = 0.35
     /// Pointer travel after mouse-down that counts as the start of a drag.
     private nonisolated static let dragStartDistance: CGFloat = 4
+    /// Extra size writes after a move to another display, and the pause
+    /// before each. One retry after 10 ms was enough in every check.
+    private nonisolated static let sizeRetries = 3
+    private nonisolated static let sizeRetryDelay: useconds_t = 25_000
 
     private var capturedTarget: CapturedTarget?
     private var history = WindowUndoHistory<WindowKey, AXUIElement>()
@@ -493,9 +498,25 @@ public final class WindowManager {
     /// minimum size), the window is re-aligned to the target's anchored edge
     /// inside ``bounds``. Reaching that aligned frame counts as success.
     private func setFrame(_ expectedFrame: CGRect, on window: AXUIElement, action: WindowAction, bounds: CGRect? = nil) throws {
+        // Enhanced accessibility, which VoiceOver and other assistive apps
+        // turn on and which then stays on in apps such as Chrome, animates
+        // frame writes and drops some of them. Turn it off for this write
+        // and put it back after.
+        let application = processID(of: window).map { applicationElement($0) }
+        let enhanced = application.map(enhancedUserInterface(of:)) ?? false
+        if enhanced, let application { setEnhancedUserInterface(false, for: application) }
+        defer { if enhanced, let application { restoreEnhancedUserInterface(for: application) } }
+
+        // A window not wholly on the destination display is changing display,
+        // even when its center is already there.
+        let destination = display(containing: expectedFrame)
+        let changesDisplay = frame(of: window).map { current in
+            destination.map { !$0.axFrame.contains(current) } ?? false
+        } ?? false
         try write(size: expectedFrame.size, to: window, action: action)
         try write(position: expectedFrame.origin, to: window, action: action)
         try write(size: expectedFrame.size, to: window, action: action)
+        if changesDisplay { try settle(size: expectedFrame.size, of: window, action: action) }
 
         // Read back with a small tolerance for display scaling and AX rounding.
         guard let actual = self.frame(of: window) else {
@@ -511,6 +532,36 @@ public final class WindowManager {
         }
         guard let settled = self.frame(of: window), approximatelyEqual(settled, aligned, tolerance: 3) else {
             throw WindowManagerError.resizeFailed(action: action, expected: expectedFrame, actual: self.frame(of: window))
+        }
+    }
+
+    /// Just after a window moves to another display, the app can still hold
+    /// it to the old display's edge, so the size write stops short. Writes
+    /// the size again, a few times at most, until it holds.
+    private func settle(size: CGSize, of window: AXUIElement, action: WindowAction) throws {
+        for _ in 0..<Self.sizeRetries {
+            guard let current = axSize(attribute(window, AXAttribute.size)),
+                  abs(current.width - size.width) > 3 || abs(current.height - size.height) > 3 else { return }
+            usleep(Self.sizeRetryDelay)
+            try write(size: size, to: window, action: action)
+        }
+    }
+
+    private func enhancedUserInterface(of application: AXUIElement) -> Bool {
+        (attribute(application, AXAttribute.enhancedUserInterface) as? NSNumber)?.boolValue ?? false
+    }
+
+    private func setEnhancedUserInterface(_ value: Bool, for application: AXUIElement) {
+        // Apps can apply this and still return an error, so the result is not used.
+        _ = AXUIElementSetAttributeValue(application, AXAttribute.enhancedUserInterface as CFString, value as CFBoolean)
+    }
+
+    /// Turns enhanced accessibility back on and checks that it held, with one
+    /// more write if it did not. The window action has already happened, so
+    /// this does not fail it.
+    private func restoreEnhancedUserInterface(for application: AXUIElement) {
+        for _ in 0..<2 where !enhancedUserInterface(of: application) {
+            setEnhancedUserInterface(true, for: application)
         }
     }
 

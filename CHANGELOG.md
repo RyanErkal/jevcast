@@ -2,6 +2,19 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.18.0] - 2026-10-03
+
+### Added
+
+- **Automation identities.** Choose an icon and colour for each automation. The minimized island keeps them visible, including when several jobs run at once.
+
+### Changed
+
+- **Refined automation islands.** Compact cards use a black surface with a subtle glass edge, clear progress, and quieter controls. Animations respect Reduce Motion. Increase Contrast keeps the edge clear.
+- **Close without stopping work.** Click outside an open running card to return to its pill. Other alerts close like Later. Pending questions and approvals remain unfinished.
+- **Stable interactions.** Running cards stay open when more jobs join. Reply drafts survive changes between one alert and a list. Menus act only on the run they were opened for.
+- **Accurate presentation.** Hidden alerts wait for their full display time. Only the current card, after it appears, counts as shown. The running ring animates in the window server instead of redrawing SwiftUI each frame.
+
 ## [1.17.2] - 2026-10-03
 
 ### Fixed

@@ -16,12 +16,32 @@ struct SymbolTile: View {
     }
 }
 
+/// Automation accent colours, the same in the window and the notch. Each reads on black and behind a white glyph.
+/// Orange and red sit apart from the notch's warning amber and failure coral, and a state always adds its own badge
+/// and words, so an accent never reads as a state.
 enum AutomationTint {
-    static let palette: [Color] = [.blue, .indigo, .purple, .pink, .orange, .teal, .green, .cyan, .mint, .brown]
-    /// A stable colour per automation ID.
-    static func color(_ id: String) -> Color {
-        palette[Int(id.unicodeScalars.reduce(UInt32(7)) { ($0 &* 31) &+ $1.value } % UInt32(palette.count))]
+    static func color(_ accent: AutomationAccent) -> Color {
+        switch accent {
+        case .blue: return Color(red: 0.24, green: 0.52, blue: 1.0)
+        case .indigo: return Color(red: 0.38, green: 0.39, blue: 0.94)
+        case .purple: return Color(red: 0.63, green: 0.38, blue: 0.93)
+        case .pink: return Color(red: 0.95, green: 0.34, blue: 0.62)
+        case .orange: return Color(red: 0.96, green: 0.47, blue: 0.13)
+        case .teal: return Color(red: 0.15, green: 0.64, blue: 0.69)
+        case .green: return Color(red: 0.20, green: 0.70, blue: 0.36)
+        case .cyan: return Color(red: 0.17, green: 0.68, blue: 0.90)
+        case .mint: return Color(red: 0.20, green: 0.76, blue: 0.64)
+        case .brown: return Color(red: 0.66, green: 0.50, blue: 0.36)
+        case .red: return Color(red: 0.86, green: 0.19, blue: 0.31)
+        case .graphite: return Color(red: 0.47, green: 0.49, blue: 0.53)
+        }
     }
+
+    /// The automation's saved accent, or its stable fallback.
+    static func color(for automation: Automation) -> Color { color(automation.resolvedAccent) }
+
+    /// The stable fallback colour for an automation ID.
+    static func color(_ id: String) -> Color { color(AutomationAccent.fallback(for: id)) }
 }
 
 extension RunState {
@@ -66,6 +86,10 @@ struct StatusChip: View {
 
 extension StatusChip {
     init(_ state: RunState) { self.init(title: state.title, tint: state.tint, symbol: state.symbol) }
+    /// A run's chip. A run that stopped for review says so; it is never shown as failed or done.
+    init(run: RunRecord) {
+        if run.needsReview { self.init(title: "Needs review", tint: .orange, symbol: "eye.fill") } else { self.init(run.state) }
+    }
 }
 
 /// A centred message with one clear action.

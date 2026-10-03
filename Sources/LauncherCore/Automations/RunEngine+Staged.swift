@@ -4,8 +4,12 @@ import Foundation
 /// only tool is Jevcast's own server running the approved command; the analyst only reads and writes text.
 /// Each stage has its own time limit inside the run's overall limit, and the run holds its claim throughout.
 extension RunEngine {
-    static let stagesFile = "stages.json"
+    public static let stagesFile = "stages.json"
     static let stagedOutputBytes = 1024 * 1024
+    /// Starts the summary of a run that stopped on something the user must review. The app reads it, so keep it in step.
+    public static let needsReviewPrefix = "Needs review: "
+    /// Starts the summary of a run with a report ready to show.
+    public static let reportReadyPrefix = "Report ready: "
 
     /// One line of `stages.json`, saved after every stage so a crash leaves a trail.
     struct StageEntry: Codable, Equatable {
@@ -97,7 +101,7 @@ extension RunEngine {
         switch item.action {
         case .review:
             state.sections.append("## \(item.title)\n\n" + (item.display.isEmpty ? "Needs your review before anything else runs." : item.display))
-            state.failures.append("Needs review: \(item.title)")
+            state.failures.append(Self.needsReviewPrefix + item.title)
             return false
         case .present:
             let wanted = PublicationItem(job: item.job, periodKey: item.periodKey, title: item.title, artifactHashes: item.artifactHashes)
@@ -334,7 +338,7 @@ extension RunEngine {
                     record.items[index].state = .refused
                     record.items[index].detail = refused.reason
                     state.sections.append("The posting receipt for \(item.title) was refused: \(refused.reason)")
-                    state.failures.append("Needs review: \(item.title) changed after it was shown.")
+                    state.failures.append(Self.needsReviewPrefix + "\(item.title) changed after it was shown.")
                 }
             }
             if let data = try? JSONEncoder.sortedPretty().encode(record) {
@@ -441,7 +445,7 @@ extension RunEngine {
             return .done(.failed, first)
         }
         if !state.publications.isEmpty {
-            run.summary = "Report ready: " + state.publications.map(\.title).joined(separator: "; ")
+            run.summary = Self.reportReadyPrefix + state.publications.map(\.title).joined(separator: "; ")
             run.quiet = false
             return .done(.succeeded, nil)
         }

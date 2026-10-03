@@ -9,7 +9,7 @@ final class NotchState: ObservableObject {
         case pill
         /// One alert or a collapsed stack.
         case card
-        /// A stack as a list, or a running indicator with its latest activity and Cancel.
+        /// A stack as a list, or one running automation's compact card with Details (Cancel is in its menu).
         case detail
         /// The card with a text field for an answer. The panel takes keyboard focus only in this mode.
         case reply

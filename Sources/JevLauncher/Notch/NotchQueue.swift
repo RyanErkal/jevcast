@@ -9,7 +9,7 @@ enum NotchTiming {
 
     static func seconds(for kind: NotchAlert.Kind, failureSeconds: TimeInterval) -> TimeInterval? {
         switch kind {
-        case .running, .question, .approval: return nil
+        case .running, .question, .approval, .review: return nil
         case .failure: return failureSeconds
         case .success: return resultSeconds
         case .info: return infoSeconds
@@ -20,11 +20,12 @@ enum NotchTiming {
 /// The alerts waiting for the notch, and what shows now. Pure: the controller owns windows and clocks.
 ///
 /// Rules:
-/// - Priority: question and approval, then failure, then success and info, then running.
+/// - Priority: question, approval, and review, then failure, then success and info, then running.
 /// - One alert per ID and per run: a newer alert for the same run replaces the older one.
 /// - Everything that is not a running indicator shows together. Two or more become one stack.
 /// - Running indicators show only when nothing else waits.
-/// - Timed alerts count down only while they are visible, and not while the pointer is over them.
+/// - Timed alerts count down only while their words are drawn (a single card, or a row of the open list), and not
+///   while the pointer is over them. A collapsed stack and rows past the list's end wait untimed.
 struct NotchQueue {
     struct Entry: Equatable {
         var alert: NotchAlert
@@ -41,7 +42,7 @@ struct NotchQueue {
 
     static func priority(_ kind: NotchAlert.Kind) -> Int {
         switch kind {
-        case .question, .approval: return 3
+        case .question, .approval, .review: return 3
         case .failure: return 2
         case .success, .info: return 1
         case .running: return 0
@@ -112,7 +113,7 @@ struct NotchQueue {
         let symbol: String
         if alerts.allSatisfy({ $0.kind == .running }) {
             title = "\(n) automations running"; symbol = "gearshape.2"
-        } else if alerts.contains(where: { $0.kind == .question || $0.kind == .approval }) {
+        } else if alerts.contains(where: { priority($0.kind) == 3 }) {
             title = "\(n) automations need you"; symbol = "bell.badge"
         } else if alerts.allSatisfy({ $0.kind == .failure }) {
             title = "\(n) automations failed"; symbol = "exclamationmark.triangle"
@@ -126,11 +127,13 @@ struct NotchQueue {
                           stack: alerts)
     }
 
-    /// Starts the countdown of visible timed alerts that do not have one.
-    mutating func startTimers(now: Date) {
-        let ids = Set(visible.map(\.alert.id))
-        for i in entries.indices where ids.contains(entries[i].alert.id) && entries[i].deadline == nil {
-            if let seconds = NotchTiming.seconds(for: entries[i].alert.kind, failureSeconds: failureSeconds) {
+    /// Starts the countdown of drawn timed alerts that have none, and stops it for alerts no longer drawn; those start
+    /// again in full once drawn. `drawn` is what the notch shows words for (`NotchAlertController.presentedAlerts`),
+    /// so nothing expires before anyone could read it.
+    mutating func startTimers(now: Date, drawn: Set<String>) {
+        for i in entries.indices {
+            guard drawn.contains(entries[i].alert.id) else { entries[i].deadline = nil; continue }
+            if entries[i].deadline == nil, let seconds = NotchTiming.seconds(for: entries[i].alert.kind, failureSeconds: failureSeconds) {
                 entries[i].deadline = now.addingTimeInterval(seconds)
             }
         }

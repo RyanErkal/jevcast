@@ -6,20 +6,7 @@ struct EditorBasics: View {
     var body: some View {
         Section {
             TextField("Name", text: $draft.name, prompt: Text("Desktop tidy"))
-            LabeledContent("Icon") {
-                LazyVGrid(columns: Array(repeating: GridItem(.fixed(28), spacing: 6), count: 12), spacing: 6) {
-                    ForEach(AutomationSymbols.all, id: \.self) { symbol in
-                        Button { draft.symbol = symbol } label: {
-                            Image(systemName: symbol).font(.system(size: 13))
-                                .frame(width: 28, height: 28)
-                                .foregroundStyle(draft.symbol == symbol ? Color.white : Color.primary)
-                                .background(draft.symbol == symbol ? Color.accentColor : Color.secondary.opacity(0.1),
-                                            in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        }
-                        .buttonStyle(.plain).accessibilityLabel(symbol)
-                    }
-                }
-            }
+            EditorAppearance(draft: $draft)
             if draft.staged == nil {
                 Picker("Kind", selection: $draft.kind) {
                     ForEach(AutomationDraft.KindChoice.allCases) { Text($0.title).tag($0) }
@@ -34,13 +21,106 @@ struct EditorBasics: View {
     }
     private var kindHelp: String {
         if draft.staged != nil {
-            return "Its stages come from a reviewed definition file. Run jevcast-runner --configure to change them; here you change only the name, schedule, and behaviour."
+            return "Its stages come from a reviewed definition file. Run jevcast-runner --configure to change them; here you change only the name, icon, colour, schedule, and behaviour."
         }
         switch draft.kind {
         case .agent: return "An agent runs your prompt with Codex or Claude, signed in on this Mac."
         case .script: return "Runs a program you choose, with fixed arguments. Nothing a model writes is ever run."
         case .scriptWithDiagnosis: return "Runs the script. Only when it fails, an agent reads the output and writes a short diagnosis."
         }
+    }
+}
+
+/// The icon and its colour, as rows and the notch show them. The colour is identity only; states keep their own colours.
+struct EditorAppearance: View {
+    @Binding var draft: AutomationDraft
+    @State private var other = ""
+
+    var body: some View {
+        let tint = AutomationTint.color(draft.accent)
+        LabeledContent("Icon") {
+            VStack(alignment: .leading, spacing: 8) {
+                LazyVGrid(columns: Array(repeating: GridItem(.fixed(28), spacing: 6), count: 12), spacing: 6) {
+                    ForEach(symbols, id: \.self) { symbol in
+                        let selected = draft.symbol == symbol
+                        Button { draft.symbol = symbol } label: {
+                            Image(systemName: symbol).font(.system(size: 13))
+                                .frame(width: 28, height: 28)
+                                .foregroundStyle(selected ? Color.white : Color.primary)
+                                .background(selected ? AnyShapeStyle(tint.gradient) : AnyShapeStyle(Color.secondary.opacity(0.1)),
+                                            in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        }
+                        .buttonStyle(.plain).accessibilityLabel(symbol)
+                        .accessibilityAddTraits(selected ? .isSelected : [])
+                    }
+                }
+                .fixedSize(horizontal: true, vertical: false)
+                HStack(spacing: 6) {
+                    TextField("Other symbol", text: $other, prompt: Text("Another SF Symbol, such as leaf"))
+                        .labelsHidden().textFieldStyle(.roundedBorder).multilineTextAlignment(.leading)
+                        .font(.system(.callout, design: .monospaced)).frame(width: 260)
+                        .onSubmit(useOther)
+                    Button("Use", action: useOther).disabled(!AutomationSymbols.exists(otherName))
+                }
+                if !otherName.isEmpty, !AutomationSymbols.exists(otherName) {
+                    Text("“\(otherName)” is not an SF Symbol on this Mac.").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        LabeledContent("Colour") {
+            HStack(spacing: 8) {
+                ForEach(AutomationAccent.allCases, id: \.self) { accent in
+                    let selected = draft.accent == accent
+                    Button { draft.accent = accent } label: {
+                        Circle().fill(AutomationTint.color(accent).gradient)
+                            .frame(width: 20, height: 20)
+                            .overlay { if selected { Image(systemName: "checkmark").font(.system(size: 9, weight: .heavy)).foregroundStyle(.white) } }
+                            .padding(3)
+                            .overlay(Circle().strokeBorder(selected ? AutomationTint.color(accent) : .clear, lineWidth: 1.5))
+                    }
+                    .buttonStyle(.plain)
+                    .help(accent.title)
+                    .accessibilityLabel(accent.title)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+        }
+        LabeledContent("In the notch") {
+            NotchLookPreview(symbol: draft.symbol, accent: draft.accent)
+        }
+    }
+
+    /// The offered symbols, with a saved one that is not among them first, so it stays visible and selected.
+    private var symbols: [String] {
+        AutomationSymbols.all.contains(draft.symbol) ? AutomationSymbols.all : [draft.symbol] + AutomationSymbols.all
+    }
+
+    private var otherName: String { other.trimmingCharacters(in: .whitespaces).lowercased() }
+
+    private func useOther() {
+        guard AutomationSymbols.exists(otherName) else { return }
+        draft.symbol = otherName
+        other = ""
+    }
+}
+
+/// A still picture of the running pill: the icon at the left, one ring at the right, as the notch draws them.
+struct NotchLookPreview: View {
+    let symbol: String
+    let accent: AutomationAccent
+
+    var body: some View {
+        HStack(spacing: 8) {
+            NotchGlyph(symbol: symbol, accent: accent.rawValue, phase: .running, diameter: 20)
+            Spacer(minLength: 40)
+            NotchProgressRing(progress: 0.62, tint: NotchStyle.ring, size: 14, reduceMotion: true)
+        }
+        .padding(.horizontal, 10)
+        .frame(width: 150, height: 30)
+        .background(Capsule().fill(Color.black))
+        .environment(\.colorScheme, .dark)
+        .accessibilityElement()
+        .accessibilityLabel("Preview of the notch icon")
     }
 }
 

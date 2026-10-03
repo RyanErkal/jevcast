@@ -59,11 +59,11 @@ struct AutomationRow: View {
     var body: some View {
         let last = model.lastRun(automation.id)
         HStack(spacing: 10) {
-            SymbolTile(symbol: automation.symbol, tint: automation.enabled ? AutomationTint.color(automation.id) : .gray, size: 30)
+            SymbolTile(symbol: automation.symbol, tint: automation.enabled ? AutomationTint.color(for: automation) : .gray, size: 30)
             VStack(alignment: .leading, spacing: 3) {
                 Text(automation.name).font(.body.weight(.medium)).lineLimit(1).truncationMode(.tail)
                 HStack(spacing: 5) {
-                    if let last, last.state != .succeeded { StatusChip(last.state) }
+                    if let last, last.state != .succeeded { StatusChip(run: last) }
                     Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
                 }
             }

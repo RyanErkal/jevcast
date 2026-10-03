@@ -153,4 +153,13 @@ final class AutomationsWindow: NSWindowController, NSWindowDelegate {
         let model = AutomationsViewModel(center: nil, quill: nil, demo: AutomationsDemoData.make())
         return AutomationEditorView(model: model, draft: template.draft(), dismiss: {})
     }
+
+    /// The icon and colour rows of the editor for `--snapshot-ui`, with an invented report automation.
+    static func snapshotAppearance() -> some View {
+        var draft = AutomationTemplate.weeklyReport.draft()
+        draft.name = "Weekly sample report"; draft.symbol = "chart.bar.xaxis"; draft.accent = .purple
+        return Form { EditorBasics(draft: .constant(draft)) }
+            .formStyle(.grouped)
+            .frame(width: 640, height: 420)
+    }
 }

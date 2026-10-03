@@ -26,7 +26,9 @@ struct AutomationDraft: Equatable {
     /// the editor changes only the name, icon, notes, schedule, and behaviour.
     var staged: StagedTask?
     var name = ""
-    var symbol = "gearshape.2"
+    var symbol = AutomationSymbol.fallback
+    /// The icon colour. An automation saved without one opens with the colour it already showed.
+    var accent: AutomationAccent = .blue
     var kind: KindChoice = .agent
     var notes = ""
 
@@ -58,7 +60,7 @@ struct AutomationDraft: Equatable {
 
     init(_ automation: Automation) {
         existing = automation
-        name = automation.name; symbol = automation.symbol; notes = automation.notes
+        name = automation.name; symbol = automation.symbol; accent = automation.resolvedAccent; notes = automation.notes
         schedule = ScheduleDraft(automation.schedule); policy = automation.policy
         sharedLock = automation.policy.sharedLock ?? ""
         enableAfterSaving = automation.enabled
@@ -118,9 +120,12 @@ struct AutomationDraft: Equatable {
     // MARK: Validation
 
     /// Every reason Save is off, in the order the form shows them. Empty means it can save.
-    func problems(isExecutable: (String) -> Bool, now: Date = Date()) -> [String] {
+    /// A symbol is checked only when it changed, so a saved one this Mac cannot draw is kept, not refused.
+    func problems(isExecutable: (String) -> Bool, symbolExists: (String) -> Bool = AutomationSymbols.exists,
+                  now: Date = Date()) -> [String] {
         var found: [String] = []
         if name.trimmingCharacters(in: .whitespaces).isEmpty { found.append("Add a name.") }
+        if symbol != existing?.symbol, !symbolExists(symbol) { found.append("Choose an icon. “\(symbol)” is not an SF Symbol on this Mac.") }
         if usesAgent {
             if kind == .agent, prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { found.append("Write a prompt.") }
             if kind == .agent, agentFolder.trimmingCharacters(in: .whitespaces).isEmpty { found.append("Choose a working folder.") }
@@ -152,8 +157,10 @@ struct AutomationDraft: Equatable {
     // MARK: Building
 
     /// The automation to save, or nil while there are problems. New automations are always paused here.
-    func build(isExecutable: (String) -> Bool, now: Date = Date()) -> Automation? {
-        guard problems(isExecutable: isExecutable, now: now).isEmpty, let schedule = schedule.schedule(now: now) else { return nil }
+    func build(isExecutable: (String) -> Bool, symbolExists: (String) -> Bool = AutomationSymbols.exists,
+               now: Date = Date()) -> Automation? {
+        guard problems(isExecutable: isExecutable, symbolExists: symbolExists, now: now).isEmpty,
+              let schedule = schedule.schedule(now: now) else { return nil }
         var policy = self.policy
         policy.sharedLock = sharedLock.isEmpty ? nil : sharedLock
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
@@ -161,6 +168,7 @@ struct AutomationDraft: Equatable {
                                                 schedule: schedule, created: now)
         automation.name = trimmedName
         automation.symbol = symbol
+        automation.accent = accent.rawValue
         automation.schedule = schedule
         automation.policy = policy
         automation.notes = notes

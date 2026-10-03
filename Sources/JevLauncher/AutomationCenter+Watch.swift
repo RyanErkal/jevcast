@@ -25,10 +25,15 @@ struct AutomationReadout: Sendable {
     var states: [String: AutomationState]
     var settings: AutomationSettings
     var heartbeat: RunnerHeartbeat?
+    /// The last finished stage of each running report workflow, by `key(_:)`.
+    var progress: [String: StageProgress] = [:]
+
+    static func key(_ run: RunRecord) -> String { run.automationID + "/" + run.id }
 
     static func read(_ store: AutomationStore) -> AutomationReadout {
         let loaded = store.loadAutomations()
         var runs: [String: [RunRecord]] = [:], states: [String: AutomationState] = [:]
+        var progress: [String: StageProgress] = [:]
         for a in loaded.automations {
             runs[a.id] = store.runs(for: a.id, limit: 50).map { record in
                 var run = record
@@ -36,9 +41,16 @@ struct AutomationReadout: Sendable {
                 return run
             }
             states[a.id] = store.state(for: a.id)
+            guard case .staged = a.kind else { continue }
+            for run in runs[a.id] ?? [] where run.state == .running {
+                if let data = try? store.readRunFile(automationID: a.id, runID: run.id, name: RunEngine.stagesFile, maxBytes: 256 * 1024),
+                   let stage = StageProgress.parse(data) {
+                    progress[key(run)] = stage
+                }
+            }
         }
         return AutomationReadout(automations: loaded.automations, problems: loaded.problems, runs: runs, states: states,
-                                 settings: store.loadSettings(), heartbeat: store.readHeartbeat())
+                                 settings: store.loadSettings(), heartbeat: store.readHeartbeat(), progress: progress)
     }
 
     /// Names in the root and the modification times of the files that matter, without `runner.json`,
@@ -91,6 +103,7 @@ extension AutomationCenter {
         }
         if runs != r.runs { runs = r.runs }
         states = r.states
+        stageProgress = r.progress
         if !isolated, settings != r.settings { settings = r.settings }
         if heartbeat != r.heartbeat { heartbeat = r.heartbeat }
         let waiting = r.runs.values.flatMap { $0 }.filter { $0.state.needsUser }.sorted { ($0.queued, $0.id) > ($1.queued, $1.id) }

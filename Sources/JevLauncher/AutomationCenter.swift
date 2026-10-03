@@ -95,6 +95,8 @@ final class AutomationCenter: ObservableObject {
     var shownAlerts: Set<String> = []
     /// Runs that show the live running indicator.
     var runningAlerts: Set<String> = []
+    /// The last finished stage of running report workflows, read with the runs. See `AutomationReadout.progress`.
+    var stageProgress: [String: StageProgress] = [:]
 
     init(store: AutomationStore = AutomationStore()) {
         self.store = store

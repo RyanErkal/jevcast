@@ -80,7 +80,9 @@ final class AutomationAlertTests: XCTestCase {
         let r = run(.needsApproval, finished: Date())
         XCTAssertEqual(AlertText.make(r, name: "Desktop tidy", hideNames: false), AlertText(title: "Desktop tidy", message: "Moved 3 files"))
         let hidden = AlertText.make(r, name: "Desktop tidy", hideNames: true)
-        XCTAssertEqual(hidden.title, "An automation")
+        XCTAssertEqual(hidden.title, Automation.Kind.unknownCategory, "no name: the kind of work, or a plain word without one")
+        XCTAssertEqual(AlertText.make(r, name: "Desktop tidy", hideNames: true, category: "Agent task").title, "Agent task")
+        XCTAssertFalse(hidden.title.contains("Desktop") || hidden.message.contains("Desktop"))
         XCTAssertFalse(hidden.message.contains("Moved"))
     }
 

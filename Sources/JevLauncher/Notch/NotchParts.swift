@@ -1,33 +1,105 @@
 import AppKit
 import SwiftUI
 
-/// The automation's symbol in a plain circle. Only the glyph carries the accent colour.
+/// The automation's symbol. With an accent it fills a disc in that colour behind a white glyph, and a state that needs
+/// a word (question, review, failure, success) adds a small badge in the state's colour. Without an accent the glyph
+/// carries the state tint on a quiet disc, as before.
 struct NotchIcon: View {
     let p: NotchPresentation
     let diameter: CGFloat
     let reduceMotion: Bool
+    var showsBadge = true
     @State private var arrived = 0
 
     var body: some View {
-        Image(systemName: p.symbol)
-            .font(.system(size: diameter * 0.44, weight: .medium))
-            .foregroundStyle(NotchStyle.tint(p.phase))
-            .symbolRenderingMode(.monochrome)
-            // One quiet cue on arrival for alerts that need the user. Nothing repeats.
-            .symbolEffect(.pulse, options: .nonRepeating, value: reduceMotion || !p.wantsAttention ? 0 : arrived)
-            .frame(width: diameter, height: diameter)
-            .background(Circle().fill(Color.white.opacity(0.1)))
+        // One quiet cue on arrival for alerts that need the user. Nothing repeats.
+        NotchGlyph(symbol: p.symbol, accent: p.accent, phase: p.phase, diameter: diameter,
+                   pulse: reduceMotion || !p.wantsAttention ? 0 : arrived)
+            .overlay(alignment: .bottomTrailing) {
+                if showsBadge, p.accent != nil, let badge = NotchBadge.symbol(p.phase) {
+                    NotchBadge(symbol: badge, tint: NotchStyle.tint(p.phase), diameter: max(12, diameter * 0.42))
+                        .offset(x: diameter * 0.08, y: diameter * 0.08)
+                }
+            }
             .onAppear { arrived += 1 }
             .accessibilityHidden(true)
     }
 }
 
-/// A thin ring. With a value it fills; without one it turns a short arc.
+/// One symbol in its disc: the accent fill with a white glyph, or the state-tinted glyph on a quiet fill.
+struct NotchGlyph: View {
+    let symbol: String
+    let accent: String?
+    let phase: NotchPresentation.Phase
+    let diameter: CGFloat
+    var pulse = 0
+
+    var body: some View {
+        let fill = NotchStyle.accent(accent)
+        Image(systemName: symbol)
+            .font(.system(size: diameter * (fill == nil ? 0.44 : 0.48), weight: fill == nil ? .medium : .semibold))
+            .foregroundStyle(fill == nil ? NotchStyle.tint(phase) : .white)
+            .symbolRenderingMode(.monochrome)
+            .symbolEffect(.pulse, options: .nonRepeating, value: pulse)
+            .frame(width: diameter, height: diameter)
+            .background(Circle().fill(fill.map { AnyShapeStyle($0.gradient) } ?? AnyShapeStyle(Color.white.opacity(0.1))))
+    }
+}
+
+/// The small state mark on an accented icon. A black ring separates it from any accent, red included.
+struct NotchBadge: View {
+    let symbol: String
+    let tint: Color
+    let diameter: CGFloat
+
+    static func symbol(_ phase: NotchPresentation.Phase) -> String? {
+        switch phase {
+        case .question: return "questionmark"
+        case .approval: return "hand.raised.fill"
+        case .review: return "eye.fill"
+        case .failure: return "exclamationmark"
+        case .success: return "checkmark"
+        case .running, .info: return nil
+        }
+    }
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: diameter * 0.52, weight: .heavy))
+            .foregroundStyle(.black)
+            .frame(width: diameter, height: diameter)
+            .background(Circle().fill(tint))
+            .overlay(Circle().strokeBorder(Color.black, lineWidth: 2).padding(-2))
+    }
+}
+
+/// Up to `NotchPresentation.maxIdentities` icons of automations running together, overlapped, in a fixed order.
+/// They never cycle; the count beside the ring gives the total.
+struct NotchIconStack: View {
+    let identities: [NotchPresentation.Identity]
+    let diameter: CGFloat
+
+    var body: some View {
+        HStack(spacing: -diameter * 0.4) {
+            ForEach(Array(identities.enumerated()), id: \.offset) { index, look in
+                NotchGlyph(symbol: look.symbol, accent: look.accent, phase: .running, diameter: diameter)
+                    .overlay(Circle().strokeBorder(Color.black, lineWidth: 1.5).padding(-1.5))
+                    .zIndex(Double(identities.count - index))
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// A thin ring. With a value it fills; without one it turns a short arc. The turning is a Core Animation layer in the
+/// window server, so a pill left up through a long run costs the app no frames. Offscreen renders and Reduce Motion
+/// draw the arc still.
 struct NotchProgressRing: View {
     let progress: Double?
     let tint: Color
     let size: CGFloat
     let reduceMotion: Bool
+    @Environment(\.notchLiveSurface) private var live
     private let line: CGFloat = 2
 
     var body: some View {
@@ -38,12 +110,12 @@ struct NotchProgressRing: View {
                     .stroke(tint, style: StrokeStyle(lineWidth: line, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                     .animation(.easeOut(duration: 0.3), value: progress)
-            } else if reduceMotion {
-                arc(angle: 0)
+            } else if reduceMotion || !live {
+                Circle().trim(from: 0, to: NotchSpinner.arc)
+                    .stroke(tint, style: StrokeStyle(lineWidth: line, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
             } else {
-                TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
-                    arc(angle: context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4 * 360)
-                }
+                NotchSpinner(tint: NSColor(tint), line: line)
             }
         }
         .frame(width: size, height: size)
@@ -51,11 +123,78 @@ struct NotchProgressRing: View {
         .accessibilityLabel("Progress")
         .accessibilityValue(progress.map { "\(Int(($0 * 100).rounded())) percent" } ?? "In progress")
     }
+}
 
-    private func arc(angle: Double) -> some View {
-        Circle().trim(from: 0, to: 0.25)
-            .stroke(tint, style: StrokeStyle(lineWidth: line, lineCap: .round))
-            .rotationEffect(.degrees(angle - 90))
+/// The turning arc of an indeterminate ring: a shape layer with a repeating rotation, run by the window server.
+/// It takes no pointer input, so a click on the pill reaches the pill.
+struct NotchSpinner: NSViewRepresentable {
+    /// The arc's share of the circle.
+    static let arc: CGFloat = 0.25
+    /// Seconds per turn.
+    static let period: CFTimeInterval = 1.4
+
+    let tint: NSColor
+    let line: CGFloat
+
+    func makeNSView(context: Context) -> SpinnerView { SpinnerView() }
+    func updateNSView(_ view: SpinnerView, context: Context) { view.style(tint: tint, line: line) }
+
+    final class SpinnerView: NSView {
+        private let shape = CAShapeLayer()
+
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            wantsLayer = true
+            shape.fillColor = nil
+            shape.lineCap = .round
+            shape.strokeStart = 0
+            shape.strokeEnd = NotchSpinner.arc
+            layer?.addSublayer(shape)
+        }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        func style(tint: NSColor, line: CGFloat) {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            effectiveAppearance.performAsCurrentDrawingAppearance { shape.strokeColor = tint.cgColor }
+            shape.lineWidth = line
+            CATransaction.commit()
+            needsLayout = true
+        }
+
+        override func layout() {
+            super.layout()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            shape.frame = bounds
+            let inset = shape.lineWidth / 2
+            // Starts at twelve o'clock, as the still arc does.
+            let circle = CGMutablePath()
+            circle.addArc(center: CGPoint(x: bounds.midX, y: bounds.midY), radius: max(0, min(bounds.width, bounds.height) / 2 - inset),
+                          startAngle: .pi / 2, endAngle: .pi / 2 - 2 * .pi, clockwise: !shape.contentsAreFlipped())
+            shape.path = circle
+            CATransaction.commit()
+            spin()
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            spin()
+        }
+
+        /// Clockwise on screen, whichever way the layer's geometry runs.
+        private func spin() {
+            guard window != nil, shape.animation(forKey: "spin") == nil else { return }
+            let turn = CABasicAnimation(keyPath: "transform.rotation.z")
+            turn.fromValue = 0
+            turn.toValue = (shape.contentsAreFlipped() ? 1 : -1) * 2 * Double.pi
+            turn.duration = NotchSpinner.period
+            turn.repeatCount = .infinity
+            turn.isRemovedOnCompletion = false
+            shape.add(turn, forKey: "spin")
+        }
     }
 }
 
@@ -79,22 +218,34 @@ struct NotchProgressBar: View {
     }
 }
 
-/// Grey meta at the right: elapsed time and a thin ring while running, and the stack count.
+/// The one status mark at the right: a ring while running (or a retry mark while a retry waits), the number of
+/// automations running together, or a stack's "+N". No elapsed time: the open running card shows that once.
 struct NotchStatus: View {
     let p: NotchPresentation
     let reduceMotion: Bool
     /// Off where the stack count already shows elsewhere.
     var showsBadge = true
+    var ringSize: CGFloat = 14
 
     var body: some View {
-        HStack(spacing: 8) {
-            if showsBadge && p.stackCount > 1 {
+        HStack(spacing: 6) {
+            if p.isRunningStack {
+                Text("\(p.stackCount)")
+                    .foregroundStyle(.white.opacity(0.85))
+                    .accessibilityLabel("\(p.stackCount) running")
+            } else if showsBadge && p.stackCount > 1 {
                 Text("+\(p.stackCount - 1)")
                     .accessibilityLabel("\(p.stackCount) alerts")
             }
             if p.phase == .running {
-                elapsed
-                NotchProgressRing(progress: p.progress, tint: NotchStyle.tint(p.phase), size: 14, reduceMotion: reduceMotion)
+                if p.retry != nil {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: ringSize * 0.8, weight: .semibold))
+                        .frame(width: ringSize, height: ringSize)
+                        .accessibilityLabel("Waiting to retry")
+                } else {
+                    NotchProgressRing(progress: p.progress, tint: NotchStyle.ring, size: ringSize, reduceMotion: reduceMotion)
+                }
             }
         }
         .font(NotchStyle.Font.meta)
@@ -102,28 +253,39 @@ struct NotchStatus: View {
         .lineLimit(1)
         .fixedSize()
     }
+}
 
-    @ViewBuilder private var elapsed: some View {
-        if let start = p.startedAt {
-            TimelineView(.periodic(from: start, by: 1)) { context in
-                Text(Self.clock(context.date.timeIntervalSince(start)))
-                    .contentTransition(.numericText(countsDown: false))
-                    .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: Int(context.date.timeIntervalSince(start)))
+/// The open running card's quiet line: the one elapsed time and the last success, as far as each is known.
+struct NotchRunningMeta: View {
+    let p: NotchPresentation
+
+    var body: some View {
+        Group {
+            if p.startedAt != nil {
+                TimelineView(.periodic(from: p.startedAt ?? Date(), by: 1)) { context in label(now: context.date) }
+            } else {
+                label(now: Date())
             }
-            .accessibilityLabel("Elapsed")
-        } else {
-            Text(NotchStyle.statusText(p))
         }
+        .font(NotchStyle.Font.meta).foregroundStyle(NotchStyle.metaText)
+        .lineLimit(1).truncationMode(.tail)
     }
 
-    static func clock(_ seconds: TimeInterval) -> String {
-        let s = max(0, Int(seconds))
-        return s >= 3600 ? String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60) : String(format: "%d:%02d", s / 60, s % 60)
+    private func label(now: Date) -> some View {
+        Text(Self.line(p, now: now)).accessibilityLabel(Self.line(p, now: now, spoken: true))
+    }
+
+    static func line(_ p: NotchPresentation, now: Date, spoken: Bool = false) -> String {
+        var parts: [String] = []
+        if let start = p.startedAt { parts.append(NotchStyle.clock(now.timeIntervalSince(start)) + (spoken ? " elapsed" : "")) }
+        if let last = p.lastSuccess { parts.append("Last success " + NotchStyle.ago(last, now: now)) }
+        return parts.joined(separator: " · ")
     }
 }
 
-/// Capsule buttons. Primary is white with black text; a destructive primary uses the failure accent.
-/// Secondary is a quiet white fill; a destructive secondary has accent text.
+/// Capsule buttons. Primary is white with black text, the one solid control; a destructive primary uses the failure
+/// accent. Secondary is a light fill with a hairline edge, so it sits in the material; a destructive secondary has
+/// accent text. Increase Contrast makes the fill and edge stronger.
 struct NotchButtonStyle: ButtonStyle {
     let primary: Bool
     var fill = false
@@ -151,6 +313,7 @@ private struct NotchButtonBody<Label: View>: View {
     let destructive: Bool
     @State private var hovering = false
     @Environment(\.isEnabled) private var enabled
+    @Environment(\.notchIncreaseContrast) private var increased
 
     var body: some View {
         label
@@ -160,6 +323,9 @@ private struct NotchButtonBody<Label: View>: View {
             .frame(minWidth: NotchStyle.buttonMinWidth, maxWidth: fill ? .infinity : nil)
             .frame(height: NotchStyle.buttonHeight)
             .background(Capsule().fill(background))
+            .overlay {
+                if !primary { Capsule().strokeBorder(Color.white.opacity(NotchStyle.controlEdge(increased: increased)), lineWidth: 0.5) }
+            }
             .foregroundStyle(foreground)
             .opacity(enabled ? 1 : 0.4)
             .scaleEffect(pressed ? 0.97 : 1)
@@ -171,7 +337,7 @@ private struct NotchButtonBody<Label: View>: View {
 
     private var background: Color {
         if primary { return destructive ? NotchStyle.destructive : Color.white.opacity(hovering ? 0.88 : 1) }
-        return Color.white.opacity(hovering ? 0.18 : 0.12)
+        return Color.white.opacity(NotchStyle.controlFill(increased: increased, hovering: hovering, pressed: pressed))
     }
 
     private var foreground: Color {
@@ -180,24 +346,44 @@ private struct NotchButtonBody<Label: View>: View {
     }
 }
 
-/// A circular icon button: the overflow menu and Show less.
+/// A circular icon button: the overflow menu and Show less. Hover lightens it; a press dips it, like the capsules.
 struct NotchIconButton: View {
     let symbol: String
     let label: String
     let action: () -> Void
-    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: 11, weight: .semibold))
-                .frame(width: NotchStyle.buttonHeight, height: NotchStyle.buttonHeight)
-                .background(Circle().fill(Color.white.opacity(hovering ? 0.18 : 0.12)))
-                .foregroundStyle(.white.opacity(0.85))
-                .contentShape(Circle())
         }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
+        .buttonStyle(NotchIconButtonStyle())
         .accessibilityLabel(label)
+    }
+}
+
+private struct NotchIconButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        NotchIconButtonBody(label: configuration.label, pressed: configuration.isPressed)
+    }
+}
+
+private struct NotchIconButtonBody<Label: View>: View {
+    let label: Label
+    let pressed: Bool
+    @State private var hovering = false
+    @Environment(\.notchIncreaseContrast) private var increased
+
+    var body: some View {
+        label
+            .frame(width: NotchStyle.buttonHeight, height: NotchStyle.buttonHeight)
+            .background(Circle().fill(Color.white.opacity(NotchStyle.controlFill(increased: increased, hovering: hovering, pressed: pressed) - 0.01)))
+            .overlay(Circle().strokeBorder(Color.white.opacity(NotchStyle.controlEdge(increased: increased)), lineWidth: 0.5))
+            .foregroundStyle(.white.opacity(0.85))
+            .scaleEffect(pressed ? 0.94 : 1)
+            .animation(.easeOut(duration: 0.12), value: pressed)
+            .animation(.easeOut(duration: 0.12), value: hovering)
+            .contentShape(Circle())
+            .onHover { hovering = $0 }
     }
 }
 

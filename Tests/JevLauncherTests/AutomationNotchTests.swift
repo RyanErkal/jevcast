@@ -149,9 +149,10 @@ final class AutomationNotchTests: XCTestCase {
         run.state = .running; run.started = Date().addingTimeInterval(-30); run.summary = "Reading files"
         let live = AutomationCenter.runningAlert(run, automation: nil, hideNames: false)
         XCTAssertEqual(live.kind, .running)
-        XCTAssertEqual(live.detail, "Reading files")
+        XCTAssertNil(live.detail, "A summary line is not the current step")
         XCTAssertEqual(live.runID, failure.runID, "The failure replaces the running indicator in the queue")
-        XCTAssertEqual(live.actions.first?.role, .destructive)
+        XCTAssertEqual(live.presentation.visibleActions.map(\.id), ["open"], "Details is the one visible action")
+        XCTAssertEqual(live.presentation.overflowActions.first?.role, .destructive, "Cancel stays in the menu")
         XCTAssertNil(AutomationCenter.runningAlert(run, automation: nil, hideNames: true).detail)
     }
 

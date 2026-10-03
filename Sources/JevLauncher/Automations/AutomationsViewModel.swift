@@ -223,8 +223,11 @@ final class AutomationsViewModel: ObservableObject {
     var selectedRun: RunRecord? { selectedRunID.flatMap(run) }
     var selectedAutomation: Automation? { selectedAutomationID.flatMap(automation) }
 
+    /// Shows a run by its exact automation and run IDs (from a notch alert), else the automation, else Needs You.
     func open(automationID: String?, runID: String?) {
-        if let runID, let run = run(runID) {
+        let match: RunRecord?
+        if let runID, let automationID { match = runs(for: automationID).first { $0.id == runID } } else { match = runID.flatMap(run) }
+        if let run = match {
             section = run.state.needsUser ? .needsYou : .history
             selectedRunID = run.id
         } else if let automationID {

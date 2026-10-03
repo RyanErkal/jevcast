@@ -93,7 +93,7 @@ struct RunRow: View {
     var body: some View {
         HStack(spacing: 10) {
             if showsName, let automation = model.automation(run.automationID) {
-                SymbolTile(symbol: automation.symbol, tint: AutomationTint.color(automation.id), size: 26)
+                SymbolTile(symbol: automation.symbol, tint: AutomationTint.color(for: automation), size: 26)
             } else {
                 Image(systemName: run.state.symbol).foregroundStyle(run.state.tint).frame(width: 18).accessibilityHidden(true)
             }
@@ -103,7 +103,7 @@ struct RunRow: View {
                 Text(details).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 6)
-            StatusChip(run.state)
+            StatusChip(run: run)
         }
         .padding(.vertical, 3)
     }
@@ -225,7 +225,7 @@ struct RunHeader: View {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 8) {
                     Text(run.automationName).font(.title3.weight(.semibold))
-                    StatusChip(run.state)
+                    StatusChip(run: run)
                 }
                 Text(AutomationFormat.trigger(run.trigger) + " · " + (run.started ?? run.queued).formatted(date: .abbreviated, time: .shortened))
                     .font(.callout).foregroundStyle(.secondary)

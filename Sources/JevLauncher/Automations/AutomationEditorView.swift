@@ -15,7 +15,7 @@ struct AutomationEditorView: View {
         let problems = draft.problems(isExecutable: { _ in programOK })
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                SymbolTile(symbol: draft.symbol, tint: .accentColor, size: 34)
+                SymbolTile(symbol: draft.symbol, tint: AutomationTint.color(draft.accent), size: 34)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(draft.isNew ? "New Automation" : "Edit Automation").font(.headline)
                     Text(draft.name.isEmpty ? "Untitled" : draft.name).font(.callout).foregroundStyle(.secondary).lineLimit(1)

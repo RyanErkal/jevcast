@@ -288,6 +288,7 @@ private extension NotchAlert.Kind {
     var testTitle: String {
         switch self {
         case .running: return "Running"; case .question: return "Question"; case .approval: return "Approval"
+        case .review: return "Review"
         case .success: return "Result"; case .failure: return "Failure"; case .info: return "Info"
         }
     }

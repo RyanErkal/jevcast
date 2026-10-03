@@ -41,6 +41,8 @@ final class NotchAlertController {
     private var timerTask: Task<Void, Never>?
     private var menuTask: Task<Void, Never>?
     private var closing = NotchCloseSequence()
+    /// The presentation an animation completion belongs to. Only the current one may record an alert as shown.
+    private var tickets = NotchPresentationTickets()
     private var pointerTimer: Timer?
     private var inputReadyAt = Date.distantFuture
     private var announced: Set<String> = []
@@ -99,6 +101,9 @@ final class NotchAlertController {
 
     // MARK: Actions
 
+    /// Runs an action for the alert it was drawn for (`alertID`; nil means the one on screen). Buttons and menus can
+    /// fire after that alert changed or left, for example a Cancel Run menu left open while the run finished; such an
+    /// action does nothing rather than reach whatever shows now.
     private func perform(_ action: String, on alertID: String?) {
         guard let shown = state.alert else { return }
         let target = alertID ?? shown.id
@@ -114,10 +119,19 @@ final class NotchAlertController {
         case NotchAlert.replyAction:
             beginReply(target)
             return
+        case NotchAlert.detailsAction:
+            // Opening a running automation's run does not end it: its live indicator stays and rests again.
+            guard let running = queue.alert(target), running.kind == .running else { break }
+            endReply()
+            setMode(Self.restingMode(for: shown))
+            onAction?(running, action)
+            return
         default: break
         }
-        if target == NotchQueue.stackID {
-            let members = shown.stack
+        switch Self.actionTarget(action, origin: target, shown: shown, queue: queue) {
+        case nil:
+            return
+        case .stack(let members)?:
             _ = queue.removeAll { alert in members.contains { $0.id == alert.id } }
             remember(members)
             if action == "later" || action == NotchAlert.dismissAction {
@@ -125,14 +139,29 @@ final class NotchAlertController {
             } else {
                 onAction?(shown, action)
             }
-        } else {
+        case .alert(let alert)?:
             if action.hasPrefix("reply:") { endReply() }
-            if let alert = queue.remove(target) {
-                remember([alert])
-                onAction?(alert, action)
-            }
+            queue.remove(alert.id)
+            remember([alert])
+            onAction?(alert, action)
         }
         refresh()
+    }
+
+    enum ActionTarget: Equatable {
+        case stack([NotchAlert])
+        case alert(NotchAlert)
+    }
+
+    /// What an action drawn for `origin` may act on now: that alert while it still waits and still offers the action,
+    /// or the stack while the stack shows. Nil when the origin has gone or changed, so a late press does nothing.
+    static func actionTarget(_ action: String, origin: String, shown: NotchAlert, queue: NotchQueue) -> ActionTarget? {
+        if origin == NotchQueue.stackID {
+            guard shown.id == NotchQueue.stackID, shown.isStack, shown.offers(action) else { return nil }
+            return .stack(shown.stack)
+        }
+        guard let alert = queue.alert(origin), alert.offers(action) else { return nil }
+        return .alert(alert)
     }
 
     private func beginReply(_ target: String) {
@@ -176,6 +205,13 @@ final class NotchAlertController {
     /// The mode after the alert on screen changes. Detail and reply stay while the same alert or stack stays.
     static func nextMode(previous: NotchAlert?, previousMode: NotchState.Mode, next: NotchAlert, replyTarget: String?) -> NotchState.Mode {
         let resting = restingMode(for: next)
+        // A reply stays open while its exact question stays, also when the question joins or leaves a stack.
+        if previousMode == .reply, let replyTarget, let old = replyAlert(in: previous, target: replyTarget) {
+            return old == replyAlert(in: next, target: replyTarget) ? .reply : resting
+        }
+        // An open list of running automations that drops to one keeps that one open, instead of snapping shut.
+        if let previous, previous.isStack, previousMode == .detail, next.kind == .running, !next.isStack,
+           previous.stack.contains(where: { $0.id == next.id }) { return .detail }
         guard let previous, previous.id == next.id else { return resting }
         switch previousMode {
         case .reply:
@@ -221,6 +257,7 @@ final class NotchAlertController {
         let previousMode = state.mode
         let mode = Self.nextMode(previous: previous, previousMode: state.mode, next: alert, replyTarget: state.replyTarget)
         if mode != .reply { endReply() }
+        let ticket = tickets.issue(alertID: alert.id, mode: mode)
         let panel = self.panel ?? makePanel()
         let opening = previous == nil || !panel.isVisible
         state.geometry = geometry
@@ -238,12 +275,13 @@ final class NotchAlertController {
             panel.ignoresMouseEvents = true
             // Grow on the next pass, after the notch-size frame is on screen.
             DispatchQueue.main.async { [weak self] in
-                guard let self, self.queue.presentation != nil, self.available, self.panel?.isVisible == true else { return }
-                self.withMotion({ self.state.expanded = true }, completion: { [weak self] in self?.reportPresented() })
+                guard let self, self.tickets.isCurrent(ticket), self.queue.presentation != nil, self.available,
+                      self.panel?.isVisible == true else { return }
+                self.withMotion({ self.state.expanded = true }, completion: { [weak self] in self?.reportPresented(ticket) })
             }
         } else {
             // A new alert or mode morphs from wherever the shape is now, also halfway through a close.
-            withMotion({ state.present(alert, mode: mode) }, completion: { [weak self] in self?.reportPresented() })
+            withMotion({ state.present(alert, mode: mode) }, completion: { [weak self] in self?.reportPresented(ticket) })
         }
         if opening || !wasExpanded || previous != alert || previousMode != mode { deferPointerInput() }
         watchPointer()
@@ -272,15 +310,20 @@ final class NotchAlertController {
     }
 
     private func setMode(_ mode: NotchState.Mode) {
-        guard panel != nil, state.mode != mode else { return }
+        guard panel != nil, state.mode != mode, let shown = state.alert else { return }
         deferPointerInput()
-        withMotion({ state.mode = mode }, completion: { [weak self] in self?.reportPresented() })
+        let ticket = tickets.issue(alertID: shown.id, mode: mode)
+        withMotion({ state.mode = mode }, completion: { [weak self] in self?.reportPresented(ticket) })
+        // Rows a list now draws start their time; rows it no longer draws wait again.
+        scheduleTimers()
     }
 
-    /// Reports what is on screen now, once per alert, when it is really there.
-    private func reportPresented() {
-        guard let onPresented, let panel, panel.isVisible, available, state.expanded, !state.closing,
-              let shown = state.alert, panel.occlusionState.contains(.visible) else { return }
+    /// Reports what is on screen now, once per alert, when it is really there: only for the presentation still
+    /// current when its animation settles. A superseded animation, a hide, or a close records nothing.
+    private func reportPresented(_ ticket: NotchPresentationTickets.Ticket) {
+        guard tickets.isCurrent(ticket), let onPresented, let panel, panel.isVisible, available, state.expanded, !state.closing,
+              let shown = state.alert, shown.id == ticket.alertID, state.mode == ticket.mode,
+              panel.occlusionState.contains(.visible) else { return }
         let alerts = Self.presentedAlerts(shown, mode: state.mode)
         presented.formIntersection(Set(queue.entries.map(\.alert.id)).union(alerts.map(\.id)))
         for alert in alerts where presented.insert(alert.id).inserted { onPresented(alert) }
@@ -326,6 +369,7 @@ final class NotchAlertController {
 
     private func hidePanel() {
         pointerTimer?.invalidate(); pointerTimer = nil
+        tickets.invalidate()
         closing.cancel()
         endReply()
         // A hidden panel never sends the pointer's exit.
@@ -343,6 +387,7 @@ final class NotchAlertController {
         menuTask?.cancel()
         endReply()
         hovering = false
+        tickets.invalidate()
         guard state.alert != nil, let panel, panel.isVisible else { finishClose(); return }
         panel.ignoresMouseEvents = true
         let token = closing.begin()
@@ -368,6 +413,7 @@ final class NotchAlertController {
     }
 
     private func finishClose() {
+        tickets.invalidate()
         closing.cancel()
         panel?.orderOut(nil)
         state.alert = nil
@@ -381,7 +427,7 @@ final class NotchAlertController {
     private func scheduleTimers() {
         timerTask?.cancel()
         guard !hovering, available else { return }
-        queue.startTimers(now: Date())
+        queue.startTimers(now: Date(), drawn: Set(state.alert.map { Self.presentedAlerts($0, mode: state.mode).map(\.id) } ?? []))
         guard let deadline = queue.nextDeadline else { return }
         timerTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(max(0.05, deadline.timeIntervalSinceNow) * 1_000_000_000))
@@ -424,4 +470,31 @@ final class NotchAlertController {
             MainActor.assumeIsolated { completion() }
         }
     }
+}
+
+/// Generations of what the notch presents. Each presentation or mode change issues a ticket; a hide or close voids the
+/// current one. An animation completion records an alert as shown only with the ticket that is still current.
+struct NotchPresentationTickets {
+    struct Ticket: Equatable {
+        let generation: Int
+        let alertID: String
+        let mode: NotchState.Mode
+    }
+
+    private(set) var current: Ticket?
+    private var generation = 0
+
+    mutating func issue(alertID: String, mode: NotchState.Mode) -> Ticket {
+        generation += 1
+        let ticket = Ticket(generation: generation, alertID: alertID, mode: mode)
+        current = ticket
+        return ticket
+    }
+
+    mutating func invalidate() {
+        generation += 1
+        current = nil
+    }
+
+    func isCurrent(_ ticket: Ticket) -> Bool { ticket == current }
 }

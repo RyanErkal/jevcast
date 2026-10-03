@@ -62,7 +62,9 @@ final class NotchQueueTests: XCTestCase {
         var q = NotchQueue()
         q.failureSeconds = 8
         q.add(alert("q", .question)); q.add(alert("f", .failure)); q.add(alert("r", .running))
-        q.startTimers(now: now)
+        // The open list draws both rows.
+        let drawn: Set<String> = ["q", "f"]
+        q.startTimers(now: now, drawn: drawn)
         XCTAssertNil(q.entries.first { $0.alert.id == "q" }?.deadline, "Questions persist")
         XCTAssertNil(q.entries.first { $0.alert.id == "r" }?.deadline, "Running persists")
         XCTAssertEqual(q.nextDeadline, now.addingTimeInterval(8))
@@ -70,7 +72,7 @@ final class NotchQueueTests: XCTestCase {
         // Hover pauses; the countdown starts again in full.
         q.pauseTimers()
         XCTAssertNil(q.nextDeadline)
-        q.startTimers(now: now.addingTimeInterval(7))
+        q.startTimers(now: now.addingTimeInterval(7), drawn: drawn)
         XCTAssertTrue(q.expire(now: now.addingTimeInterval(9)).isEmpty)
         XCTAssertEqual(q.expire(now: now.addingTimeInterval(15)).map(\.id), ["f"])
         XCTAssertEqual(q.presentation?.id, "q")
@@ -81,7 +83,7 @@ final class NotchQueueTests: XCTestCase {
         var q = NotchQueue()
         q.add(alert("r", .running))
         q.add(NotchAlert(id: "i", kind: .info, symbol: "bell", title: "i", message: "m"))
-        q.startTimers(now: now)
+        q.startTimers(now: now, drawn: ["i"])
         XCTAssertNotNil(q.entries.first { $0.alert.id == "i" }?.deadline)
         XCTAssertEqual(q.expire(now: now.addingTimeInterval(7)).map(\.id), ["i"])
         XCTAssertEqual(q.presentation?.id, "r")

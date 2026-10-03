@@ -12,6 +12,9 @@ public struct Automation: Codable, Equatable, Identifiable, Sendable {
     public var name: String
     /// SF Symbol name for rows and alerts.
     public var symbol: String
+    /// An `AutomationAccent` name for its icon in rows and alerts. Nil in older files; an unknown name is kept but not
+    /// drawn. Read it through `accentChoice`. It is identity only and never shows a run's state.
+    public var accent: String?
     public var kind: Kind
     public var schedule: Schedule
     public var policy: Policy

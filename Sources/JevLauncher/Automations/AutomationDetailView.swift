@@ -33,11 +33,11 @@ struct AutomationDetailView: View {
 
     private var identity: some View {
         HStack(alignment: .center, spacing: 14) {
-            SymbolTile(symbol: automation.symbol, tint: automation.enabled ? AutomationTint.color(automation.id) : .gray, size: 48)
+            SymbolTile(symbol: automation.symbol, tint: automation.enabled ? AutomationTint.color(for: automation) : .gray, size: 48)
             VStack(alignment: .leading, spacing: 4) {
                 Text(automation.name).font(.title2.weight(.semibold)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 6) {
-                    if let last = model.lastRun(automation.id) { StatusChip(last.state) }
+                    if let last = model.lastRun(automation.id) { StatusChip(run: last) }
                     else { StatusChip(title: "Never run", tint: .secondary) }
                     Text(statusLine).font(.callout).foregroundStyle(.secondary).lineLimit(1)
                 }

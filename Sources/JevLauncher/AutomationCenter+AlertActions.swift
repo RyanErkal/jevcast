@@ -122,7 +122,8 @@ extension AutomationCenter {
     }
 
     private func alertTitle(_ run: RunRecord) -> String {
-        alertSettings().hideNames ? "An automation" : (automation(run.automationID)?.name ?? run.automationName)
+        let a = automation(run.automationID)
+        return alertSettings().hideNames ? Self.category(a) : (a?.name ?? run.automationName)
     }
 
     /// Shows an alert unless this center is isolated for snapshots and tests.
@@ -145,19 +146,25 @@ extension AutomationCenter {
     func showTestAlert(_ kind: NotchAlert.Kind = .info) {
         let hide = alertSettings().hideNames
         NotchAlertController.shared.failureSeconds = alertSettings().failureSeconds
-        let title = hide ? "An automation" : "Sample automation"
+        let title = hide ? Automation.Kind.unknownCategory : "Sample automation"
         let id = "test-\(kind.rawValue)-\(UUID().uuidString)"
-        let alert: NotchAlert
+        let accent = AutomationAccent.blue.rawValue
+        var alert: NotchAlert
         switch kind {
         case .running:
             alert = NotchAlert(id: id, kind: .running, symbol: "gearshape.2", title: title, message: "Running",
-                               detail: hide ? nil : "Reading the sample folder", started: Date().addingTimeInterval(-42),
-                               actions: [.init("Cancel", id: "cancel", role: .destructive), .init("Open", id: "open")])
+                               detail: "Data fetched", started: Date().addingTimeInterval(-42),
+                               actions: [.init("Details", id: "later"),
+                                         .init("Cancel Run", id: "later", role: .destructive, menuOnly: true)])
         case .question:
             alert = NotchAlert(id: id, kind: .question, symbol: "questionmark.bubble", title: title,
                                message: hide ? "It has a question for you." : "Which folder should the sample files go to?",
                                actions: [.init("Reply…", id: NotchAlert.replyAction), .init("Later", id: "later")],
                                choices: hide ? [] : ["Archive", "Documents"], allowsReply: !hide)
+        case .review:
+            alert = NotchAlert(id: id, kind: .review, symbol: "doc.text.magnifyingglass", title: title,
+                               message: hide ? "It needs your review." : "Needs review: Sample report",
+                               actions: [.init("Review", id: "later", primary: true), .init("Later", id: "later")])
         case .approval:
             var counts = NotchAlert.ApprovalCounts(); counts.moves = 12; counts.trash = 3
             alert = NotchAlert(id: id, kind: .approval, symbol: "folder.badge.gearshape", title: title, message: counts.summary,
@@ -167,13 +174,15 @@ extension AutomationCenter {
             alert = NotchAlert(id: id, kind: .success, symbol: "checkmark.circle", title: title, message: "Moved 12, trashed 3",
                                actions: [.init("Undo", id: "later", primary: true), .init("Open", id: "later")])
         case .failure:
-            alert = NotchAlert(id: id, kind: .failure, symbol: "exclamationmark.triangle", title: title,
+            alert = NotchAlert(id: id, kind: .failure, symbol: "chart.bar.xaxis", title: title,
                                message: hide ? "It failed." : "Failed: the sample source did not answer.",
-                               actions: [.init("Retry", id: "later", primary: true), .init("Open", id: "later"), .init("Dismiss", id: "dismiss")])
+                               actions: [.init("Retry", id: "later", primary: true), .init("Details", id: "later"), .init("Dismiss", id: "dismiss")])
         case .info:
-            alert = NotchAlert(id: id, kind: .info, symbol: "bolt.badge.clock", title: hide ? "An automation" : "Test alert",
+            alert = NotchAlert(id: id, kind: .info, symbol: "bolt.badge.clock", title: hide ? Automation.Kind.unknownCategory : "Test alert",
                                message: "Automation alerts look like this.", actions: [.init("OK", id: "later", primary: true)])
         }
+        // Automation alerts carry their automation's colour; the test uses a fixed one.
+        if kind != .info { alert.accent = accent }
         NotchAlertController.shared.show(alert)
     }
 }

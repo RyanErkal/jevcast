@@ -25,13 +25,15 @@ extension AutomationCenter {
             case .skip: break
             }
         }
-        // The live indicator: shown while a run is running, removed when it stops or the setting is off.
+        // The live indicator: shown while a run works or waits for its retry, removed when it stops or the setting is off.
         var live: Set<String> = []
-        for run in all where run.state == .running {
+        for run in all where AlertDecision.liveStates.contains(run.state) {
             switch AlertDecision.decideRunning(run, settings: settings, now: now) {
             case .show:
                 live.insert(run.id)
-                notch.show(Self.runningAlert(run, automation: automation(run.automationID), hideNames: settings.hideNames))
+                notch.show(Self.runningAlert(run, automation: automation(run.automationID), hideNames: settings.hideNames,
+                                             progress: stageProgress[AutomationReadout.key(run)],
+                                             lastSuccess: RunRecord.lastSuccess(in: runs[run.automationID] ?? [])))
             case .wait(let until): wake = min(wake ?? until, until)
             case .skip: break
             }
@@ -117,14 +119,26 @@ extension AutomationCenter {
         expected.kind == .approval && current == expected
     }
 
+    // MARK: Look (pure). Icon and colour may show while names are hidden; they name nothing.
+
+    /// The automation's symbol when it is a real SF Symbol, otherwise the default.
+    nonisolated static func symbol(_ a: Automation?) -> String { AutomationSymbols.valid(a?.symbol) }
+
+    /// The automation's accent name, or the stable fallback for its ID when it has none or cannot be read.
+    nonisolated static func accent(_ a: Automation?, _ run: RunRecord) -> String {
+        (a?.resolvedAccent ?? AutomationAccent.fallback(for: run.automationID)).rawValue
+    }
+
+    /// The kind of work, shown in place of the name when names are hidden.
+    nonisolated static func category(_ a: Automation?) -> String { a?.kind.category ?? Automation.Kind.unknownCategory }
+
     // MARK: Alert content (pure, for tests)
 
     /// The alert for a run that needs the user or failed.
     nonisolated static func makeAlert(_ run: RunRecord, automation a: Automation?, hideNames: Bool) -> NotchAlert {
-        let text = AlertText.make(run, name: a?.name ?? run.automationName, hideNames: hideNames)
-        let symbol = hideNames ? "bolt.badge.clock" : (a?.symbol ?? "gearshape.2")
-        var alert = NotchAlert(id: alertID(run), kind: .info, symbol: symbol, title: text.title, message: text.message,
-                               automationID: run.automationID, runID: run.id)
+        let text = AlertText.make(run, name: a?.name ?? run.automationName, hideNames: hideNames, category: category(a))
+        var alert = NotchAlert(id: alertID(run), kind: .info, symbol: symbol(a), accent: accent(a, run),
+                               title: text.title, message: text.message, automationID: run.automationID, runID: run.id)
         switch run.state {
         case .needsInput:
             let question = run.questions.last { $0.answer == nil }
@@ -139,9 +153,14 @@ extension AutomationCenter {
         case .needsApproval:
             alert.kind = .approval
             alert.actions = [.init("Review", id: "review", primary: true), .init("Later", id: "later")]
+        case .failed where run.needsReview:
+            // Something only the user can settle. A retry would stop at the same place, so Review leads.
+            alert.kind = .review
+            alert.actions = [.init("Review", id: "review", primary: true), .init("Later", id: "later")]
         case .failed, .interrupted:
             alert.kind = .failure
-            alert.actions = [.init("Retry", id: "retry", primary: true), .init("Open", id: "open"), .init("Dismiss", id: "dismiss")]
+            alert.actions = [.init("Retry", id: "retry", primary: true), .init("Details", id: NotchAlert.detailsAction),
+                             .init("Dismiss", id: "dismiss")]
         case .succeeded:
             // Opt-in: a report is ready or a backup finished. Open shows the saved result.
             alert.kind = .success
@@ -176,15 +195,23 @@ extension AutomationCenter {
         alert.actions = [.init("Approve all", id: "approveAll", primary: true), .init("Review", id: "review"), .init("Later", id: "later")]
     }
 
-    /// The live indicator. Detail is the run's latest summary line, when it has one.
-    nonisolated static func runningAlert(_ run: RunRecord, automation a: Automation?, hideNames: Bool) -> NotchAlert {
-        let summary = run.summary.trimmingCharacters(in: .whitespacesAndNewlines)
-        let detail = hideNames || summary.isEmpty ? (run.attempt > 1 ? "Attempt \(run.attempt)" : nil) : String(summary.prefix(120))
-        return NotchAlert(id: runningAlertID(run), kind: .running, symbol: hideNames ? "gearshape.2" : (a?.symbol ?? "gearshape.2"),
-                          title: hideNames ? "An automation" : (a?.name ?? run.automationName), message: "Running",
-                          detail: detail, started: run.started,
-                          actions: [.init("Cancel", id: "cancel", role: .destructive), .init("Open", id: "open")],
-                          automationID: run.automationID, runID: run.id)
+    /// The live indicator. Its line is the last stage the run's own records show as finished, or the retry the runner
+    /// scheduled; otherwise plain "Running". The run's summary is not used: it can be left from an earlier attempt or
+    /// question. Details opens the run; Cancel is in the menu.
+    nonisolated static func runningAlert(_ run: RunRecord, automation a: Automation?, hideNames: Bool,
+                                         progress: StageProgress? = nil, lastSuccess: Date? = nil) -> NotchAlert {
+        var alert = NotchAlert(id: runningAlertID(run), kind: .running, symbol: symbol(a), accent: accent(a, run),
+                               title: hideNames ? category(a) : (a?.name ?? run.automationName), message: "Running",
+                               detail: progress?.phrase, started: run.started, lastSuccess: lastSuccess,
+                               actions: [.init("Details", id: NotchAlert.detailsAction),
+                                         .init("Cancel Run", id: "cancel", role: .destructive, menuOnly: true)],
+                               automationID: run.automationID, runID: run.id)
+        if run.state == .retryWaiting {
+            alert.retry = NotchAlert.Retry(attempt: run.attempt, at: nil)
+        } else if run.attempt > 1 {
+            alert.attempt = run.attempt
+        }
+        return alert
     }
 
     // MARK: Codex

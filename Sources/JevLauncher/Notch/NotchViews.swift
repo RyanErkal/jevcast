@@ -74,7 +74,16 @@ struct NotchIsland: View {
     private var p: NotchPresentation { alert.presentation }
     private var hasNotch: Bool { geometry.hasNotch }
 
-    private struct ContentKey: Hashable { let id: String; let mode: NotchMode }
+    /// Content identity: a new alert or mode cross-fades. A reply is keyed by the question it answers, so its field,
+    /// draft, and focus stay when that question joins or leaves a stack.
+    struct ContentKey: Hashable {
+        let id: String
+        let mode: NotchMode
+    }
+
+    static func contentKey(alert: NotchAlert, mode: NotchMode, replyTarget: String?) -> ContentKey {
+        ContentKey(id: mode == .reply ? (replyTarget ?? alert.id) : alert.id, mode: mode)
+    }
 
     var body: some View {
         let size = NotchStyle.size(mode, alert, geometry)
@@ -82,7 +91,7 @@ struct NotchIsland: View {
         let outline = NotchStyle.outline(mode, hasNotch: hasNotch)
         ZStack(alignment: .top) {
             // One keyed child: a new alert or mode cross-fades instead of changing in place.
-            ForEach([ContentKey(id: alert.id, mode: mode)], id: \.self) { key in
+            ForEach([Self.contentKey(alert: alert, mode: mode, replyTarget: replyTarget)], id: \.self) { key in
                 let own = NotchStyle.size(key.mode, alert, geometry)
                 content(key.mode)
                     .frame(width: own.width, height: own.height, alignment: .top)
@@ -93,7 +102,8 @@ struct NotchIsland: View {
         .opacity(contentHidden ? 0 : 1)
         .frame(width: area.width, height: area.height, alignment: .top)
         .animation(NotchMotion.height(closing: retracting, reduceMotion: reduceMotion)) {
-            $0.modifier(IslandOutline(height: size.height, outline: outline, open: mode.isOpen))
+            $0.modifier(IslandOutline(height: size.height, outline: outline, openness: mode.isOpen ? 1 : 0,
+                                      band: hasNotch ? geometry.notchHeight : 0))
         }
         .animation(NotchMotion.width(closing: retracting, reduceMotion: reduceMotion)) {
             $0.modifier(IslandWidth(width: size.width))
@@ -116,14 +126,23 @@ struct NotchIsland: View {
         }
     }
 
-    private func perform(_ id: String, row: String? = nil) { handlers.perform(id, row) }
+    /// Every action names the alert it was drawn for, also from a menu that returns later, so the controller can
+    /// refuse it once that alert has changed or gone.
+    private func perform(_ id: String, row: String? = nil) { handlers.perform(id, row ?? alert.id) }
 
-    // MARK: Compact: icon left of the notch, elapsed time and ring right of it. A click opens the detail.
+    // MARK: Compact: the automation's icon (or a few, when several run) left of the notch, one status mark right of it.
+    // A click opens the detail.
 
     private var compact: some View {
         HStack(spacing: 8) {
-            NotchIcon(p: p, diameter: 20, reduceMotion: reduceMotion)
-                .matchedGeometryEffect(id: "icon", in: parts)
+            Group {
+                if p.isRunningStack {
+                    NotchIconStack(identities: p.identities, diameter: 20)
+                } else {
+                    NotchIcon(p: p, diameter: 20, reduceMotion: reduceMotion, showsBadge: false)
+                }
+            }
+            .matchedGeometryEffect(id: "icon", in: parts)
             if hasNotch {
                 Spacer(minLength: geometry.notchWidth)
             } else {
@@ -195,7 +214,7 @@ struct NotchIsland: View {
                     .font(NotchStyle.Font.title).foregroundStyle(.white)
                     .lineLimit(1)
                     .matchedGeometryEffect(id: "title", in: parts, properties: .position)
-                Text(subtitle(p))
+                subtitleText(p)
                     .font(NotchStyle.Font.message).foregroundStyle(NotchStyle.secondaryText)
                     .lineLimit(lines)
             }
@@ -204,6 +223,15 @@ struct NotchIsland: View {
             trailing
         }
         .frame(minHeight: 32)
+    }
+
+    /// A running alert's line is its last finished stage or retry, ticking only while a known retry time counts down.
+    @ViewBuilder private func subtitleText(_ p: NotchPresentation) -> some View {
+        if p.phase == .running, p.retry?.at != nil {
+            TimelineView(.periodic(from: Date(), by: 1)) { context in Text(p.runningLine(now: context.date)) }
+        } else {
+            Text(p.phase == .running ? p.runningLine(now: Date()) : subtitle(p))
+        }
     }
 
     /// The footer shows the detail left of the buttons, except while running, where the bar goes there.
@@ -220,11 +248,14 @@ struct NotchIsland: View {
             leading
             Spacer(minLength: 8)
             ForEach(p.visibleActions) { button($0) }
-            if !p.overflowActions.isEmpty {
-                let more = p.overflowActions
-                NotchIconButton(symbol: "ellipsis", label: "More actions") {
-                    NotchOverflowMenu.show(more) { perform($0) }
-                }
+            overflow(p.overflowActions)
+        }
+    }
+
+    @ViewBuilder private func overflow(_ more: [NotchAlert.Action], row: String? = nil, title: String? = nil) -> some View {
+        if !more.isEmpty {
+            NotchIconButton(symbol: "ellipsis", label: title.map { "More actions for \($0)" } ?? "More actions") {
+                NotchOverflowMenu.show(more) { perform($0, row: row) }
             }
         }
     }
@@ -252,19 +283,26 @@ struct NotchIsland: View {
             .accessibilityHint(p.title)
     }
 
-    // MARK: Detail: a running automation's latest activity
+    // MARK: Detail: one running automation, compact. A click on it or Details opens the run; Cancel is in the menu.
 
     private var runningDetail: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if hasNotch { band(collapse: true).padding(.bottom, -12) }
-            header(p, trailing: Group { if !hasNotch { collapseButton() } })
-            Text(p.detail ?? "No activity yet.")
-                .font(NotchStyle.Font.message)
-                .foregroundStyle(p.detail == nil ? NotchStyle.metaText : Color.white.opacity(0.8))
-                .lineLimit(2).truncationMode(.tail)
-                .frame(maxWidth: .infinity, minHeight: 32, maxHeight: 32, alignment: .topLeading)
-                .padding(.leading, 44)
-            footer
+        VStack(alignment: .leading, spacing: 0) {
+            if hasNotch { band(collapse: true) }
+            header(p, trailing: Group {
+                if !hasNotch { HStack(spacing: 8) { NotchStatus(p: p, reduceMotion: reduceMotion); collapseButton() } }
+            })
+            .contentShape(Rectangle())
+            .onTapGesture { perform(NotchAlert.detailsAction) }
+            .accessibilityAction(named: "Open details") { perform(NotchAlert.detailsAction) }
+            HStack(spacing: 8) {
+                NotchRunningMeta(p: p)
+                    .padding(.leading, 44)
+                    .layoutPriority(-1)
+                Spacer(minLength: 8)
+                ForEach(p.visibleActions) { button($0) }
+                overflow(p.overflowActions)
+            }
+            .padding(.top, 12)
         }
         .modifier(IslandPadding(hasNotch: hasNotch))
     }
@@ -282,7 +320,7 @@ struct NotchIsland: View {
                         .font(NotchStyle.Font.meta).foregroundStyle(NotchStyle.metaText)
                 }
                 Spacer(minLength: 8)
-                if let later = p.actions.first(where: { $0.id == "later" }) {
+                if !p.isRunningStack, let later = p.actions.first(where: { $0.id == "later" }) {
                     Button("All later") { perform(later.id) }
                         .buttonStyle(NotchButtonStyle(primary: false))
                 }
@@ -304,24 +342,33 @@ struct NotchIsland: View {
             NotchIcon(p: rp, diameter: 24, reduceMotion: reduceMotion)
             VStack(alignment: .leading, spacing: 1) {
                 Text(rp.title).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
-                Text(rp.phase == .running || rp.phase == .approval ? rp.detail ?? rp.message
-                     : rp.detail.map { rp.message + " · " + $0 } ?? rp.message)
+                Text(rowLine(rp))
                     .font(.system(size: 11)).foregroundStyle(NotchStyle.secondaryText)
             }
             .lineLimit(1).truncationMode(.tail)
             .frame(maxWidth: .infinity, alignment: .leading)
+            if rp.phase == .running { NotchStatus(p: rp, reduceMotion: reduceMotion, ringSize: 12) }
             HStack(spacing: 8) {
                 ForEach(rp.rowActions) { item in
                     Button(item.title) { perform(item.id, row: member.id) }
                         .buttonStyle(NotchButtonStyle(item))
                         .accessibilityHint(rp.title)
                 }
+                overflow(rp.rowMenu, row: member.id, title: rp.title)
             }
             .fixedSize()
         }
         .frame(height: NotchGeometry.rowHeight)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(rp.title). \(rp.message)")
+        .accessibilityLabel("\(rp.title). \(rowLine(rp))")
+    }
+
+    private func rowLine(_ rp: NotchPresentation) -> String {
+        switch rp.phase {
+        case .running: return rp.runningLine(now: Date())
+        case .approval: return rp.detail ?? rp.message
+        default: return rp.detail.map { rp.message + " · " + $0 } ?? rp.message
+        }
     }
 
     // MARK: Reply
@@ -362,23 +409,27 @@ private extension EnvironmentValues {
     }
 }
 
-/// Draws the black surface behind the content and clips the content to it, at the animated size and radii.
+/// Draws the surface behind the content and clips the content to it, at the animated size and radii.
+/// `openness` rides the height spring, so the material fades in as the shape grows out of the black notch.
 private struct IslandOutline: ViewModifier, Animatable {
     var height: CGFloat
     var outline: NotchShape
-    let open: Bool
+    /// 0 closed or compact (opaque black), 1 open.
+    var openness: CGFloat
+    /// The notch's height, or 0 without one.
+    let band: CGFloat
     @Environment(\.notchIslandWidth) private var width
 
-    var animatableData: AnimatablePair<CGFloat, NotchShape.AnimatableData> {
-        get { AnimatablePair(height, outline.animatableData) }
-        set { height = newValue.first; outline.animatableData = newValue.second }
+    var animatableData: AnimatablePair<CGFloat, AnimatablePair<CGFloat, NotchShape.AnimatableData>> {
+        get { AnimatablePair(height, AnimatablePair(openness, outline.animatableData)) }
+        set { height = newValue.first; openness = newValue.second.first; outline.animatableData = newValue.second.second }
     }
 
     func body(content: Content) -> some View {
         let shape = NotchIslandShape(width: width, height: height, outline: outline)
         content
             .clipShape(shape)
-            .background(alignment: .top) { NotchSurface(shape: shape, open: open) }
+            .background(alignment: .top) { NotchSurface(shape: shape, height: height, band: band, openness: openness) }
     }
 }
 

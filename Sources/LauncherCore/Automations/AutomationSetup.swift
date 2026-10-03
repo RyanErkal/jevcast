@@ -17,6 +17,8 @@ public enum AutomationSetup {
         public var id: String
         public var name: String
         public var symbol: String?
+        /// An `AutomationAccent` name. Left out, an existing automation keeps its colour.
+        public var accent: String?
         public var notes: String?
         public var schedule: ScheduleSpec
         public var policy: Policy
@@ -65,6 +67,10 @@ public enum AutomationSetup {
             if !AutomationID.isValid(e.id) { found.append(at + "the ID must use a-z, 0-9, and -") }
             if !ids.insert(e.id).inserted { found.append(at + "the ID is used twice") }
             if e.name.trimmingCharacters(in: .whitespaces).isEmpty { found.append(at + "the name is empty") }
+            if let symbol = e.symbol, !AutomationSymbol.isWellFormed(symbol) { found.append(at + "the symbol must be an SF Symbol name, such as chart.bar.xaxis") }
+            if let accent = e.accent, AutomationAccent(rawValue: accent) == nil {
+                found.append(at + "the accent must be one of " + AutomationAccent.allCases.map(\.rawValue).joined(separator: ", "))
+            }
             if (try? RRule(e.schedule.rrule)) == nil { found.append(at + "the schedule rule is not valid") }
             if TimeZone(identifier: e.schedule.timeZone) == nil { found.append(at + "unknown time zone \(e.schedule.timeZone)") }
             if e.policy.timeout < 10 { found.append(at + "the time limit must be at least 10 seconds") }
@@ -118,6 +124,7 @@ public enum AutomationSetup {
         var a = existing ?? Automation(id: e.id, name: e.name, kind: kind, schedule: Schedule(rule: .manual), created: now)
         a.name = e.name
         a.symbol = e.symbol ?? a.symbol
+        a.accent = e.accent ?? a.accent
         a.notes = e.notes ?? ""
         a.kind = kind
         a.schedule = Schedule(rule: .rrule(e.schedule.rrule), timeZone: zone.identifier, anchor: anchor)

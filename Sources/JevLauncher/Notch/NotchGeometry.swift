@@ -13,7 +13,7 @@ struct NotchGeometry: Equatable {
     static let briefBody: CGFloat = 56
     /// A question's row of answers, above its buttons.
     static let choicesRow: CGFloat = 36
-    /// Extra width on each side of the notch for the running pill: icon on the left, time on the right.
+    /// Extra width on each side of the notch for the running pill: icons on the left, one status mark on the right.
     static let pillWing: CGFloat = 66
     /// Pill size on a screen without a notch.
     static let pillBody: CGFloat = 34
@@ -25,8 +25,8 @@ struct NotchGeometry: Equatable {
     static let rowHeight: CGFloat = 48
     static let listBottom: CGFloat = 8
     static let maxRows = 4
-    /// The running detail: latest activity, progress, and Cancel.
-    static let detailBody: CGFloat = 140
+    /// The running detail: title, last finished stage, quiet facts, and Details. The same height as a card.
+    static let detailBody: CGFloat = cardBody
     /// The question and the reply field.
     static let replyBody: CGFloat = 112
     /// Content starts 8 below the notch band. Without a notch it starts 16 from the top, so open modes grow by the difference.

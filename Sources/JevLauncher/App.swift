@@ -17,6 +17,8 @@ struct JevLauncherApp {
             Diagnostics.mailActions(to: CommandLine.arguments[index + 1]); return
         }
         if CommandLine.arguments.contains("--hyper-led-test") { HyperKeyController.runLightTest(); return }
+        // The notch panel alone, before the instance check and before any launcher, menu, preference, or store.
+        if CommandLine.arguments.contains("--notch-demo") { NotchDemo.run(); return }
         if CommandLine.arguments.contains("--diagnose-mail") { Diagnostics.mail(); return }
         if CommandLine.arguments.contains("--diagnose-native-mail") { Diagnostics.nativeMail(); return }
         if CommandLine.arguments.contains("--diagnose-mail-setup") { Diagnostics.mailSetup(); return }
@@ -100,7 +102,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     private var automationSnapshotWindow: NSWindow?
     /// `--automation-alerts`: the runner opened the app to show alerts. No welcome, no launcher.
     private let alertLaunch = CommandLine.arguments.contains("--automation-alerts")
-    private let notchDemo = CommandLine.arguments.contains("--notch-demo")
     /// Snapshot, capture, and demo runs: no global shortcuts, watchers, runner, or Hyper remap.
     private let diagnostic = SingleInstance.isDiagnostic(CommandLine.arguments)
     private var showObserver: NSObjectProtocol?
@@ -146,7 +147,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
                                 isOpen: { [weak self] in self?.wasVisible ?? false }, toggle: { [weak self] in self?.toggle() },
                                 openSettings: { [weak self] tab in self?.showSettings(tab: tab) })
         // Snapshot runs leave global shortcuts to the running copy of the app.
-        if UISnapshots.directory == nil, !notchDemo, !diagnostic {
+        if UISnapshots.directory == nil, !diagnostic {
             configureHotkeys()
             dictation.canStart = { [weak self] in !(self?.wasVisible ?? false) }
             dictation.start()
@@ -207,7 +208,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         // A menu-bar app stays quiet at login; `--open` shows the panel for diagnostics.
         // A new install shows the welcome window once instead.
         if let directory = UISnapshots.directory { runSnapshots(to: directory); return }
-        if notchDemo { runNotchDemo(); return }
         automations.start()
         if CommandLine.arguments.contains("--turn-on-runner") { automations.turnOnRunner() }
         updates.start()
@@ -298,6 +298,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             let shots: [(String, AnyView, NSSize)] = [
                 ("automations-approval", AnyView(AutomationsWindow.snapshotApproval()), NSSize(width: 760, height: 640)),
                 ("automations-editor", AnyView(AutomationsWindow.snapshotEditor(.dataRefresh).frame(width: 720, height: 820)), NSSize(width: 720, height: 820)),
+                ("automations-appearance", AnyView(AutomationsWindow.snapshotAppearance()), NSSize(width: 640, height: 420)),
                 ("mail-compose", AnyView(MailSnapshots.composer()), NSSize(width: 640, height: 520)),
                 ("mail-reply", AnyView(MailSnapshots.reply()), NSSize(width: 820, height: 760)),
                 ("mail-outbox", AnyView(MailSnapshots.outbox()), NSSize(width: 540, height: 310)),
@@ -560,36 +561,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     }
 
     @objc func showAutomationsWindow() { showAutomations() }
-
-    /// `--notch-demo`: invented alerts of each kind, then quit after 30 seconds.
-    /// A running pill, then a question and an approval that stack, then a failure.
-    private func runNotchDemo() {
-        let notch = NotchAlertController.shared
-        notch.onAction = { alert, action in print("[Jev notch] \(alert.id) \(action)"); fflush(stdout) }
-        notch.show(NotchAlert(id: "demo-running", kind: .running, symbol: "gearshape.2", title: "Sample metrics refresh",
-                              message: "Running", detail: "Reading the sample source", started: Date().addingTimeInterval(-42),
-                              actions: [.init("Cancel", id: "cancel", role: .destructive), .init("Open", id: "open")]))
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
-            notch.show(NotchAlert(id: "demo-question", kind: .question, symbol: "questionmark.bubble", title: "Desktop tidy",
-                                  message: "Which folder should the screenshots go to?",
-                                  actions: [.init("Reply…", id: NotchAlert.replyAction), .init("Later", id: "later")],
-                                  choices: ["Archive", "Pictures"], allowsReply: true))
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
-            var counts = NotchAlert.ApprovalCounts(); counts.moves = 12; counts.trash = 3
-            notch.show(NotchAlert(id: "demo-approval", kind: .approval, symbol: "folder.badge.gearshape", title: "Downloads tidy",
-                                  message: counts.summary,
-                                  actions: [.init("Approve all", id: "approveAll", primary: true), .init("Review", id: "review"),
-                                            .init("Later", id: "later")], counts: counts))
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 15) {
-            notch.show(NotchAlert(id: "demo-failure", kind: .failure, symbol: "chart.bar.xaxis", title: "Sample report",
-                                  message: "Failed: the sample source did not answer.",
-                                  actions: [.init("Retry", id: "retry", primary: true), .init("Open", id: "open"),
-                                            .init("Dismiss", id: "dismiss")]))
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { NSApp.terminate(nil) }
-    }
 
     /// A scheduled task's result.
     func showRun(_ run: QuillTaskRun) {

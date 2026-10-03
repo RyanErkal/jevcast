@@ -86,10 +86,13 @@ public enum AlertDecision: Equatable, Sendable {
     /// A run shows the live indicator after it has run this long.
     public static let runningDelay: TimeInterval = 10
 
+    /// Runs the live indicator follows: working, or waiting for a retry the runner already scheduled.
+    public static let liveStates: Set<RunState> = [.running, .retryWaiting]
+
     /// Whether a run shows the live running indicator now. Never persisted: it is not a delivery.
     public static func decideRunning(_ run: RunRecord, settings: AlertSettings, now: Date,
                                      calendar: Calendar = .current) -> AlertDecision {
-        guard settings.enabled, settings.liveRunning, run.state == .running, let started = run.started else { return .skip }
+        guard settings.enabled, settings.liveRunning, liveStates.contains(run.state), let started = run.started else { return .skip }
         // A run that claims to have run for over a day is stale, not live.
         guard now.timeIntervalSince(started) <= maxAge else { return .skip }
         if let quiet = settings.quietHours, let end = quiet.end(after: now, calendar: calendar) { return .wait(until: end) }
@@ -98,23 +101,25 @@ public enum AlertDecision: Equatable, Sendable {
     }
 }
 
-/// The words on a notch alert. Hidden names keep automation and file names off the screen.
+/// The words on a notch alert. Hidden names keep automation and file names off the screen: the title becomes
+/// the kind of work (`Automation.Kind.category`), and messages use fixed words only.
 public struct AlertText: Equatable, Sendable {
     public var title: String
     public var message: String
 
-    public static func make(_ run: RunRecord, name: String, hideNames: Bool) -> AlertText {
+    public static func make(_ run: RunRecord, name: String, hideNames: Bool,
+                            category: String = Automation.Kind.unknownCategory) -> AlertText {
         if hideNames {
             let message: String
             switch run.state {
             case .needsInput: message = "It has a question for you."
             case .needsApproval: message = "It has changes for you to review."
-            case .failed: message = "It failed."
+            case .failed: message = run.needsReview ? "It needs your review." : "It failed."
             case .interrupted: message = "It was interrupted."
-            case .succeeded: message = "It finished."
+            case .succeeded: message = run.hasReadyReport ? "A report is ready." : "It finished."
             default: message = run.state.title
             }
-            return AlertText(title: "An automation", message: message)
+            return AlertText(title: category, message: message)
         }
         let summary = run.summary.trimmingCharacters(in: .whitespacesAndNewlines)
         let fallback: String

@@ -124,6 +124,22 @@ final class StagedEngineTests: XCTestCase {
         XCTAssertEqual(r.summary, "Report ready: Weekly 2026-09-26")
     }
 
+    /// Item 1 was saved earlier (present: no stage is logged); item 2 is generated now. The log then holds only
+    /// item 2's stages, so a position counted from it would call item 2 the first. Progress shows the stage alone.
+    func testMixedSavedAndNewItemsShowOnlyTheLastFinishedStage() throws {
+        let a = try automation()
+        let saved = StagedFixture.item("present_saved", period: "2026-09-19", hashes: ["/reports/2026-09-19.md": String(repeating: "b", count: 64)])
+        let fresh = StagedFixture.item("generate", fetch: true)
+        try handoff(StagedFixture.handoff("work", items: [saved, fresh]))
+        let r = try run(a)
+        let data = try XCTUnwrap(store.readRunFile(automationID: a.id, runID: r.id, name: RunEngine.stagesFile))
+        let entries = try JSONDecoder.iso().decode([RunEngine.StageEntry].self, from: data)
+        XCTAssertEqual(entries.map(\.stage), ["preflight", "fetch", "analyst", "finish"], "the saved item logs no stage")
+        XCTAssertEqual(Set(entries.compactMap(\.item)), [fresh["id"] as? String], "every logged stage belongs to item 2")
+        XCTAssertEqual(StageProgress.parse(data), StageProgress(phrase: "Report checked"))
+        XCTAssertFalse(StageProgress.parse(data)?.phrase.contains { $0.isNumber } ?? true, "no item position is inferred")
+    }
+
     func testFetchCommandFailureStopsBeforeAnalyst() throws {
         let a = try automation()
         try fx.mode("command-fail")

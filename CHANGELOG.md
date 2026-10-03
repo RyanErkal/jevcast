@@ -2,6 +2,12 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.17.1] - 2026-10-03
+
+### Fixed
+
+- **Readable commit IDs in automation output.** Redaction masked every 40-character Git commit ID as a possible token, so a backup could not show the commits it verified. A full lowercase commit ID now stays readable only directly after `Verified Git commit: `, `Local Git commit: `, or `Remote Git commit: `, and only after known secrets and named credential rules are applied. Every other long token is still masked.
+
 ## [1.17.0] - 2026-10-03
 
 ### Added

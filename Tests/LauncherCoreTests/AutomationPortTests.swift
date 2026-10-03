@@ -368,3 +368,33 @@ final class AutomationPortTests: XCTestCase {
         XCTAssertFalse(FailureDedupe.isRepeat(different, previous: first), "a new error alerts again")
     }
 }
+
+/// Commit IDs stay readable only in their exact labels; every secret rule still applies first.
+final class RedactorCommitLabelTests: XCTestCase {
+    let sha = "0a32a7a1c4e5f60718293a4b5c6d7e8f90123456"
+
+    func testLabelledFullCommitIDsStayReadable() {
+        let text = "- docs: changes committed and pushed. Verified Git commit: \(sha).\nLocal Git commit: \(sha); Remote Git commit: \(sha)"
+        XCTAssertEqual(Redactor.redact(text), text)
+    }
+
+    func testUnlabelledOrMalformedLongTokensAreMasked() {
+        for text in ["commit \(sha)", "Verified Git commit:\(sha)", "verified git commit: \(sha)", "Verified Git commit: \(sha.uppercased())",
+                     "Verified Git commit: \(sha)ab", "Verified Git commit: \(sha)=", "Git commit: \(sha)",
+                     "Verified Git commit: " + String(repeating: "Ab0", count: 14)] {
+            XCTAssertFalse(Redactor.redact(text).contains(sha.prefix(20)) || Redactor.redact(text).contains("Ab0Ab0Ab0Ab0Ab0"), text)
+        }
+    }
+
+    func testSecretsAndNamedCredentialsAreMaskedFirst() {
+        // A known secret that looks like a commit ID is masked even when labelled.
+        XCTAssertEqual(Redactor.redact("Verified Git commit: \(sha)", known: [sha]), "Verified Git commit: [redacted]")
+        // A named credential assignment is masked, label or not.
+        XCTAssertFalse(Redactor.redact("GITHUB_TOKEN=\(sha)").contains(sha))
+        XCTAssertFalse(Redactor.redact("api_key: Verified Git commit: \(sha)").contains("Verified Git commit: \(sha)"))
+        XCTAssertFalse(Redactor.redact("Authorization: Bearer \(sha)").contains(sha))
+        XCTAssertFalse(Redactor.redact("ghp_" + String(repeating: "a", count: 36)).contains("aaaaaaaaaaaaaaaa"))
+        XCTAssertFalse(Redactor.redact("sk-" + String(repeating: "b", count: 40)).contains("bbbbbbbbbbbb"))
+        XCTAssertFalse(Redactor.redact("token=Verified Git commit: \(sha)").contains("token=Verified"))
+    }
+}

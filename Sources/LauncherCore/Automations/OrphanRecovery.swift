@@ -39,6 +39,8 @@ public enum OrphanRecovery {
         case stopped
         /// SIGKILL was sent, but something in the group was still there after it.
         case stillRunning
+        /// The group exists but its leader is gone or unreadable, so it could not be proved ours. Not signalled.
+        case unconfirmed
     }
 
     /// True when `run`'s recorded owner process is alive with a start time close to `ownerStart`.
@@ -49,20 +51,56 @@ public enum OrphanRecovery {
         return abs(start.timeIntervalSince(kernelStart)) < 30
     }
 
+    /// What is known about a recorded child group now.
+    public enum GroupState: Equatable, Sendable {
+        /// No process is in the group, or the ID now leads a newer group (the system reuses a group ID only
+        /// after the old group is empty). Safe to forget.
+        case gone
+        /// The group exists and its leader is the recorded process.
+        case ours
+        /// The group exists, but its leader has exited or cannot be read. Its members may be ours, so it
+        /// blocks work and is never signalled.
+        case unknown
+    }
+
+    public static func groupState(pgid: Int32?, start: Date?) -> GroupState {
+        guard let pgid, pgid > 1 else { return .gone }
+        guard ProcessInfoReader.groupExists(pgid) else { return .gone }
+        guard let start, let leader = ProcessInfoReader.startTime(pgid), ProcessInfoReader.groupID(pgid) == pgid else { return .unknown }
+        return ProcessInfoReader.sameStart(leader, start) ? .ours : .gone
+    }
+
+    /// True unless the group is provably gone: work waits for a group that is ours or unknown.
+    public static func groupMayRun(pgid: Int32?, start: Date?) -> Bool { groupState(pgid: pgid, start: start) != .gone }
+
+    /// A run's recorded unconfirmed group that has since ended, with its fields cleared. Nil while it may still run or when there is none.
+    public static func resolvedOrphan(_ run: RunRecord) -> RunRecord? {
+        guard run.orphanPGID != nil, !groupMayRun(pgid: run.orphanPGID, start: run.orphanStart) else { return nil }
+        var record = run
+        record.orphanPGID = nil; record.orphanStart = nil
+        return record
+    }
+
     public static func stopChild(of run: RunRecord, grace: TimeInterval = 10) -> Outcome {
-        guard let pgid = run.childPGID, let expected = run.childStart, pgid > 1 else { return .noChild }
-        guard ProcessInfoReader.groupExists(pgid) else { return .noChild }
-        guard let start = ProcessInfoReader.startTime(pgid), ProcessInfoReader.groupID(pgid) == pgid,
-              ProcessInfoReader.sameStart(start, expected) else { return .notOurs }
+        guard let pgid = run.childPGID, pgid > 1 else { return .noChild }
+        // A group with no recorded start time cannot be proved ours: it is never signalled, and it blocks.
+        guard let expected = run.childStart else { return ProcessInfoReader.groupExists(pgid) ? .unconfirmed : .noChild }
+        switch groupState(pgid: pgid, start: expected) {
+        case .gone: return ProcessInfoReader.groupExists(pgid) ? .notOurs : .noChild
+        case .unknown: return .unconfirmed
+        case .ours: break
+        }
         kill(-pgid, SIGTERM)
         let end = Date().addingTimeInterval(grace)
         while Date() < end {
             if !ProcessInfoReader.groupExists(pgid) { return .stopped }
             usleep(50_000)
         }
-        // Recheck the leader before the hard stop, in case the group ended and its ID was reused.
-        if let now = ProcessInfoReader.startTime(pgid), ProcessInfoReader.groupID(pgid) == pgid, !ProcessInfoReader.sameStart(now, expected) {
-            return .stopped
+        // Check again before the hard stop: the leader may have exited (unknown) or the ID may lead a new group (gone).
+        switch groupState(pgid: pgid, start: expected) {
+        case .gone: return .stopped
+        case .unknown: return .unconfirmed
+        case .ours: break
         }
         kill(-pgid, SIGKILL)
         for _ in 0..<40 {
@@ -81,8 +119,11 @@ public enum OrphanRecovery {
         case .noChild: what = "The runner stopped during this run. It was not repeated."
         case .stopped: what = "The runner stopped during this run. Its program was still running and was stopped. It was not repeated."
         case .notOurs: what = "The runner stopped during this run. Its program had already ended. It was not repeated."
-        case .stillRunning: what = "The runner stopped during this run. Its program could not be stopped; check Activity Monitor. It was not repeated."
+        case .stillRunning: what = "The runner stopped during this run. Its program could not be stopped; check Activity Monitor. This automation waits until that program ends."
+        case .unconfirmed: what = "The runner stopped during this run. Part of its program may still be running and could not be checked, so it was left alone. This automation waits until it ends."
         }
+        // An unconfirmed group keeps its identity, so later runs wait for it instead of working beside it.
+        if outcome == .stillRunning || outcome == .unconfirmed { run.orphanPGID = run.childPGID; run.orphanStart = run.childStart }
         run.state = .interrupted
         run.error = what
         run.finished = Date()

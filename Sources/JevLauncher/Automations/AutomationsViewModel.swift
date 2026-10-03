@@ -183,6 +183,7 @@ final class AutomationsViewModel: ObservableObject {
         section = .all; selectedAutomationID = copy.id
     }
     func turnOnRunner() { live?.turnOnRunner() }
+    func turnOffRunner() { live?.turnOffRunner() }
     func openLoginItems() { live?.openLoginItems() }
     func importIssues(_ item: CodexAutomation) -> [String] { demo?.codexIssues[item.id] ?? center?.importIssues(item) ?? [] }
     func importedCopy(of item: CodexAutomation) -> Automation? { demo == nil ? center?.importedCopy(of: item) : nil }

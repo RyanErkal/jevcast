@@ -12,7 +12,7 @@ public enum AgentModelCatalog {
         switch runner {
         case .codex:
             return [Choice(id: "gpt-6-luna", name: "GPT-6 Luna"), Choice(id: "gpt-6-sol", name: "GPT-6 Sol"),
-                    Choice(id: "gpt-6-astra", name: "GPT-6 Astra")]
+                    Choice(id: "gpt-6.1-sol", name: "GPT-6.1 Sol"), Choice(id: "gpt-6-astra", name: "GPT-6 Astra")]
         case .claude:
             return [Choice(id: "claude-opus-5-5", name: "Opus 5.5")]
         }

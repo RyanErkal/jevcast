@@ -37,7 +37,6 @@ extension RunEngine {
             }
         }
         let mode: OutputMode = diagnosis != nil ? .report : task.output
-        let cli = task.runner == .codex ? context.settings.codexPath : context.settings.claudePath
         let prompt: String
         var resume: String?
         switch followUp {
@@ -58,62 +57,100 @@ extension RunEngine {
         }
         if followUp != nil, resume == nil { return .done(.failed, "This run has no session to continue. Start a new run.") }
 
-        let folder = store.runFolder(automationID: run.automationID, runID: run.id)
-        let schema = AgentPrompt.schema(mode)
-        do {
-            try store.writeRunFile(automationID: run.automationID, runID: run.id, name: Self.schemaFile, data: Data(schema.utf8))
-            if task.runner == .codex {
-                try store.writeRunFile(automationID: run.automationID, runID: run.id, name: Self.lastMessageFile, data: Data())
-            }
-        } catch { return .done(.failed, "The run folder could not be written: \(error)") }
-        var signInFile: URL?
-        if task.runner == .claude, context.settings.claudeUsesSettingsSignIn {
-            guard let env = ClaudeSignIn.gatewayEnvironment(), let data = ClaudeSignIn.settingsData(env) else {
-                return .done(.failed, "Claude is set to sign in through ~/.claude/settings.json, but no gateway is set there.")
-            }
-            do { try store.writeRunFile(automationID: run.automationID, runID: run.id, name: ClaudeSignIn.fileName, data: data) }
-            catch { return .done(.failed, "The run folder could not be written: \(error)") }
-            signInFile = folder.appendingPathComponent(ClaudeSignIn.fileName)
+        let turn: AgentTurn
+        switch launchAgentTurn(&run, task: task, prompt: prompt, schema: AgentPrompt.schema(mode), resume: resume,
+                               options: RunnerCommand.Options(ephemeral: mode == .report && followUp == nil),
+                               timeout: TimeInterval(automation.policy.timeout), control: control) {
+        case .failure(let step): return step
+        case .success(let t): turn = t
         }
-        // The sign-in copy holds a token, so it lives only while the CLI runs.
-        defer { if let signInFile { try? FileManager.default.removeItem(at: signInFile) } }
-        let files = RunnerCommand.Files(schemaFile: folder.appendingPathComponent(Self.schemaFile),
-                                        lastMessageFile: folder.appendingPathComponent(Self.lastMessageFile),
-                                        claudeSettingsFile: signInFile)
-        let launch: ProcessLaunch
-        do {
-            launch = try RunnerCommand.agent(task, cliPath: cli, prompt: prompt, schema: schema, files: files, resumeSession: resume,
-                                             baseEnvironment: context.baseEnvironment, path: context.settings.scriptPath)
-        } catch { return .done(.failed, "\(error)") }
-
-        let events = EventBox(runner: task.runner)
-        let outcome = supervise(&run, control.supervisor(killGrace: context.killGrace), launch,
-                                timeout: TimeInterval(automation.policy.timeout)) { events.consume($0) }
-        let parsed = events.value
-        if let u = parsed.usage { run.usage = (run.usage ?? TokenUsage()) + u }
-        if let s = parsed.sessionID, UUID(uuidString: s) != nil { run.sessionID = s }
-        run.exitCode = outcome.exitCode
-
-        switch outcome.reason {
+        switch turn.outcome.reason {
         case .spawnFailed(let why): return .retry(why, spawnOnly: true)
+        case .identityNotSaved: return .done(.failed, Self.identityNotSaved)
         case .cancelled: return .done(.cancelled, "Cancelled.")
         case .timedOut: return .done(.failed, "Stopped after \(automation.policy.timeout) seconds.")
         case .signaled, .exited: break
         }
-        let stderr = Redactor.redact(Redactor.tail(outcome.stderrTail, maxBytes: 2000)).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard outcome.succeeded, parsed.error == nil else {
-            let why = Redactor.redact(parsed.error ?? (stderr.isEmpty ? "The \(task.runner.executableName) CLI exited with code \(outcome.exitCode ?? -1)." : stderr))
-            return Self.isTransient(why) ? .retry(why, spawnOnly: false) : .done(.failed, String(why.prefix(1000)))
+        if let failure = turn.failure {
+            return Self.isTransient(failure) ? .retry(failure, spawnOnly: false) : .done(.failed, String(failure.prefix(1000)))
         }
-        var structured = parsed.structured
-        if structured == nil, task.runner == .codex,
-           let data = try? store.readRunFile(automationID: run.automationID, runID: run.id, name: Self.lastMessageFile) {
-            structured = data
-        }
-        guard let structured else { return .done(.failed, "The agent finished without a reply.") }
+        guard let structured = turn.structured else { return .done(.failed, "The agent finished without a reply.") }
         let output: AgentOutput
         do { output = try AgentOutput.parse(structured, mode: mode) } catch { return .done(.failed, "\(error)") }
         return store(output, into: &run, raw: structured, diagnosis: diagnosis != nil)
+    }
+
+    /// What one CLI turn left: how it ended, its events, its structured reply, and a failure text when it failed.
+    enum TurnResult { case success(AgentTurn), failure(Step) }
+
+    struct AgentTurn {
+        var outcome: ProcessOutcome
+        var events: RunnerEvents
+        var structured: Data?
+        /// Redacted CLI error or stderr when the CLI reported an error or exited non-zero.
+        var failure: String?
+    }
+
+    /// Starts one CLI turn and waits for it. Checks the subscription sign-in first for Codex, writes the
+    /// schema beside the run, and keeps the Claude sign-in copy only while the CLI runs. `fileTag` keeps
+    /// the files of several turns in one run apart.
+    func launchAgentTurn(_ run: inout RunRecord, task: AgentTask, prompt: String, schema: String, resume: String?,
+                         options: RunnerCommand.Options, timeout: TimeInterval, control: RunControl,
+                         fileTag: String = "") -> TurnResult {
+        if task.runner == .codex, case .problem(let why) = CodexAuth.check(home: context.baseEnvironment["HOME"] ?? NSHomeDirectory()) {
+            return .failure(.done(.failed, why))
+        }
+        let cli = task.runner == .codex ? context.settings.codexPath : context.settings.claudePath
+        let folder = store.runFolder(automationID: run.automationID, runID: run.id)
+        let schemaName = fileTag.isEmpty ? Self.schemaFile : fileTag + "-" + Self.schemaFile
+        let lastName = fileTag.isEmpty ? Self.lastMessageFile : fileTag + "-" + Self.lastMessageFile
+        do {
+            try store.writeRunFile(automationID: run.automationID, runID: run.id, name: schemaName, data: Data(schema.utf8))
+            if task.runner == .codex {
+                try store.writeRunFile(automationID: run.automationID, runID: run.id, name: lastName, data: Data())
+            }
+        } catch { return .failure(.done(.failed, "The run folder could not be written: \(error)")) }
+        var signInFile: URL?
+        if task.runner == .claude, context.settings.claudeUsesSettingsSignIn {
+            guard let env = ClaudeSignIn.gatewayEnvironment(), let data = ClaudeSignIn.settingsData(env) else {
+                return .failure(.done(.failed, "Claude is set to sign in through ~/.claude/settings.json, but no gateway is set there."))
+            }
+            do { try store.writeRunFile(automationID: run.automationID, runID: run.id, name: ClaudeSignIn.fileName, data: data) }
+            catch { return .failure(.done(.failed, "The run folder could not be written: \(error)")) }
+            signInFile = folder.appendingPathComponent(ClaudeSignIn.fileName)
+        }
+        // The sign-in copy holds a token, so it lives only while the CLI runs.
+        defer { if let signInFile { try? FileManager.default.removeItem(at: signInFile) } }
+        let files = RunnerCommand.Files(schemaFile: folder.appendingPathComponent(schemaName),
+                                        lastMessageFile: folder.appendingPathComponent(lastName),
+                                        claudeSettingsFile: signInFile)
+        let launch: ProcessLaunch
+        do {
+            launch = try RunnerCommand.agent(task, cliPath: cli, prompt: prompt, schema: schema, files: files, resumeSession: resume,
+                                             baseEnvironment: context.baseEnvironment, path: context.settings.scriptPath, options: options)
+        } catch { return .failure(.done(.failed, "\(error)")) }
+
+        let box = EventBox(runner: task.runner)
+        let outcome = supervise(&run, control.supervisor(killGrace: context.killGrace), launch, timeout: timeout) { box.consume($0) }
+        let events = box.value
+        if let u = events.usage { run.usage = (run.usage ?? TokenUsage()) + u }
+        if let s = events.sessionID, UUID(uuidString: s) != nil { run.sessionID = s }
+        run.exitCode = outcome.exitCode
+        if !fileTag.isEmpty, !outcome.stderrTail.isEmpty {
+            let text = Redactor.redact(Redactor.tail(outcome.stderrTail, maxBytes: Self.stderrBytes))
+            try? store.writeRunFile(automationID: run.automationID, runID: run.id, name: fileTag + "-stderr.txt", data: Data(text.utf8))
+        }
+        var failure: String?
+        if outcome.reason == .exited || outcome.reason == .signaled, !outcome.succeeded || events.error != nil {
+            let stderr = Redactor.redact(Redactor.tail(outcome.stderrTail, maxBytes: 2000)).trimmingCharacters(in: .whitespacesAndNewlines)
+            failure = Redactor.redact(events.error ?? (stderr.isEmpty ? "The \(task.runner.executableName) CLI exited with code \(outcome.exitCode ?? -1)." : stderr))
+        }
+        var structured = events.structured
+        if structured == nil, task.runner == .codex,
+           let data = try? store.readRunFile(automationID: run.automationID, runID: run.id, name: lastName), !data.isEmpty {
+            structured = data
+        }
+        return .success(AgentTurn(outcome: outcome, events: events, structured: structured, failure: failure))
     }
 
     private func store(_ output: AgentOutput, into run: inout RunRecord, raw: Data, diagnosis: Bool) -> Step {

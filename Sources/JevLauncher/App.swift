@@ -520,6 +520,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         automations.openWindow = { [weak self] automationID, runID in self?.showAutomations(automationID: automationID, runID: runID) }
         automations.openSettings = { [weak self] in self?.showSettings(tab: .automations) }
         NotchAlertController.shared.stillApplies = { [weak self] alert in self?.automations.alertStillApplies(alert) ?? false }
+        NotchAlertController.shared.onPresented = { [weak self] alert in self?.automations.alertPresented(alert) }
         NotchAlertController.shared.onAction = { [weak self] alert, action in
             let id = alert.id
             guard let self, !self.automations.handleAlertAction(id, action, approval: alert.approvalManifest) else { return }

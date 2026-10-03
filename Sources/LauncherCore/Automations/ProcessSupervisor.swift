@@ -10,6 +10,8 @@ public struct ProcessOutcome: Equatable, Sendable {
         /// Killed by a signal the supervisor did not send.
         case signaled
         case spawnFailed(String)
+        /// The caller could not save the child's identity, so the child was stopped at once. Never a success.
+        case identityNotSaved
     }
     public var reason: Reason
     public var exitCode: Int32?

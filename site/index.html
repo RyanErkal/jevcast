@@ -603,7 +603,8 @@
             </p>
             <ul class="auto-points">
               <li><strong>You approve changes.</strong> An agent proposes file moves and tidy-ups. You tick what you want; Jevcast makes the change and can undo it.</li>
-              <li><strong>Quiet by default.</strong> No banners. A card drops from the notch only when a run needs you or fails.</li>
+              <li><strong>Quiet by default.</strong> No banners. A card drops from the notch when a run needs you or fails, and, if you ask for it, when a report is ready or a backup is done.</li>
+              <li><strong>Report workflows.</strong> An approved script plans each run. A model starts only when a report is due, and never picks a program or an argument.</li>
               <li><strong>Read only unless you choose.</strong> Access is enforced by the agent's own sandbox, never by the prompt.</li>
               <li><strong>Bring your Codex automations.</strong> Jevcast reads them, and imports a paused copy when you ask.</li>
             </ul>
@@ -792,6 +793,18 @@ scripts/build.sh</code></pre>
             </p>
           </div>
           <ol class="releases">
+            <li class="release">
+              <div class="release-head">
+                <span class="release-tag">1.17.0</span>
+                <time datetime="2026-10-03">3 October 2026</time>
+              </div>
+              <ul>
+                <li><strong>Report workflows.</strong> An approved script plans the work. Each due report runs at most one fetch worker and one read-only analyst, and an approved script checks and saves it. Nothing due means no model.</li>
+                <li><strong>Success alerts that count.</strong> Turn on success alerts for a ready report or a finished backup. A card counts as shown only after the notch draws it.</li>
+                <li><strong>Safer runs.</strong> Codex runs use your ChatGPT sign-in only, start no extra agents, and stop at their time limit. A repeated failure alerts once.</li>
+                <li><strong>GPT-6.1 Sol</strong> in the model picker.</li>
+              </ul>
+            </li>
             <li class="release">
               <div class="release-head">
                 <span class="release-tag">1.16.1</span>

@@ -75,7 +75,7 @@ private struct RunnerSettingsSection: View {
     private var color: Color {
         switch center.runnerStatus {
         case .running: return .green
-        case .starting, .needsApproval: return .orange
+        case .starting, .needsApproval, .staleHelper: return .orange
         case .notResponding, .failed: return .red
         case .off, .unsignedBuild: return .secondary
         }
@@ -90,6 +90,7 @@ private struct RunnerSettingsSection: View {
         case .starting: return "The runner is starting. It checks in within 90 seconds."
         case .running(let since): return "Checking schedules every 30 seconds. Started " + since.formatted(.relative(presentation: .named)) + "."
         case .notResponding: return "It is registered, but it has not checked in for over 90 seconds. Turn it off and on again."
+        case .staleHelper(let version): return "A runner from another copy or version (\(version)) is checking in instead of this app's runner. Turn it off and on again."
         case .failed: return "The runner could not start. Reinstall Jevcast if this stays."
         }
     }

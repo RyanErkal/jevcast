@@ -38,7 +38,7 @@ extension AutomationCenter {
         switch a.kind {
         case .agent(let t): task = t
         case .scriptWithDiagnosis(_, let t): task = t
-        case .script: return []
+        case .script, .staged: return []
         }
         return ([task.workingDirectory] + task.allowedRoots).filter { !$0.isEmpty }.map { ($0 as NSString).expandingTildeInPath }
     }

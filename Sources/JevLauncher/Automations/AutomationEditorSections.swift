@@ -20,15 +20,22 @@ struct EditorBasics: View {
                     }
                 }
             }
-            Picker("Kind", selection: $draft.kind) {
-                ForEach(AutomationDraft.KindChoice.allCases) { Text($0.title).tag($0) }
+            if draft.staged == nil {
+                Picker("Kind", selection: $draft.kind) {
+                    ForEach(AutomationDraft.KindChoice.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+            } else {
+                LabeledContent("Kind", value: "Report workflow")
             }
-            .pickerStyle(.segmented)
         } footer: {
             Text(kindHelp).font(.caption).foregroundStyle(.secondary)
         }
     }
     private var kindHelp: String {
+        if draft.staged != nil {
+            return "Its stages come from a reviewed definition file. Run jevcast-runner --configure to change them; here you change only the name, schedule, and behaviour."
+        }
         switch draft.kind {
         case .agent: return "An agent runs your prompt with Codex or Claude, signed in on this Mac."
         case .script: return "Runs a program you choose, with fixed arguments. Nothing a model writes is ever run."

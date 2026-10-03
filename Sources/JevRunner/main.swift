@@ -4,10 +4,19 @@ import LauncherCore
 
 // jevcast-runner: the background scheduler launchd keeps alive. See docs/plans/2026-09-26-automations.md (B3).
 // `--root <dir>` uses another store folder (for manual checks).
+// `--fetch-tool <spec>` serves a staged fetch worker's one tool over stdio, then exits.
+// `--configure <file> [--check]` creates or updates paused automations from a reviewed definition file, then exits.
 
 var root = AutomationStore.defaultRoot
 let args = CommandLine.arguments
 if let i = args.firstIndex(of: "--root"), i + 1 < args.count { root = URL(fileURLWithPath: args[i + 1], isDirectory: true) }
+
+if let i = args.firstIndex(of: "--fetch-tool") {
+    exit(RunnerTools.serveFetchTool(specPath: i + 1 < args.count ? args[i + 1] : ""))
+}
+if let i = args.firstIndex(of: "--configure") {
+    exit(RunnerTools.configure(file: i + 1 < args.count ? args[i + 1] : "", root: root, check: args.contains("--check")))
+}
 
 guard let lockFD = SingleInstance.acquire(root: root) else {
     log("Another runner is active. Exiting.")

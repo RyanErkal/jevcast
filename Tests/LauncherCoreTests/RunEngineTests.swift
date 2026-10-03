@@ -11,6 +11,7 @@ final class RunEngineTests: XCTestCase {
         dir = FileManager.default.temporaryDirectory.appendingPathComponent("engine-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         store = AutomationStore(root: dir.appendingPathComponent("Automations"))
+        try TestCodexSignIn.install(home: dir)
     }
 
     override func tearDownWithError() throws { try? FileManager.default.removeItem(at: dir) }

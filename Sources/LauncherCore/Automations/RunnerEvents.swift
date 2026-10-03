@@ -16,6 +16,20 @@ public struct RunnerEvents: Sendable {
     /// Short lines for the run view: "Ran: ls -la", "Read file".
     public private(set) var activity: [String] = []
     public private(set) var skippedLines = 0
+    /// Commands the CLI ran for the agent, in order, so code can check a worker ran only what it was allowed.
+    public private(set) var commands: [ExecutedCommand] = []
+    /// More commands than `maxCommands` ran. The list is then incomplete, which itself fails a check.
+    public private(set) var commandsTruncated = false
+
+    public struct ExecutedCommand: Equatable, Sendable {
+        public var command: String
+        public var exitCode: Int?
+        /// The command's own output, bounded.
+        public var output: String
+    }
+    public static let maxCommands = 20
+    /// File changes, web searches, and tool calls the agent made, besides commands.
+    public private(set) var otherToolUses = 0
 
     public init(runner: AgentRunner) { self.runner = runner }
 
@@ -42,9 +56,10 @@ public struct RunnerEvents: Sendable {
                 if let cmd = item["command"] as? String { note("Ran: " + oneLine(cmd, 80)) }
             case ("item.completed", "command_execution"):
                 if activity.last?.hasPrefix("Ran: ") != true, let cmd = item["command"] as? String { note("Ran: " + oneLine(cmd, 80)) }
-            case ("item.completed", "file_change"): note("Changed files")
-            case ("item.completed", "web_search"): note("Searched the web")
-            case ("item.completed", "mcp_tool_call"): note("Used a tool")
+                record(item)
+            case ("item.completed", "file_change"): note("Changed files"); otherToolUses += 1
+            case ("item.completed", "web_search"): note("Searched the web"); otherToolUses += 1
+            case ("item.completed", "mcp_tool_call"): note("Used a tool"); otherToolUses += 1
             case ("item.completed", "error"): error = (item["message"] as? String).map { oneLine($0, 500) } ?? error
             default: break
             }
@@ -68,6 +83,7 @@ public struct RunnerEvents: Sendable {
         case "assistant":
             let content = ((o["message"] as? [String: Any])?["content"] as? [[String: Any]]) ?? []
             for block in content where block["type"] as? String == "tool_use" {
+                otherToolUses += 1
                 switch block["name"] as? String ?? "" {
                 case "Read": note("Read file")
                 case "Glob", "Grep": note("Searched files")
@@ -91,6 +107,13 @@ public struct RunnerEvents: Sendable {
             }
         default: break
         }
+    }
+
+    private mutating func record(_ item: [String: Any]) {
+        guard commands.count < Self.maxCommands else { commandsTruncated = true; return }
+        let command = String((item["command"] as? String ?? "").prefix(4096))
+        let output = String((item["aggregated_output"] as? String ?? "").suffix(16 * 1024))
+        commands.append(ExecutedCommand(command: command, exitCode: (item["exit_code"] as? NSNumber)?.intValue, output: output))
     }
 
     private mutating func setFinal(_ text: String) {

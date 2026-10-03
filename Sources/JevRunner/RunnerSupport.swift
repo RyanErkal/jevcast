@@ -18,6 +18,11 @@ enum RunnerIdentity {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
     }
 
+    static var build: String? { Bundle.main.infoDictionary?["CFBundleVersion"] as? String }
+
+    /// This runner's own file, symlinks resolved. The fetch worker's tool server is this file with `--fetch-tool`.
+    static var executablePath: String? { Bundle.main.executableURL?.resolvingSymlinksInPath().path }
+
     /// True when this binary has a real (not ad hoc) signature.
     static var signedBuild: Bool {
         var code: SecCode?
@@ -55,14 +60,8 @@ enum AlertLauncher {
         }
     }
 
-    static func shouldAlert(_ run: RunRecord, policy: Policy) -> Bool {
-        switch run.state {
-        case .needsInput, .needsApproval: return true
-        case .failed: return policy.alertOnFailure
-        case .succeeded: return false
-        default: return false
-        }
-    }
+    /// The same rule the app uses, so a closed app opens only for an alert it will show.
+    static func shouldAlert(_ run: RunRecord, policy: Policy) -> Bool { AlertDecision.wants(run, policy: policy) }
 }
 
 /// Script secrets from the Keychain. Never shows a prompt; a locked or denied item reads as missing.

@@ -13,6 +13,10 @@ public final class AutomationStore: @unchecked Sendable {
     public let root: URL
     private let lock = NSLock()
 
+    /// Working folders for staged runs, beside the store and never inside it, so an agent that may write
+    /// its staging folder can never reach automation state.
+    public var stagingRoot: URL { root.deletingLastPathComponent().appendingPathComponent("AutomationStaging", isDirectory: true) }
+
     public init(root: URL = AutomationStore.defaultRoot) { self.root = root }
 
     // MARK: Automations
@@ -142,6 +146,15 @@ public final class AutomationStore: @unchecked Sendable {
         }
     }
 
+    /// Names of the files in a run folder, sorted. Empty when the folder is missing.
+    public func runFileNames(automationID: String, runID: String) -> [String] {
+        locked {
+            guard let dir = try? runDir(automationID, runID, create: false),
+                  let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return [] }
+            return names.filter(SecureFile.isSafeName).sorted()
+        }
+    }
+
     public func readRunFile(automationID: String, runID: String, name: String, maxBytes: Int = 2 * 1024 * 1024) throws -> Data? {
         guard SecureFile.isSafeName(name) else { throw AutomationStoreError.invalidID(name) }
         return try locked {
@@ -255,7 +268,8 @@ public final class AutomationStore: @unchecked Sendable {
     // MARK: Prune
 
     /// Deletes finished runs beyond each automation's `keepRuns` or older than `historyDays`.
-    /// Active runs and runs waiting for the user are never removed. Returns how many were removed.
+    /// Active runs, runs waiting for the user, and runs that still hold evidence (see `keepsEvidence`)
+    /// are never removed. Returns how many were removed.
     @discardableResult
     public func prune(now: Date, settings: AutomationSettings) -> Int {
         locked {
@@ -267,8 +281,10 @@ public final class AutomationStore: @unchecked Sendable {
                           let a = try? AutomationJSON.decoder().decode(Automation.self, from: data) else { return Policy().keepRuns }
                     return max(a.policy.keepRuns, 1)
                 }()
+                var offered = Set<String>()
                 for (index, run) in loadRuns(id, limit: 100_000).enumerated() {
-                    guard run.state.isFinished else { continue }
+                    let evidence = keepsEvidence(id, run, newerOffers: &offered)
+                    guard run.state.isFinished, !evidence else { continue }
                     let old = (run.finished ?? run.queued) < cutoff
                     guard index >= keep || old else { continue }
                     if (try? FileManager.default.removeItem(at: runFolder(automationID: id, runID: run.id))) != nil { removed += 1 }
@@ -285,7 +301,10 @@ public final class AutomationStore: @unchecked Sendable {
         locked {
             var removed = 0
             for id in automationFolderNames() {
-                for run in loadRuns(id, limit: 100_000) where run.state.isFinished {
+                var offered = Set<String>()
+                for run in loadRuns(id, limit: 100_000) {
+                    let evidence = keepsEvidence(id, run, newerOffers: &offered)
+                    guard run.state.isFinished, !evidence else { continue }
                     if (try? FileManager.default.removeItem(at: runFolder(automationID: id, runID: run.id))) != nil { removed += 1 }
                 }
             }
@@ -294,6 +313,31 @@ public final class AutomationStore: @unchecked Sendable {
     }
 
     // MARK: Private helpers (call with the lock held)
+
+    /// True when the run's files are still needed: a program it started that may still run (its record is
+    /// what blocks later work), or a report it offered that is shown and waits for its posting receipt, or
+    /// that no newer run offers again. Call newest run first; `newerOffers` collects what newer runs offered,
+    /// so a report offered again later lets the older offer go.
+    private func keepsEvidence(_ id: String, _ run: RunRecord, newerOffers: inout Set<String>) -> Bool {
+        let dir = runFolder(automationID: id, runID: run.id)
+        var keep = run.orphanPGID != nil && OrphanRecovery.groupMayRun(pgid: run.orphanPGID, start: run.orphanStart)
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        for name in names where name.hasSuffix("-fetch-child.json") {
+            let child = (try? SecureFile.read(dir.appendingPathComponent(name), maxBytes: 64 * 1024)).flatMap { $0 }
+                .flatMap { try? AutomationJSON.decoder().decode(FetchToolChild.self, from: $0) } ?? FetchToolChild(pgid: 0, start: nil)
+            if child.pgid <= 1 || OrphanRecovery.groupMayRun(pgid: child.pgid, start: child.start) { keep = true }
+        }
+        if let data = (try? SecureFile.read(dir.appendingPathComponent(PublicationRecord.fileName), maxBytes: SecureFile.maxJSON)).flatMap({ $0 }),
+           let record = try? JSONDecoder().decode(PublicationRecord.self, from: data) {
+            let pending = record.items.filter { $0.state == .pending }
+            if !pending.isEmpty {
+                if names.contains(PresentationProof.fileName) { keep = true }
+                else if pending.contains(where: { !newerOffers.contains($0.job + "|" + $0.periodKey) }) { keep = true }
+            }
+            for item in record.items { newerOffers.insert(item.job + "|" + item.periodKey) }
+        }
+        return keep
+    }
 
     private func locked<T>(_ body: () throws -> T) rethrows -> T {
         lock.lock(); defer { lock.unlock() }
@@ -346,7 +390,8 @@ public final class AutomationStore: @unchecked Sendable {
     private func automationFolderNames() -> [String] {
         guard (try? SecureFile.isDirectory(root)) == true,
               let names = try? FileManager.default.contentsOfDirectory(atPath: root.path) else { return [] }
-        return names.filter { AutomationID.isValid($0) && $0 != "requests" && ((try? SecureFile.isDirectory(folder($0))) == true) }.sorted()
+        return names.filter { AutomationID.isValid($0) && $0 != "requests" && $0 != StagedClaims.folderName
+            && ((try? SecureFile.isDirectory(folder($0))) == true) }.sorted()
     }
 
     private func loadRuns(_ id: String, limit: Int) -> [RunRecord] {

@@ -31,6 +31,11 @@ public struct Automation: Codable, Equatable, Identifiable, Sendable {
     /// When the user last turned it back on. The schedule starts again here: occurrences from the paused
     /// time never run, also with `.runOnce`. Nil in older files and before the first resume.
     public var resumed: Date?
+    /// Script files the approved commands run (such as a `.ts` file given to `bun`), as they were on the
+    /// last save. The runner refuses a changed file. Nil in older files; such files run unchecked.
+    public var approvedFiles: [ProgramIdentity]?
+    /// Extra files to approve on each save, besides the script files found in the arguments.
+    public var pinnedFiles: [String]?
 
     public init(id: String, name: String, symbol: String = "gearshape.2", kind: Kind, schedule: Schedule,
                 policy: Policy = Policy(), enabled: Bool = false, revision: Int = 1, created: Date = Date(),
@@ -47,12 +52,15 @@ public struct Automation: Codable, Equatable, Identifiable, Sendable {
         case agent(AgentTask)
         /// Run the script; only when it fails, ask the agent to diagnose and write a short report.
         case scriptWithDiagnosis(ScriptTask, AgentTask)
+        /// A report workflow with fixed stages: approved scripts plan and finish, agents only read and write text.
+        case staged(StagedTask)
 
         public var title: String {
             switch self {
             case .script: return "Script"
             case .agent: return "Agent"
             case .scriptWithDiagnosis: return "Script with diagnosis"
+            case .staged: return "Report workflow"
             }
         }
     }
@@ -247,7 +255,11 @@ public enum RunState: String, Codable, CaseIterable, Sendable {
     }
 }
 
-public enum RunTrigger: String, Codable, Sendable { case schedule, manual, test, resume }
+public enum RunTrigger: String, Codable, Sendable {
+    case schedule, manual, test, resume
+    /// One check the runner starts after a report workflow was interrupted, so due work is reconciled.
+    case recovery
+}
 
 public struct TokenUsage: Codable, Equatable, Sendable {
     public var input: Int
@@ -307,6 +319,14 @@ public struct RunRecord: Codable, Equatable, Identifiable, Sendable {
     public var childStart: Date?
     /// Set once the notch panel showed this run, so a relaunch does not show it again.
     public var alerted: Bool
+    /// A success with nothing to show, such as a check that found no due report. It never alerts.
+    public var quiet: Bool?
+    /// The same failure as the previous finished run of this automation. It does not alert again.
+    public var repeatFailure: Bool?
+    /// A child group that could not be confirmed stopped after a runner crash. While it exists,
+    /// the automation does not start again. Nil when there is none.
+    public var orphanPGID: Int32?
+    public var orphanStart: Date?
 
     public init(id: String, automation: Automation, trigger: RunTrigger, occurrence: Date?, queued: Date = Date()) {
         self.id = id; self.automationID = automation.id; self.automationName = automation.name

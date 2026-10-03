@@ -14,6 +14,10 @@ final class NotchAlertController {
     var onAction: ((NotchAlert, String) -> Void)?
     /// Whether a remembered alert still applies, for "Show notifications". Nil keeps every one.
     var stillApplies: ((NotchAlert) -> Bool)?
+    /// Called once per alert after it was actually drawn on screen: the panel is visible, the session is
+    /// unlocked, and the expanded shape has finished growing. A queued or hidden alert is never reported.
+    /// A stack reports its members only when its list is open, because a collapsed stack shows titles only.
+    var onPresented: ((NotchAlert) -> Void)?
     /// Seconds a failure stays up when the pointer is not over it.
     var failureSeconds: TimeInterval {
         get { queue.failureSeconds }
@@ -40,6 +44,8 @@ final class NotchAlertController {
     private var pointerTimer: Timer?
     private var inputReadyAt = Date.distantFuture
     private var announced: Set<String> = []
+    /// Alerts already reported through `onPresented`, by ID.
+    private var presented: Set<String> = []
 
     deinit { pointerTimer?.invalidate() }
 
@@ -233,11 +239,11 @@ final class NotchAlertController {
             // Grow on the next pass, after the notch-size frame is on screen.
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.queue.presentation != nil, self.available, self.panel?.isVisible == true else { return }
-                self.withMotion { self.state.expanded = true }
+                self.withMotion({ self.state.expanded = true }, completion: { [weak self] in self?.reportPresented() })
             }
         } else {
             // A new alert or mode morphs from wherever the shape is now, also halfway through a close.
-            withMotion { state.present(alert, mode: mode) }
+            withMotion({ state.present(alert, mode: mode) }, completion: { [weak self] in self?.reportPresented() })
         }
         if opening || !wasExpanded || previous != alert || previousMode != mode { deferPointerInput() }
         watchPointer()
@@ -268,7 +274,24 @@ final class NotchAlertController {
     private func setMode(_ mode: NotchState.Mode) {
         guard panel != nil, state.mode != mode else { return }
         deferPointerInput()
-        withMotion { state.mode = mode }
+        withMotion({ state.mode = mode }, completion: { [weak self] in self?.reportPresented() })
+    }
+
+    /// Reports what is on screen now, once per alert, when it is really there.
+    private func reportPresented() {
+        guard let onPresented, let panel, panel.isVisible, available, state.expanded, !state.closing,
+              let shown = state.alert, panel.occlusionState.contains(.visible) else { return }
+        let alerts = Self.presentedAlerts(shown, mode: state.mode)
+        presented.formIntersection(Set(queue.entries.map(\.alert.id)).union(alerts.map(\.id)))
+        for alert in alerts where presented.insert(alert.id).inserted { onPresented(alert) }
+    }
+
+    /// The alerts whose words are visible in `mode`: a single alert, or the rows a stack's open list draws
+    /// (the first `NotchGeometry.maxRows`; the rest are only counted, so they are not presented).
+    static func presentedAlerts(_ shown: NotchAlert, mode: NotchState.Mode) -> [NotchAlert] {
+        guard shown.kind != .running else { return [] }
+        if shown.isStack { return mode == .detail ? shown.stack.prefix(NotchGeometry.maxRows).filter { $0.kind != .running } : [] }
+        return mode == .pill ? [] : [shown]
     }
 
     // Ignore input while the shape morphs. Its final outline is not its visible outline yet.
@@ -394,5 +417,11 @@ final class NotchAlertController {
 
     private func withMotion(_ change: () -> Void) {
         withAnimation(NotchStyle.morph(reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion), change)
+    }
+
+    private func withMotion(_ change: () -> Void, completion: @escaping @MainActor () -> Void) {
+        withAnimation(NotchStyle.morph(reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion), change) {
+            MainActor.assumeIsolated { completion() }
+        }
     }
 }

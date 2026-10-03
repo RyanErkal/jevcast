@@ -239,6 +239,7 @@ final class AutomationHardeningTests: XCTestCase {
         XCTAssertNotNil(a.approvedAgentCLI)
         XCTAssertNil(a.approvedAgentCLI?.sha256, "CLIs are not hashed")
         try store.save(a)
+        try TestCodexSignIn.install(home: dir)
         let engine = RunEngine(store: store, context: RunEngine.Context(settings: settings, baseEnvironment: ["HOME": dir.path], retryDelay: 0.01))
         let same = engine.execute(RunRecord(id: RunID.make(), automation: a, trigger: .manual, occurrence: nil), automation: a)
         XCTAssertEqual(same.state, .succeeded, same.error ?? "")

@@ -2,6 +2,34 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.17.0] - 2026-10-03
+
+### Added
+
+- **Report workflows.** A new automation kind with fixed stages: an approved preflight script plans the due work, then each report runs at most one fetch worker and one analyst, in order, and an approved finish script checks and saves it. No model runs when nothing is due or when a saved report only needs to be shown. The planner's handoff is checked, bounded data; a model never chooses a program or an argument. Each stage has its own time limit inside the run's limit, a per-client claim is held for the whole run, and each stage's result and redacted error output stay in the run folder.
+- **A fetch worker with one tool.** The fetch worker runs read only, with the shell, browser, apps, and web search off. Its only tool is Jevcast's own `jevcast-runner --fetch-tool`, pre-approved by name, which runs the saved command for the planned period once and records the result itself. Jevcast trusts that record, not the worker's reply.
+- **Success alerts.** **Alert on success** now works. A card shows when a run has something to show, such as a ready report or a finished backup, and Open shows the saved result. A check with nothing due stays in the history.
+- **Shown means drawn.** A run counts as alerted only after the notch draws its card on screen with the screen unlocked. Report runs record that proof, and the next run hands it to the workflow's publish script.
+- **`jevcast-runner --configure <file> [--check]`** creates or updates automations from a reviewed definition file. New ones start paused; it never turns anything on. It records the approved programs and script files, and lowers the number of runs at a time when the file says so.
+- **GPT-6.1 Sol** in the model picker. The default model is unchanged.
+
+### Changed
+
+- Codex runs turn off Codex's own extra agents (`multi_agent`, `multi_agent_v2`). Report and diagnosis runs use ephemeral sessions; runs that may ask a question keep theirs.
+- Before a Codex run, Jevcast checks that Codex is signed in with ChatGPT. An API-key sign-in stops the run before it starts.
+- Saving an automation approves the script files its command runs, such as a `.ts` file given to `bun`. A changed file stops the next run until you save again.
+- Script output keeps the redacted end of standard error, and a failure names the last line the script printed.
+- The runner shows as running only when the heartbeat comes from the runner in this app. A runner from another version or copy shows as **Old runner**.
+
+### Fixed
+
+- A script with diagnosis is diagnosed after its last retry, not only when it allows none. The same failure again reuses the earlier diagnosis.
+- Interrupted runs alert. A failure that repeats the previous run's error alerts once, until the error changes or a run succeeds.
+- Queued runs that had not started survive a runner restart for up to a day. An interrupted report workflow gets one recovery check.
+- After a crash, a child program that cannot be proved stopped keeps its identity, is never signalled, and blocks work that shares its lock. A child whose identity cannot be saved is stopped at once, and the run fails.
+- A finished run's queued card is no longer withdrawn by the next reload before the notch could show it.
+- History cleanup keeps runs that still hold posting evidence or a program that may still run.
+
 ## [1.16.1] - 2026-10-03
 
 ### Added

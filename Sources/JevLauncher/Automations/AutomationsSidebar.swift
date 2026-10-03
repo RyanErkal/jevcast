@@ -58,7 +58,7 @@ struct RunnerStatusPill: View {
         switch status {
         case .running: return .green
         case .starting: return .yellow
-        case .needsApproval, .notResponding: return .orange
+        case .needsApproval, .notResponding, .staleHelper: return .orange
         case .failed, .unsignedBuild: return .red
         case .off: return .gray
         }
@@ -78,6 +78,7 @@ struct RunnerStatusPopover: View {
                 switch status {
                 case .off, .failed, .notResponding: Button("Turn On") { model.turnOnRunner() }.keyboardShortcut(.defaultAction)
                 case .needsApproval: Button("Open Login Items") { model.openLoginItems() }.keyboardShortcut(.defaultAction)
+                case .staleHelper: Button("Turn Off") { model.turnOffRunner() }
                 default: EmptyView()
                 }
             }
@@ -94,6 +95,7 @@ struct RunnerStatusPopover: View {
         case .off: return "Scheduled automations do not run while the runner is off. Run Now still queues work for when it starts."
         case .needsApproval: return "macOS needs your permission. In System Settings › General › Login Items, turn on Jevcast."
         case .notResponding: return "The runner has not checked in for over 90 seconds. Turn it on again to restart it."
+        case .staleHelper(let version): return "A runner from another copy or version (\(version)) is checking in, not the one in this app. Turn the runner off, then on, so this app's runner takes over. Scheduled runs are not reported as running until then."
         case .unsignedBuild: return "This build is not signed, so macOS will not start the runner. Use a signed release build."
         case .failed(let message): return "The runner could not start: " + message
         }

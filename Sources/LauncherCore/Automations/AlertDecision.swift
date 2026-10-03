@@ -63,17 +63,24 @@ public enum AlertDecision: Equatable, Sendable {
 
     public static func decide(_ run: RunRecord, policy: Policy?, settings: AlertSettings, now: Date,
                               calendar: Calendar = .current) -> AlertDecision {
-        guard settings.enabled, !run.alerted else { return .skip }
-        switch run.state {
-        case .needsInput, .needsApproval: break
-        case .failed: guard settings.failures, policy?.alertOnFailure ?? true else { return .skip }
-        case .succeeded: return .skip
-        default: return .skip
-        }
+        guard settings.enabled, !run.alerted, wants(run, policy: policy, failures: settings.failures) else { return .skip }
         let when = run.finished ?? run.started ?? run.queued
         guard now.timeIntervalSince(when) <= maxAge else { return .skip }
         if let quiet = settings.quietHours, let end = quiet.end(after: now, calendar: calendar) { return .wait(until: end) }
         return .show
+    }
+
+    /// Whether this run's state calls for an alert at all, before quiet hours and age.
+    /// Input and approval always do. Failures and interruptions do when failure alerts are on, once per
+    /// distinct error. Successes do only when the automation alerts on success and the run has something
+    /// to show; a quiet check (nothing due) never does.
+    public static func wants(_ run: RunRecord, policy: Policy?, failures: Bool = true) -> Bool {
+        switch run.state {
+        case .needsInput, .needsApproval: return true
+        case .failed, .interrupted: return failures && (policy?.alertOnFailure ?? true) && run.repeatFailure != true
+        case .succeeded: return policy?.alertOnSuccess == true && run.quiet != true
+        default: return false
+        }
     }
 
     /// A run shows the live indicator after it has run this long.
@@ -103,13 +110,19 @@ public struct AlertText: Equatable, Sendable {
             case .needsInput: message = "It has a question for you."
             case .needsApproval: message = "It has changes for you to review."
             case .failed: message = "It failed."
+            case .interrupted: message = "It was interrupted."
             case .succeeded: message = "It finished."
             default: message = run.state.title
             }
             return AlertText(title: "An automation", message: message)
         }
         let summary = run.summary.trimmingCharacters(in: .whitespacesAndNewlines)
-        let fallback = run.state == .failed ? (run.error.map { "Failed: " + $0 } ?? run.state.title) : run.state.title
+        let fallback: String
+        switch run.state {
+        case .failed: fallback = run.error.map { "Failed: " + $0 } ?? run.state.title
+        case .interrupted: fallback = run.error.map { "Interrupted: " + $0 } ?? run.state.title
+        default: fallback = run.state.title
+        }
         return AlertText(title: name.isEmpty ? run.automationName : name,
                          message: String((summary.isEmpty ? fallback : summary).prefix(160)))
     }

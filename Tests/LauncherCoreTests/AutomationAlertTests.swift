@@ -42,7 +42,13 @@ final class AutomationAlertTests: XCTestCase {
         XCTAssertEqual(AlertDecision.decide(run(.needsApproval, finished: now), policy: Policy(), settings: on, now: now, calendar: calendar), .show)
         XCTAssertEqual(AlertDecision.decide(run(.needsApproval, finished: now, alerted: true), policy: Policy(), settings: on, now: now, calendar: calendar), .skip)
         XCTAssertEqual(AlertDecision.decide(run(.succeeded, finished: now), policy: Policy(), settings: on, now: now, calendar: calendar), .skip)
-        XCTAssertEqual(AlertDecision.decide(run(.succeeded, finished: now), policy: Policy(alertOnSuccess: true), settings: on, now: now, calendar: calendar), .skip)
+        // Success alerts are opt-in per automation; a quiet run (nothing due) never alerts.
+        XCTAssertEqual(AlertDecision.decide(run(.succeeded, finished: now), policy: Policy(alertOnSuccess: true), settings: on, now: now, calendar: calendar), .show)
+        var quietRun = run(.succeeded, finished: now); quietRun.quiet = true
+        XCTAssertEqual(AlertDecision.decide(quietRun, policy: Policy(alertOnSuccess: true), settings: on, now: now, calendar: calendar), .skip)
+        XCTAssertEqual(AlertDecision.decide(run(.interrupted, finished: now), policy: Policy(), settings: on, now: now, calendar: calendar), .show)
+        var repeated = run(.failed, finished: now); repeated.repeatFailure = true
+        XCTAssertEqual(AlertDecision.decide(repeated, policy: Policy(), settings: on, now: now, calendar: calendar), .skip)
         XCTAssertEqual(AlertDecision.decide(run(.failed, finished: now), policy: Policy(alertOnFailure: false), settings: on, now: now, calendar: calendar), .skip)
         XCTAssertEqual(AlertDecision.decide(run(.failed, finished: now), policy: Policy(), settings: AlertSettings(failures: false), now: now, calendar: calendar), .skip)
         XCTAssertEqual(AlertDecision.decide(run(.failed, finished: now), policy: Policy(), settings: on, now: now, calendar: calendar), .show)

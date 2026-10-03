@@ -56,7 +56,7 @@ extension AutomationCenter {
             guard let self else { return }
             self.signedBuild = signed
             let next = Self.runnerStatus(signed: signed, service: status, heartbeat: self.heartbeat,
-                                         enabledSince: self.enabledSince, now: Date())
+                                         enabledSince: self.enabledSince, now: Date(), expected: Self.expectedRunner())
             if status == .enabled, self.enabledSince == nil { self.enabledSince = Date() }
             if status != .enabled { self.enabledSince = nil }
             if self.runnerStatus != next {
@@ -66,15 +66,33 @@ extension AutomationCenter {
         }
     }
 
+    /// The runner this app expects: its version, build, and the runner file inside this app bundle.
+    struct RunnerIdentity: Equatable { var version: String; var build: String?; var executable: String? }
+
+    nonisolated static func expectedRunner(bundle: Bundle = .main) -> RunnerIdentity {
+        let info = bundle.infoDictionary ?? [:]
+        let app = bundle.bundleURL
+        let executable = app.pathExtension == "app"
+            ? app.appendingPathComponent("Contents/MacOS/jevcast-runner").resolvingSymlinksInPath().path : nil
+        return RunnerIdentity(version: info["CFBundleShortVersionString"] as? String ?? "dev",
+                              build: info["CFBundleVersion"] as? String, executable: executable)
+    }
+
+    /// Running needs a fresh heartbeat from the runner in this app. A fresh beat from another runner is not running.
     nonisolated static func runnerStatus(signed: Bool, service: RunnerService.Status, heartbeat: RunnerHeartbeat?,
-                                         enabledSince: Date?, now: Date) -> RunnerStatus {
+                                         enabledSince: Date?, now: Date, expected: RunnerIdentity? = nil) -> RunnerStatus {
         guard signed else { return .unsignedBuild }
         switch service {
         case .notRegistered: return .off
         case .requiresApproval: return .needsApproval
         case .notFound: return .failed("Runner missing from app bundle")
         case .enabled:
-            if let heartbeat, heartbeat.isFresh(now: now) { return .running(since: heartbeat.started) }
+            if let heartbeat, heartbeat.isFresh(now: now) {
+                if let expected, heartbeat.isStale(version: expected.version, build: expected.build, executable: expected.executable) {
+                    return .staleHelper(heartbeat.version)
+                }
+                return .running(since: heartbeat.started)
+            }
             // Just registered, or first seen this session: give it 90 seconds to beat.
             if now.timeIntervalSince(enabledSince ?? now) < 90 { return .starting }
             return .notResponding

@@ -48,9 +48,58 @@ final class RunnerCommandTests: XCTestCase {
 
     func testCodexReadOnly() throws {
         let a = try launch(task(.codex, .readOnly)).arguments
-        XCTAssertEqual(a, ["exec", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "--json", "-s", "read-only",
+        XCTAssertEqual(a, ["exec", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "--json",
+                           "-c", "features.multi_agent=false", "-c", "features.multi_agent_v2=false", "-s", "read-only",
                            "-m", "gpt-6", "-c", "model_reasoning_effort=\"high\"", "-C", "/work",
                            "--output-schema", "/tmp/run/schema.json", "-o", "/tmp/run/last-message.txt", "-"])
+    }
+
+    /// Every run turns off Codex's own extra agents; a run has only the workers Jevcast starts.
+    func testCodexNeverStartsNestedAgents() throws {
+        for access in AgentAccess.allCases {
+            let a = try launch(task(.codex, access)).arguments
+            XCTAssertTrue(a.joined(separator: " ").contains("-c features.multi_agent=false -c features.multi_agent_v2=false"))
+        }
+        let resumed = try launch(task(.codex, .readOnly), resume: "0199a213-81c0-7800-8aa1-bbab2a035a53").arguments
+        XCTAssertTrue(resumed.contains("features.multi_agent_v2=false"))
+        XCTAssertFalse(resumed.contains("--ephemeral"), "a resumed session keeps its session")
+    }
+
+    func testEphemeralAndToolProfiles() throws {
+        let files = RunnerCommand.Files(schemaFile: URL(fileURLWithPath: "/tmp/run/schema.json"),
+                                        lastMessageFile: URL(fileURLWithPath: "/tmp/run/last-message.txt"))
+        var t = task(.codex, .readOnly); t.model = "gpt-6.1-sol"; t.effort = .medium
+        let analyst = try RunnerCommand.agent(t, cliPath: "/opt/bin/codex", prompt: "p", schema: "{}", files: files, baseEnvironment: [:], path: "",
+                                              options: RunnerCommand.Options(ephemeral: true, noRemoteTools: true)).arguments
+        let line = analyst.joined(separator: " ")
+        XCTAssertTrue(analyst.contains("--ephemeral"))
+        XCTAssertTrue(line.contains("-m gpt-6.1-sol") && line.contains("model_reasoning_effort=\"medium\""))
+        XCTAssertEqual(AgentModelCatalog.displayName("gpt-6.1-sol", runner: .codex), "GPT-6.1 Sol", "the picker offers it by name")
+        XCTAssertEqual(AgentModelCatalog.defaultModel(.codex), "gpt-6-luna", "the default stays; jobs name their model exactly")
+        XCTAssertTrue(line.contains("-s read-only") && !line.contains("network_access"))
+        for feature in ["apps", "browser_use", "browser_use_external", "computer_use", "skill_search"] {
+            XCTAssertTrue(line.contains("features.\(feature)=false"), feature)
+        }
+        XCTAssertTrue(line.contains("web_search=\"disabled\""))
+        XCTAssertFalse(line.contains("shell_tool=false"), "the analyst keeps its read-only shell to read files")
+
+        let server = RunnerCommand.ToolServer(name: "jevfetch", command: "/Applications/Jevcast.app/Contents/MacOS/jevcast-runner",
+                                              arguments: ["--fetch-tool", "/tmp/run/item1-fetch-tool.json"], tool: "fetch_report_bundle", toolTimeout: 900)
+        let worker = try RunnerCommand.agent(t, cliPath: "/opt/bin/codex", prompt: "p", schema: "{}", files: files, baseEnvironment: [:], path: "",
+                                             options: RunnerCommand.Options(ephemeral: true, toolServer: server)).arguments
+        let w = worker.joined(separator: " ")
+        XCTAssertTrue(w.contains("features.shell_tool=false") && w.contains("features.unified_exec=false"))
+        XCTAssertTrue(w.contains("-s read-only") && !w.contains("network_access") && !w.contains("--add-dir"))
+        XCTAssertTrue(w.contains(#"mcp_servers.jevfetch.command="/Applications/Jevcast.app/Contents/MacOS/jevcast-runner""#))
+        XCTAssertTrue(w.contains(#"mcp_servers.jevfetch.args=["--fetch-tool","/tmp/run/item1-fetch-tool.json"]"#))
+        XCTAssertTrue(w.contains("mcp_servers.jevfetch.tool_timeout_sec=900"))
+        XCTAssertTrue(w.contains(#"mcp_servers.jevfetch.enabled_tools=["fetch_report_bundle"]"#))
+        XCTAssertTrue(w.contains(#"mcp_servers.jevfetch.tools.fetch_report_bundle.approval_mode="approve""#))
+        XCTAssertTrue(w.contains(#"mcp_servers.jevfetch.default_tools_approval_mode="prompt""#))
+        XCTAssertEqual(worker.filter { $0.contains("approval_mode=\"approve\"") }.count, 1, "only the one saved tool is pre-approved")
+        XCTAssertFalse(w.contains("approval_policy"), "the general approval policy is unchanged")
+        XCTAssertTrue(w.contains("web_search=\"disabled\""))
+        for flag in RunnerCommand.forbiddenArguments { XCTAssertFalse(worker.contains(flag)) }
     }
 
     func testCodexWriteNetworkFastNoEffort() throws {
@@ -97,7 +146,7 @@ final class RunnerCommandTests: XCTestCase {
     }
 
     func testModelCatalog() {
-        XCTAssertEqual(AgentModelCatalog.choices(.codex).map(\.id), ["gpt-6-luna", "gpt-6-sol", "gpt-6-astra"])
+        XCTAssertEqual(AgentModelCatalog.choices(.codex).map(\.id), ["gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6-astra"])
         XCTAssertEqual(AgentModelCatalog.choices(.claude).map(\.id), ["claude-opus-5-5"])
         XCTAssertEqual(AgentModelCatalog.displayName("", runner: .claude), "Opus 5.5")
         XCTAssertEqual(AgentModelCatalog.displayName("opus", runner: .claude), "Custom: opus")

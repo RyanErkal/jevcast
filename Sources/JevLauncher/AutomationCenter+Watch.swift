@@ -95,14 +95,21 @@ extension AutomationCenter {
         if heartbeat != r.heartbeat { heartbeat = r.heartbeat }
         let waiting = r.runs.values.flatMap { $0 }.filter { $0.state.needsUser }.sorted { ($0.queued, $0.id) > ($1.queued, $1.id) }
         if needsYou != waiting { needsYou = waiting }
-        // A resolved run no longer needs its alert.
-        let open = Set(waiting.map(Self.alertID))
-        for id in shownAlerts where !open.contains(id) { NotchAlertController.shared.withdraw(id: id) }
-        shownAlerts.formIntersection(open.union(r.runs.values.flatMap { $0 }.filter { $0.state == .failed || $0.state == .succeeded }.map(Self.alertID)))
+        let keep = Self.alertsToKeep(r.runs.values.flatMap { $0 })
+        for id in shownAlerts where !keep.contains(id) { NotchAlertController.shared.withdraw(id: id) }
+        shownAlerts.formIntersection(keep)
         // Cached checks stay only for runs still waiting; others are read again from proposal.json when asked.
         proposals = proposals.filter { id, _ in waiting.contains { $0.id == id } }
         updateRunnerStatus()
         processAlerts()
+    }
+
+    /// Alerts that still apply after a reload. A question or approval applies while the run waits for the user.
+    /// A finished run's alert (success, failure, interruption) applies while the run is in that same state,
+    /// whether or not it was drawn yet: the notch keeps it for its normal time or until the user dismisses it,
+    /// and a locked screen or a busy queue must not lose it. A changed state is withdrawn earlier in `apply`.
+    nonisolated static func alertsToKeep(_ runs: [RunRecord]) -> Set<String> {
+        Set(runs.filter { $0.state.needsUser || [.failed, .interrupted, .succeeded].contains($0.state) }.map(alertID))
     }
 
     /// The root folder: a new, removed, or replaced entry means a reload. Only `runner.json` changing re-reads the heartbeat.

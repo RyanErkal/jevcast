@@ -22,6 +22,9 @@ struct AutomationDraft: Equatable {
 
     /// Nil for a new automation.
     var existing: Automation?
+    /// A report workflow's stages. They come from its reviewed definition file and are not edited here;
+    /// the editor changes only the name, icon, notes, schedule, and behaviour.
+    var staged: StagedTask?
     var name = ""
     var symbol = "gearshape.2"
     var kind: KindChoice = .agent
@@ -63,6 +66,7 @@ struct AutomationDraft: Equatable {
         case .agent(let agent): kind = .agent; fill(agent)
         case .script(let script): kind = .script; fill(script)
         case .scriptWithDiagnosis(let script, let agent): kind = .scriptWithDiagnosis; fill(script); fill(agent)
+        case .staged(let task): staged = task; kind = .script; fill(task.preflight)
         }
     }
 
@@ -90,8 +94,8 @@ struct AutomationDraft: Equatable {
     }
 
     var isNew: Bool { existing == nil }
-    var usesAgent: Bool { kind != .script }
-    var usesScript: Bool { kind != .agent }
+    var usesAgent: Bool { staged == nil && kind != .script }
+    var usesScript: Bool { staged == nil && kind != .agent }
 
     /// Preserve saved argv exactly when this field was not edited.
     var arguments: [String] {
@@ -99,6 +103,7 @@ struct AutomationDraft: Equatable {
             let saved: [String]
             switch existing.kind {
             case .script(let script), .scriptWithDiagnosis(let script, _): saved = script.arguments
+            case .staged(let task): saved = task.preflight.arguments
             case .agent: saved = []
             }
             if argumentsText == saved.joined(separator: "\n") { return saved }
@@ -160,6 +165,7 @@ struct AutomationDraft: Equatable {
         automation.policy = policy
         automation.notes = notes
         switch kind {
+        case _ where staged != nil: automation.kind = .staged(staged!)
         case .agent: automation.kind = .agent(agentTask)
         case .script: automation.kind = .script(scriptTask)
         case .scriptWithDiagnosis: automation.kind = .scriptWithDiagnosis(scriptTask, diagnosisTask)

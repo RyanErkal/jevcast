@@ -48,12 +48,56 @@ extension AutomationCenter {
         }
     }
 
+    /// Queues the alert. Queueing is not delivery: the run counts as alerted only when the notch reports
+    /// the alert as drawn on screen (`alertPresented`), so a locked screen or quiet queue keeps it pending.
     private func show(_ run: RunRecord, automation a: Automation?, hideNames: Bool) {
         let alert = Self.makeAlert(run, automation: a, hideNames: hideNames)
         shownAlerts.insert(alert.id)
         NotchAlertController.shared.show(alert)
-        markAlerted(run)
         if run.state == .needsApproval { loadCounts(run, automation: a, hideNames: hideNames) }
+    }
+
+    /// The notch drew `alert` on screen. Saves the presentation proof (for a run that offers reports) and
+    /// then the delivery receipt. The proof comes first: a receipt without its proof would stop the alert
+    /// from showing again while the report still lacks evidence. A failed write is shown, never hidden.
+    func alertPresented(_ alert: NotchAlert, now: Date = Date()) {
+        guard !isolated, alert.id.hasPrefix("run:"), let ids = Self.alertRunIDs(alert.id),
+              let run = runs[ids.automationID]?.first(where: { $0.id == ids.runID }) else { return }
+        let store = self.store
+        Task { @MainActor [weak self] in
+            let failure = await Task.detached(priority: .utility) { () -> String? in
+                // The record on disk decides: an alert for a state the run has left is not delivery.
+                guard let current = store.run(automationID: run.automationID, runID: run.id),
+                      AutomationAlertReceipt(current) == AutomationAlertReceipt(run) else { return nil }
+                do {
+                    if current.state == .succeeded {
+                        try AutomationCenter.savePresentationProof(current, alertID: alert.id, store: store, now: now)
+                    }
+                    try AutomationAlertReceipt.save(current, store: store)
+                    return nil
+                } catch {
+                    return "Jevcast showed “\(current.automationName)” but could not record that it did (\(error)). It may show again."
+                }
+            }.value
+            AutomationSignal.post()
+            if let failure {
+                NSLog("Jevcast automations: %@", failure)
+                self?.message = failure
+            }
+        }
+    }
+
+    /// Writes `presentation.json` once, with the reports the run offered, for the publish script.
+    nonisolated static func savePresentationProof(_ run: RunRecord, alertID: String, store: AutomationStore, now: Date) throws {
+        guard let data = try store.readRunFile(automationID: run.automationID, runID: run.id, name: PublicationRecord.fileName),
+              let record = try? JSONDecoder().decode(PublicationRecord.self, from: data),
+              record.runID == run.id, record.automationID == run.automationID else { return }
+        let pending = record.items.filter { $0.state == .pending }
+        guard !pending.isEmpty,
+              (try? store.readRunFile(automationID: run.automationID, runID: run.id, name: PresentationProof.fileName)) == nil else { return }
+        let proof = PresentationProof(automationID: run.automationID, runID: run.id, alertID: alertID, presentedAt: now, items: pending)
+        try store.writeRunFile(automationID: run.automationID, runID: run.id, name: PresentationProof.fileName,
+                               data: PresentationProof.encoder().encode(proof))
     }
 
     /// Reads the checked proposal and adds its counts and Approve all to the approval alert.
@@ -71,12 +115,6 @@ extension AutomationCenter {
 
     nonisolated static func canAddCounts(expected: NotchAlert, current: NotchAlert?) -> Bool {
         expected.kind == .approval && current == expected
-    }
-
-    /// Save delivery without a read-modify-write of run.json.
-    private func markAlerted(_ run: RunRecord) {
-        let store = self.store
-        Task.detached(priority: .utility) { try? AutomationAlertReceipt.save(run, store: store) }
     }
 
     // MARK: Alert content (pure, for tests)
@@ -101,9 +139,13 @@ extension AutomationCenter {
         case .needsApproval:
             alert.kind = .approval
             alert.actions = [.init("Review", id: "review", primary: true), .init("Later", id: "later")]
-        case .failed:
+        case .failed, .interrupted:
             alert.kind = .failure
             alert.actions = [.init("Retry", id: "retry", primary: true), .init("Open", id: "open"), .init("Dismiss", id: "dismiss")]
+        case .succeeded:
+            // Opt-in: a report is ready or a backup finished. Open shows the saved result.
+            alert.kind = .success
+            alert.actions = [.init("Open", id: "open", primary: true), .init("Dismiss", id: "dismiss")]
         default:
             alert.actions = [.init("Open", id: "open", primary: true), .init("Later", id: "later")]
         }

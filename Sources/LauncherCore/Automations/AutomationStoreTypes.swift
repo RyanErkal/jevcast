@@ -16,8 +16,23 @@ public struct RunnerHeartbeat: Codable, Equatable, Sendable {
     public var version: String
     /// True when the runner binary carries a non-ad-hoc code signature.
     public var signedBuild: Bool
-    public init(pid: Int32, started: Date, heartbeat: Date, version: String, signedBuild: Bool) {
+    /// The runner's own executable path, symlinks resolved. Nil from older runners.
+    public var executable: String?
+    /// `CFBundleVersion` of the runner's bundle. Nil from older runners.
+    public var build: String?
+    public init(pid: Int32, started: Date, heartbeat: Date, version: String, signedBuild: Bool,
+                executable: String? = nil, build: String? = nil) {
         self.pid = pid; self.started = started; self.heartbeat = heartbeat; self.version = version; self.signedBuild = signedBuild
+        self.executable = executable; self.build = build
+    }
+
+    /// True when this heartbeat comes from a runner other than the one in this app: another version,
+    /// another build, or another file. An old runner can keep beating after an update.
+    public func isStale(version expected: String, build expectedBuild: String?, executable expectedPath: String?) -> Bool {
+        if version != expected { return true }
+        if let build, let expectedBuild, build != expectedBuild { return true }
+        if let executable, let expectedPath, executable != expectedPath { return true }
+        return false
     }
     /// Alive when the last beat is under 90 seconds old.
     public func isFresh(now: Date = Date()) -> Bool { now.timeIntervalSince(heartbeat) < 90 }

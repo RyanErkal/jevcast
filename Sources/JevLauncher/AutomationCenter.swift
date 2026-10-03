@@ -20,6 +20,8 @@ final class AutomationCenter: ObservableObject {
         case running(since: Date)
         /// Registered, but no heartbeat for over 90 seconds.
         case notResponding
+        /// A runner from another version or file is beating, for example one left from before an update.
+        case staleHelper(String)
         case failed(String)
         var title: String {
             switch self {
@@ -29,6 +31,7 @@ final class AutomationCenter: ObservableObject {
             case .starting: return "Starting…"
             case .running: return "Running"
             case .notResponding: return "Not responding"
+            case .staleHelper(let version): return "Old runner (\(version)) is running. Turn it off and on"
             case .failed(let message): return "Failed: " + message
             }
         }
@@ -253,6 +256,9 @@ final class AutomationCenter: ObservableObject {
         case .script(let s): return scriptProblem(s)
         case .agent(let t): return agentProblem(t)
         case .scriptWithDiagnosis(let s, let t): return scriptProblem(s) ?? agentProblem(t)
+        case .staged(let t):
+            if let problem = t.problem() { return problem }
+            return t.scripts.lazy.compactMap(scriptProblem).first ?? agentProblem(t.analyst) ?? t.fetch.flatMap { agentProblem($0.agent) }
         }
     }
 

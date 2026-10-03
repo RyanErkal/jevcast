@@ -60,10 +60,11 @@ public struct ProgramIdentity: Codable, Equatable, Sendable {
 }
 
 extension Automation {
-    /// The script program for script kinds, nil for agents.
+    /// The script program for script kinds and the preflight of a report workflow, nil for agents.
     public var scriptTask: ScriptTask? {
         switch kind {
         case .script(let s), .scriptWithDiagnosis(let s, _): return s
+        case .staged(let t): return t.preflight
         case .agent: return nil
         }
     }
@@ -71,16 +72,59 @@ extension Automation {
     public var agentTask: AgentTask? {
         switch kind {
         case .agent(let t), .scriptWithDiagnosis(_, let t): return t
+        case .staged(let t): return t.analyst
         case .script: return nil
         }
     }
 
-    /// Records what the user approves by saving: the script's bytes and the agent CLI's size and time.
-    /// Call on every save. `settings` gives the CLI paths the runner will use.
+    /// Records what the user approves by saving: the script's bytes, the script files it runs, and the agent
+    /// CLI's size and time. Call on every save. `settings` gives the CLI paths the runner will use.
     public mutating func recordApprovedPrograms(settings: AutomationSettings) {
         approvedProgram = scriptTask.flatMap { ProgramIdentity.read(path: $0.executable, hash: true) }
         approvedAgentCLI = agentTask.flatMap {
             ProgramIdentity.read(path: $0.runner == .codex ? settings.codexPath : settings.claudePath, hash: false)
         }
+        let files = approvalFiles
+        approvedFiles = files.isEmpty ? nil : files.compactMap { ProgramIdentity.read(path: $0, hash: true) }
+    }
+
+    /// Every file the runner checks before it starts a stage: script files in the arguments, the other
+    /// stage programs, and the files the definition pins.
+    public var approvalFiles: [String] {
+        var paths: [String] = []
+        switch kind {
+        case .script(let s), .scriptWithDiagnosis(let s, _):
+            paths = ProgramIdentity.scriptFiles(s.arguments, in: s.workingDirectory)
+        case .staged(let t):
+            for script in t.scripts {
+                if script.executable != t.preflight.executable { paths.append(script.executable) }
+                paths += ProgramIdentity.scriptFiles(script.arguments, in: script.workingDirectory)
+            }
+            if let fetch = t.fetch, let program = fetch.command.first {
+                paths.append(program)
+                paths += ProgramIdentity.scriptFiles(Array(fetch.command.dropFirst()), in: fetch.commandDirectory)
+            }
+        case .agent: break
+        }
+        paths += pinnedFiles ?? []
+        var seen = Set<String>()
+        return paths.filter { seen.insert($0).inserted }
+    }
+}
+
+extension ProgramIdentity {
+    static let scriptExtensions: Set<String> = ["ts", "tsx", "js", "mjs", "cjs", "py", "sh", "zsh", "bash", "rb", "pl", "swift"]
+
+    /// Arguments that name an existing script file, as full paths. Relative names resolve in `folder`.
+    public static func scriptFiles(_ arguments: [String], in folder: String) -> [String] {
+        var found: [String] = []
+        for argument in arguments where !argument.hasPrefix("-") && !argument.isEmpty {
+            let path = argument.hasPrefix("/") ? argument : URL(fileURLWithPath: folder).appendingPathComponent(argument).standardized.path
+            guard scriptExtensions.contains(URL(fileURLWithPath: path).pathExtension.lowercased()) else { continue }
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), !isDir.boolValue else { continue }
+            found.append(path)
+        }
+        return found
     }
 }

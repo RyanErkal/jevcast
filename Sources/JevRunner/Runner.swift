@@ -18,6 +18,9 @@ final class Runner: @unchecked Sendable {
     private var activity: NSObjectProtocol?
     private var shuttingDown = false
     private var ticks = 0
+    /// Shared locks held by programs earlier runs left that could not be confirmed stopped. Recomputed each tick,
+    /// so such a program blocks every automation that shares its lock (the same workspace), not only its own.
+    private var leftoverLocks: Set<String> = []
     private let finished = DispatchGroup()
 
     init(store: AutomationStore) { self.store = store }
@@ -45,6 +48,7 @@ final class Runner: @unchecked Sendable {
         let settings = store.loadSettings()
         beat()
         expireWaitingRuns()
+        refreshLeftoverLocks()
         handleRequests(settings)
         scheduleDue(settings)
         startQueued(settings)
@@ -53,7 +57,8 @@ final class Runner: @unchecked Sendable {
 
     private func beat() {
         try? store.writeHeartbeat(RunnerHeartbeat(pid: pid, started: started, heartbeat: Date(),
-                                                  version: RunnerIdentity.version, signedBuild: RunnerIdentity.signedBuild))
+                                                  version: RunnerIdentity.version, signedBuild: RunnerIdentity.signedBuild,
+                                                  executable: RunnerIdentity.executablePath, build: RunnerIdentity.build))
     }
 
     /// A proposal older than seven days can no longer be approved. Its run becomes expired,
@@ -102,6 +107,7 @@ final class Runner: @unchecked Sendable {
     private func resume(_ automationID: String, _ runID: String, expect: RunState, followUp: RunFollowUp, _ settings: AutomationSettings) -> Bool {
         guard let automation = store.automation(id: automationID), var run = store.run(automationID: automationID, runID: runID),
               run.state == expect else { return true }
+        refreshLeftoverLocks()
         guard !active.values.contains(where: { $0.automationID == automationID }),
               active.count < max(1, settings.maxConcurrentRuns), !lockTaken(automation.policy.sharedLock) else { return false }
         if case .answer(let round, _) = followUp, !run.questions.contains(where: { $0.round == round && $0.answer == nil }) { return true }
@@ -144,6 +150,8 @@ final class Runner: @unchecked Sendable {
 
     private func startQueued(_ settings: AutomationSettings) {
         guard !shuttingDown else { return }
+        // A run that just ended may have left a program; its lock must hold before anything queued starts.
+        refreshLeftoverLocks()
         var waiting: [(String, String)] = []
         for (automationID, runID) in pending {
             guard let run = store.run(automationID: automationID, runID: runID), run.state == .queued else { continue }
@@ -164,7 +172,8 @@ final class Runner: @unchecked Sendable {
         let control = RunControl()
         active[run.id] = Active(automationID: automation.id, sharedLock: automation.policy.sharedLock, control: control)
         updateActivity(settings)
-        let context = RunEngine.Context(settings: settings, ownerPID: pid, ownerStart: started, secret: { SecretStore.value($0) })
+        var context = RunEngine.Context(settings: settings, ownerPID: pid, ownerStart: started, secret: { SecretStore.value($0) })
+        context.toolExecutable = RunnerIdentity.executablePath
         let engine = RunEngine(store: store, context: context) { _ in AutomationSignal.post() }
         finished.enter()
         DispatchQueue.global(qos: .utility).async {
@@ -181,9 +190,10 @@ final class Runner: @unchecked Sendable {
         updateActivity(settings)
         if shuttingDown, run.state == .cancelled {
             var r = run; r.state = .interrupted; r.error = "The runner stopped during this run."
-            saveRun(r)
+            saveRun(markRepeat(r))
             return
         }
+        let run = markRepeat(run)
         alertIfNeeded(run, automation)
         AutomationSignal.post()
         startQueued(store.loadSettings())
@@ -194,17 +204,45 @@ final class Runner: @unchecked Sendable {
         if AlertLauncher.shouldAlert(run, policy: automation.policy) { AlertLauncher.openAppIfNeeded() }
     }
 
+    /// Marks a failure that repeats the previous finished run's failure, so it does not alert again.
+    private func markRepeat(_ run: RunRecord) -> RunRecord {
+        guard [.failed, .interrupted].contains(run.state) else { return run }
+        let previous = store.runs(for: run.automationID, limit: 20).first { $0.id != run.id && $0.state.isFinished }
+        guard FailureDedupe.isRepeat(run, previous: previous), run.repeatFailure != true else { return run }
+        var r = run; r.repeatFailure = true
+        saveRun(r)
+        return r
+    }
+
     // MARK: Helpers
 
     private func isBusy(_ automationID: String) -> Bool {
         if active.values.contains(where: { $0.automationID == automationID }) { return true }
-        // A run that is queued or waits for the user blocks the next one.
-        return store.runs(for: automationID, limit: 20).contains { $0.state.isActive || $0.state.needsUser }
+        // A run that is queued or waits for the user blocks the next one, and so does a program an
+        // earlier run left that could not be confirmed stopped.
+        var busy = false
+        for run in store.runs(for: automationID, limit: 20) {
+            if run.state.isActive || run.state.needsUser { busy = true; continue }
+            if let resolved = OrphanRecovery.resolvedOrphan(run) { saveRun(resolved); continue }
+            if StagedRecovery.mayRun(store: store, run: run) { busy = true }
+        }
+        return busy
     }
 
     private func lockTaken(_ name: String?) -> Bool {
         guard let name, !name.isEmpty else { return false }
-        return active.values.contains { $0.sharedLock == name }
+        return active.values.contains { $0.sharedLock == name } || leftoverLocks.contains(name)
+    }
+
+    private func refreshLeftoverLocks() {
+        var locks = Set<String>()
+        for automation in store.loadAutomations().automations {
+            guard let lock = automation.policy.sharedLock, !lock.isEmpty, !locks.contains(lock) else { continue }
+            let runs = store.runs(for: automation.id, limit: 20).filter { active[$0.id] == nil && !$0.state.isActive }
+            if runs.contains(where: { StagedRecovery.mayRun(store: store, run: $0) }) { locks.insert(lock) }
+        }
+        if locks != leftoverLocks, !locks.isEmpty { log("Waiting for programs left by earlier runs; locks held: \(locks.sorted().joined(separator: ", "))") }
+        leftoverLocks = locks
     }
 
     private func saveRun(_ run: RunRecord) {
@@ -222,20 +260,49 @@ final class Runner: @unchecked Sendable {
     }
 
     /// At start, runs another runner left active can no longer be owned by anyone (this process holds the lock).
+    /// A queued run that never started is kept and started again when it is recent. An interrupted report
+    /// workflow gets one recovery run, which plans from the saved artifacts; missed hours are never queued.
     private func recoverInterruptedRuns() {
+        let now = Date()
         for automation in store.loadAutomations().automations {
             // A crash can leave the short-lived Claude sign-in copy behind; it holds a token.
             for run in store.runs(for: automation.id, limit: 200) {
                 let copy = store.runFolder(automationID: automation.id, runID: run.id).appendingPathComponent(ClaudeSignIn.fileName)
                 try? FileManager.default.removeItem(at: copy)
             }
+            var recover = false
             for run in store.runs(for: automation.id, limit: 200) where [.queued, .running, .retryWaiting].contains(run.state) {
                 guard !OrphanRecovery.ownerIsAlive(run, currentPID: pid) else { continue }
+                if run.state == .queued, run.started == nil {
+                    var r = run
+                    if now.timeIntervalSince(run.queued) <= Self.maxQueuedAge {
+                        r.ownerPID = pid; r.ownerStart = started
+                        saveRun(r)
+                        pending.append((automation.id, r.id))
+                    } else {
+                        r.state = .interrupted; r.finished = now; r.ownerPID = nil; r.ownerStart = nil
+                        r.error = "The runner stopped before this run started, and it is too old to start late."
+                        saveRun(r)
+                    }
+                    continue
+                }
                 // Stops the run's child group only when its leader's start time proves it is the same process.
-                saveRun(OrphanRecovery.interrupt(run))
+                var r = OrphanRecovery.interrupt(run)
+                if let left = StagedRecovery.stopFetchChildren(store: store, run: r, grace: 10), r.orphanPGID == nil {
+                    r.orphanPGID = left.pgid > 1 ? left.pgid : nil; r.orphanStart = left.start
+                    r.error = (r.error ?? "") + " Its fetch command could not be confirmed stopped; this automation waits until it ends."
+                }
+                saveRun(r)
+                if case .staged = automation.kind, automation.enabled, run.trigger != .recovery { recover = true }
+            }
+            if recover, !isBusy(automation.id) {
+                enqueue(automation, trigger: .recovery, occurrence: nil, runID: RunID.make())
             }
         }
     }
+
+    /// A queued run older than this is not started after a runner restart.
+    static let maxQueuedAge: TimeInterval = 24 * 3600
 
     // MARK: Shutdown
 
@@ -245,10 +312,10 @@ final class Runner: @unchecked Sendable {
             self.shuttingDown = true
             self.timer?.cancel()
             for a in self.active.values { a.control.cancel() }
+            // Queued runs that never started stay queued without an owner; the next runner start takes them.
             for (automationID, runID) in self.pending {
                 guard let run = self.store.run(automationID: automationID, runID: runID), run.state == .queued else { continue }
-                var r = run; r.state = .interrupted; r.error = "The runner stopped before this run started."
-                r.finished = Date(); r.ownerPID = nil; r.ownerStart = nil
+                var r = run; r.ownerPID = nil; r.ownerStart = nil
                 self.saveRun(r)
             }
             DispatchQueue.global().async {

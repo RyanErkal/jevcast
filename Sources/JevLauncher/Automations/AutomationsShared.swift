@@ -141,17 +141,20 @@ enum AutomationFormat {
         return usage.total.formatted() + " tokens"
     }
     static func trigger(_ trigger: RunTrigger) -> String {
-        switch trigger { case .schedule: return "Scheduled"; case .manual: return "Manual"; case .test: return "Test run"; case .resume: return "Resumed" }
+        switch trigger {
+        case .schedule: return "Scheduled"; case .manual: return "Manual"; case .test: return "Test run"; case .resume: return "Resumed"
+        case .recovery: return "Recovery check"
+        }
     }
     static func path(_ path: String?) -> String { path.map(Paths.display) ?? "—" }
 }
 
 extension Automation {
     var agent: AgentTask? {
-        switch kind { case .agent(let a): return a; case .scriptWithDiagnosis(_, let a): return a; case .script: return nil }
+        switch kind { case .agent(let a): return a; case .scriptWithDiagnosis(_, let a): return a; case .staged(let t): return t.analyst; case .script: return nil }
     }
     var script: ScriptTask? {
-        switch kind { case .script(let s): return s; case .scriptWithDiagnosis(let s, _): return s; case .agent: return nil }
+        switch kind { case .script(let s): return s; case .scriptWithDiagnosis(let s, _): return s; case .staged(let t): return t.preflight; case .agent: return nil }
     }
     var scheduleSummary: String { ScheduleText.summary(schedule) }
 }

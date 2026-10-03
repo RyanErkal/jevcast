@@ -136,7 +136,7 @@ extension AutomationCenter {
         guard alert.id.hasPrefix("run:") || alert.id.hasPrefix("running:") || alert.id.hasPrefix("result:") else { return true }
         guard alert.id.hasPrefix("run:"), let ids = Self.alertRunIDs(alert.id),
               let run = runs[ids.automationID]?.first(where: { $0.id == ids.runID }) else { return false }
-        return run.state.needsUser || run.state == .failed
+        return run.state.needsUser || [.failed, .interrupted, .succeeded].contains(run.state)
     }
 
     // MARK: Test alerts

@@ -150,27 +150,33 @@ private final class MeasuringHostingView<Content: View>: NSHostingView<Content> 
 /// The panel background: Liquid Glass on macOS 26, the popover material on
 /// macOS 14 and 15. A 0.5pt hairline sits above it; Increase Contrast draws
 /// the hairline at full strength. `content` holds the SwiftUI view.
+///
+/// Regular glass turns light over a bright page and dark over a dark one. The panel keeps the system's
+/// appearance instead: a smoke in that appearance covers the glass, and the content sits above both, outside
+/// the glass, so its text follows the system and never the page behind the panel.
 private final class PanelSurface: NSView {
     let content = NSView()
     private let border = PassThroughView()
+    private let smoke = PassThroughView()
     private var contrastObserver: NSObjectProtocol?
+    /// Dark enough that a white page behind the glass still reads as a dark panel, light enough that the
+    /// glass's edge and depth still show. Light Mode keeps the panel light over a dark desktop.
+    static let smokeColor = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(white: 0.11, alpha: 0.74) : NSColor(white: 0.97, alpha: 0.62)
+    }
 
     init(glass: Bool) {
         super.init(frame: .zero)
         let background: NSView
+        // Views above the background, back to front.
+        var layers: [NSView] = []
         if #available(macOS 26, *), glass {
             let glass = NSGlassEffectView()
             glass.style = .regular
             glass.cornerRadius = LauncherMetrics.panelRadius
-            glass.contentView = content
-            // Pinned so the content always fills the glass, whatever the glass does with its frame.
-            content.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                content.leadingAnchor.constraint(equalTo: glass.leadingAnchor),
-                content.trailingAnchor.constraint(equalTo: glass.trailingAnchor),
-                content.topAnchor.constraint(equalTo: glass.topAnchor),
-                content.bottomAnchor.constraint(equalTo: glass.bottomAnchor)
-            ])
+            smoke.wantsLayer = true
+            layers = [smoke, content]
             background = glass
         } else {
             let material = NSVisualEffectView()
@@ -194,6 +200,7 @@ private final class PanelSurface: NSView {
         border.layer?.cornerCurve = .continuous
         border.layer?.borderWidth = LauncherMetrics.panelBorderWidth
         fill(self, with: background)
+        for layer in layers { fill(self, with: layer) }
         fill(self, with: border)
         // The whole surface clips to the rounded shape, so nothing square is ever drawn. The window
         // shadow, and its light rim in Dark Mode, follow what is drawn, so they stay rounded too.
@@ -201,7 +208,7 @@ private final class PanelSurface: NSView {
         layer?.cornerRadius = LauncherMetrics.panelRadius
         layer?.cornerCurve = .continuous
         layer?.masksToBounds = true
-        updateBorder()
+        updateColors()
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
@@ -220,17 +227,19 @@ private final class PanelSurface: NSView {
         guard contrastObserver == nil else { return }
         contrastObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
-        ) { [weak self] _ in MainActor.assumeIsolated { self?.updateBorder() } }
+        ) { [weak self] _ in MainActor.assumeIsolated { self?.updateColors() } }
     }
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        updateBorder()
+        updateColors()
     }
-    func updateBorder() {
+    /// The hairline and the smoke, in this view's appearance: the system's, never the glass's.
+    func updateColors() {
         let alpha: CGFloat = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 1 : 0.5
-        // Resolve the dynamic colour in this view's appearance before taking its CGColor.
+        // Resolve the dynamic colours in this view's appearance before taking their CGColor.
         effectiveAppearance.performAsCurrentDrawingAppearance {
             border.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(alpha).cgColor
+            smoke.layer?.backgroundColor = Self.smokeColor.cgColor
         }
     }
 }

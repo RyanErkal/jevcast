@@ -51,7 +51,7 @@ enum MailSnapshots {
     }
 
     private static func fixture() -> MailModel {
-        let model = MailModel(quill: { _ in throw CancellationError() }, quillAllowed: { false }, statusProvider: { .noMail },
+        let model = MailModel(aiWriting: { _ in throw CancellationError() }, aiWritingAllowed: { false }, statusProvider: { .noMail },
                               setRead: { _, _, _, _ in throw CancellationError() }, sendDraft: { _, _ in throw CancellationError() }, draftStore: nil)
         model.senders = [.init(accountID: "demo", address: "alex@example.com", name: "Alex Morgan", signature: "Alex Morgan")]
         return model

@@ -223,7 +223,7 @@ final class AutomationCenterTests: XCTestCase {
         center.openWindow = { opened.append(($0, $1)) }
         XCTAssertTrue(center.handleAlertAction("run:tidy-1/20260926T080000Z-abcd", "review"))
         XCTAssertTrue(center.handleAlertAction("run:tidy-1/20260926T080000Z-abcd", "later"))
-        XCTAssertFalse(center.handleAlertAction("quill:x", "open"))
+        XCTAssertFalse(center.handleAlertAction("brief:x", "open"))
         XCTAssertEqual(opened.count, 1)
         XCTAssertEqual(opened.first?.0, "tidy-1")
         XCTAssertEqual(opened.first?.1, "20260926T080000Z-abcd")

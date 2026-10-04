@@ -133,7 +133,7 @@ final class MailLabelTests: XCTestCase {
     @MainActor func testRefreshFindsOlderNewLabelMembersWithoutLosingPages() async throws {
         try skipLiveMailModelOnCI()
         let root = try make(.init(gmail: 1_500, yahooInbox: 0, yahooArchive: 0))
-        let model = MailModel(quill: { _ in throw CancellationError() }, quillAllowed: { false }, statusProvider: { .ready(root: root) })
+        let model = MailModel(aiWriting: { _ in throw CancellationError() }, aiWritingAllowed: { false }, statusProvider: { .ready(root: root) })
         model.refreshStatus()
         try await wait { model.messages.count == 200 && !model.isLoading }
         model.loadNextPage()
@@ -170,7 +170,7 @@ final class MailLabelTests: XCTestCase {
             UPDATE messages SET summary = 1;
             UPDATE subjects SET subject = 'body-only-token' WHERE ROWID = 13;
             """)
-        let model = MailModel(quill: { _ in throw CancellationError() }, quillAllowed: { false }, statusProvider: { .ready(root: root) })
+        let model = MailModel(aiWriting: { _ in throw CancellationError() }, aiWritingAllowed: { false }, statusProvider: { .ready(root: root) })
         model.refreshStatus()
         try await wait { model.messages.count == 4 && !model.isLoading }
         model.search = "body-only-token"

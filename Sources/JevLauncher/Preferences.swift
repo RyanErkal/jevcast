@@ -10,20 +10,20 @@ final class Preferences: ObservableObject {
     @Published var jevEnabled: Bool { didSet { defaults.set(jevEnabled, forKey: "jevEnabled") } }
     /// Jev also names the kind of request, and chooses again within that kind when the two differ.
     @Published var jevLayered: Bool { didSet { defaults.set(jevLayered, forKey: "jevLayered") } }
-    /// Quill writes and reads text when a request needs it. Off until the user turns it on.
-    @Published var quillEnabled: Bool { didSet { defaults.set(quillEnabled, forKey: QuillStorageKeys.enabled) } }
-    @Published var quillEffort: ReasoningEffort { didSet { defaults.set(quillEffort.rawValue, forKey: QuillStorageKeys.effort) } }
+    /// AI writing writes and reads text when a request needs it. Off until the user turns it on.
+    @Published var aiWritingEnabled: Bool { didSet { defaults.set(aiWritingEnabled, forKey: AIWritingStorageKeys.enabled) } }
+    @Published var aiWritingEffort: ReasoningEffort { didSet { defaults.set(aiWritingEffort.rawValue, forKey: AIWritingStorageKeys.effort) } }
     /// Fast asks OpenRouter for the priority service tier. Off by default.
-    @Published var quillFast: Bool { didSet { defaults.set(quillFast, forKey: QuillStorageKeys.fast) } }
-    /// The OpenRouter model ID Quill sends.
-    @Published var quillModel: String { didSet { defaults.set(quillModel, forKey: QuillStorageKeys.model) } }
-    /// Each kind of context Quill may receive. What the user types is always allowed once Quill is on.
-    @Published var quillSendsSelection: Bool { didSet { defaults.set(quillSendsSelection, forKey: QuillStorageKeys.sendsSelection) } }
-    @Published var quillSendsMail: Bool { didSet { defaults.set(quillSendsMail, forKey: QuillStorageKeys.sendsMail) } }
-    @Published var quillSendsCalendar: Bool { didSet { defaults.set(quillSendsCalendar, forKey: QuillStorageKeys.sendsCalendar) } }
-    @Published var quillSendsUnreadMail: Bool { didSet { defaults.set(quillSendsUnreadMail, forKey: QuillStorageKeys.sendsUnreadMail) } }
-    /// Quill cleans dictation transcripts. Off until the user turns it on.
-    @Published var quillSendsDictation: Bool { didSet { defaults.set(quillSendsDictation, forKey: QuillStorageKeys.sendsDictation) } }
+    @Published var aiWritingFast: Bool { didSet { defaults.set(aiWritingFast, forKey: AIWritingStorageKeys.fast) } }
+    /// The OpenRouter model ID AI writing sends.
+    @Published var aiWritingModel: String { didSet { defaults.set(aiWritingModel, forKey: AIWritingStorageKeys.model) } }
+    /// Each kind of context AI writing may receive. What the user types is always allowed once AI writing is on.
+    @Published var aiWritingSendsSelection: Bool { didSet { defaults.set(aiWritingSendsSelection, forKey: AIWritingStorageKeys.sendsSelection) } }
+    @Published var aiWritingSendsMail: Bool { didSet { defaults.set(aiWritingSendsMail, forKey: AIWritingStorageKeys.sendsMail) } }
+    @Published var aiWritingSendsCalendar: Bool { didSet { defaults.set(aiWritingSendsCalendar, forKey: AIWritingStorageKeys.sendsCalendar) } }
+    @Published var aiWritingSendsUnreadMail: Bool { didSet { defaults.set(aiWritingSendsUnreadMail, forKey: AIWritingStorageKeys.sendsUnreadMail) } }
+    /// AI writing cleans dictation transcripts. Off until the user turns it on.
+    @Published var aiWritingSendsDictation: Bool { didSet { defaults.set(aiWritingSendsDictation, forKey: AIWritingStorageKeys.sendsDictation) } }
     /// Hold Right Command to dictate into the front app. Off until the user turns it on.
     @Published var dictationEnabled: Bool { didSet { defaults.set(dictationEnabled, forKey: "dictationEnabled") } }
     @Published var dictationRetention: DictationRetention { didSet { defaults.set(dictationRetention.rawValue, forKey: "dictationRetention") } }
@@ -113,17 +113,17 @@ final class Preferences: ObservableObject {
         welcomeShown = d.object(forKey: "welcomeShown") as? Bool ?? existingInstall
         jevEnabled = d.bool(forKey: "jevEnabled")
         jevLayered = d.object(forKey: "jevLayered") as? Bool ?? true
-        quillEnabled = d.bool(forKey: QuillStorageKeys.enabled)
-        quillEffort = d.string(forKey: QuillStorageKeys.effort).flatMap(ReasoningEffort.init(storedQuillValue:))
-            .flatMap { ReasoningEffort.quillChoices.contains($0) ? $0 : nil } ?? .low
-        quillFast = d.bool(forKey: QuillStorageKeys.fast)
-        quillModel = d.string(forKey: QuillStorageKeys.model).flatMap { id in QuillModel.catalog.contains { $0.id == id } ? id : nil }
-            ?? QuillModel.defaultID
-        quillSendsSelection = d.bool(forKey: QuillStorageKeys.sendsSelection)
-        quillSendsMail = d.bool(forKey: QuillStorageKeys.sendsMail)
-        quillSendsCalendar = d.bool(forKey: QuillStorageKeys.sendsCalendar)
-        quillSendsUnreadMail = d.bool(forKey: QuillStorageKeys.sendsUnreadMail)
-        quillSendsDictation = d.bool(forKey: QuillStorageKeys.sendsDictation)
+        aiWritingEnabled = d.bool(forKey: AIWritingStorageKeys.enabled)
+        aiWritingEffort = d.string(forKey: AIWritingStorageKeys.effort).flatMap(ReasoningEffort.init(storedAIWritingValue:))
+            .flatMap { ReasoningEffort.aiWritingChoices.contains($0) ? $0 : nil } ?? .low
+        aiWritingFast = d.bool(forKey: AIWritingStorageKeys.fast)
+        aiWritingModel = d.string(forKey: AIWritingStorageKeys.model).flatMap { id in AIWritingModel.catalog.contains { $0.id == id } ? id : nil }
+            ?? AIWritingModel.defaultID
+        aiWritingSendsSelection = d.bool(forKey: AIWritingStorageKeys.sendsSelection)
+        aiWritingSendsMail = d.bool(forKey: AIWritingStorageKeys.sendsMail)
+        aiWritingSendsCalendar = d.bool(forKey: AIWritingStorageKeys.sendsCalendar)
+        aiWritingSendsUnreadMail = d.bool(forKey: AIWritingStorageKeys.sendsUnreadMail)
+        aiWritingSendsDictation = d.bool(forKey: AIWritingStorageKeys.sendsDictation)
         dictationEnabled = d.bool(forKey: "dictationEnabled")
         dictationRetention = d.string(forKey: "dictationRetention").flatMap(DictationRetention.init(rawValue:)) ?? .days30
         edgeSnapping = d.bool(forKey: "edgeSnapping")

@@ -131,7 +131,7 @@ final class MailReadTests: XCTestCase {
     @MainActor private func makeModel(_ calls: Calls) throws -> MailModel {
         try skipLiveMailModelOnCI()
         let fixtureRoot = root
-        return MailModel(quill: { _ in throw CancellationError() }, quillAllowed: { false }, statusProvider: { .ready(root: fixtureRoot) },
+        return MailModel(aiWriting: { _ in throw CancellationError() }, aiWritingAllowed: { false }, statusProvider: { .ready(root: fixtureRoot) },
                          setRead: { read, message, _, _ in
                              calls.add(read, message.rowID)
                              if calls.fails { throw LauncherError("Mail did not answer.") }

@@ -100,7 +100,7 @@ extension MailModel {
     }
 
     private func refusal(_ draft: Draft) -> String? {
-        if quillBusy { return "Wait until Quill finishes writing." }
+        if aiWritingBusy { return "Wait until AI writing finishes." }
         if let problem = draft.sendProblem { return problem }
         if let persistenceProblem { return "Nothing was sent. " + persistenceProblem }
         if draft.backend != MailBackend.current.rawValue { return "This draft uses another mail source. Select its source in Settings › Mail before sending." }
@@ -247,23 +247,23 @@ extension MailModel {
         return true
     }
 
-    // MARK: Quill
+    // MARK: AI writing
 
     /// Writes the reply body from the instruction in the draft, such as "yes, but next week".
     /// The text goes only into the same draft, and only when its body did not change meanwhile.
-    func draftWithQuill() {
-        guard let current = draft, !quillBusy else { return }
-        quillBusy = true
-        let id = current.id, body = current.body, source = quillSource(current)
+    func draftWithAI() {
+        guard let current = draft, !aiWritingBusy else { return }
+        aiWritingBusy = true
+        let id = current.id, body = current.body, source = aiWritingSource(current)
         let instruction = current.instruction
         Task { @MainActor [weak self] in
-            defer { self?.quillBusy = false }
+            defer { self?.aiWritingBusy = false }
             do {
-                guard let reply = try await self?.quill(.reply(message: source, instruction: instruction)), let self else { return }
+                guard let reply = try await self?.aiWriting(.reply(message: source, instruction: instruction)), let self else { return }
                 // Sent or discarded meanwhile: the text has no place to go.
                 guard self.draft?.id == id else { return }
                 guard self.draft?.body == body else {
-                    self.composeNote = "Quill's text was not used because you changed the message."
+                    self.composeNote = "The AI draft was not used because you changed the message."
                     return
                 }
                 self.draft?.body = reply.text
@@ -272,8 +272,8 @@ extension MailModel {
         }
     }
 
-    /// The answered message as Quill reads it: the text kept with the draft, not the selection.
-    private func quillSource(_ draft: Draft) -> String {
+    /// The answered message as the writing model reads it: the text kept with the draft, not the selection.
+    private func aiWritingSource(_ draft: Draft) -> String {
         guard let original = draft.original, let message = draft.source?.message else { return "(No original message.)\nSubject: " + draft.subject }
         return "From: \(original.sender) <\(original.senderAddress)>\nSubject: \(original.subject)\nDate: \(original.date.formatted())\n\n"
             + String(message.readableText.prefix(30_000))

@@ -128,7 +128,7 @@ struct WelcomeAIPage: View {
                 Section {
                     Text("Answers questions and writes text. It never runs actions. You choose what it may read, such as selected text or mail.")
                         .font(.callout)
-                } header: { Text("Quill · " + (preferences.quillEnabled ? "On" : "Off")) }
+                } header: { Text("AI Writing · " + (preferences.aiWritingEnabled ? "On" : "Off")) }
                 Section {
                     Text("Both use your own key. Clipboard history and audio are never sent, and no file paths are added to what you type. Each request is logged without its text.")
                         .font(.caption).foregroundStyle(.secondary)

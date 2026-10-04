@@ -2,6 +2,23 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Changed
+
+- **Plain names for AI writing.** "Quill" is now named for what it does: Ask AI answers questions, AI writing works on selected text, mail, and dictation, and Scheduled Briefs write a brief at a set time. The settings are in Settings › AI › Writing. Your settings, key, briefs, and history carry over.
+- **The launcher keeps the system appearance.** In Dark Mode the panel stays dark over a white page. In Light Mode it stays light over a dark desktop. The glass edge still shows.
+
+### Fixed
+
+- **One copy at a time.** Snapshot and diagnostic runs add no second menu-bar item. The notch demo does not start while Jevcast runs.
+- **Tests stay off your desktop.** Tests no longer change the system clipboard or press ⌘V. Every launcher copy and paste goes through the clipboard history, which tests replace.
+- **Notch alerts.** A second question, or a success after an approval, for the same run now counts as shown. A click elsewhere no longer removes a card without Later, such as the Undo card after Approve all.
+- **Automations window.** Arrow keys move through the one-column list without opening each item. A click or Return opens it. The divider between the list and the detail can be dragged again.
+- **Automation runs.** A run that never started says so. Git divergence is read only from the script's error, never from a model's summary. Only the staged workflow can mark a report ready or a run for review. A planner item ID cannot start with "-". An unreadable fetch record blocks the run with a reason and the file to remove. The fetch worker must make exactly one call to its one tool. A weekly hourly schedule with no days is summarised correctly.
+- **Keep awake.** A failed sleep assertion is logged once, not every 30 seconds, and a failed renew is logged and retried.
+- **Window layouts.** Tile All and Cascade All turn off Chrome's enhanced accessibility once per app, not once per window.
+
 ## [1.18.1] - 2026-10-04
 
 ### Added

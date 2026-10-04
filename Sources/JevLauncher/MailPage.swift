@@ -22,7 +22,7 @@ final class MailPage: ObservableObject, LauncherPage {
     /// The message fills the panel and the list hides. Escape returns to two panes first.
     @Published var expanded = false
     /// An empty model for snapshot runs, which never read Mail.
-    private lazy var empty = MailModel(quill: { _ in throw CancellationError() }, quillAllowed: { false })
+    private lazy var empty = MailModel(aiWriting: { _ in throw CancellationError() }, aiWritingAllowed: { false })
 
     private var draftWatch: AnyCancellable?
 

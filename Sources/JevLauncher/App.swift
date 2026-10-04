@@ -17,8 +17,12 @@ struct JevLauncherApp {
             Diagnostics.mailActions(to: CommandLine.arguments[index + 1]); return
         }
         if CommandLine.arguments.contains("--hyper-led-test") { HyperKeyController.runLightTest(); return }
-        // The notch panel alone, before the instance check and before any launcher, menu, preference, or store.
-        if CommandLine.arguments.contains("--notch-demo") { NotchDemo.run(); return }
+        // The notch panel alone, before any launcher, menu, preference, or store. It never runs beside Jevcast,
+        // whose own notch panel would sit in the same place.
+        if CommandLine.arguments.contains("--notch-demo") {
+            guard !InstanceGuard.isHeld() else { print("Jevcast is running. Quit it before --notch-demo."); return }
+            NotchDemo.run(); return
+        }
         if CommandLine.arguments.contains("--diagnose-mail") { Diagnostics.mail(); return }
         if CommandLine.arguments.contains("--diagnose-native-mail") { Diagnostics.nativeMail(); return }
         if CommandLine.arguments.contains("--diagnose-mail-setup") { Diagnostics.mailSetup(); return }
@@ -76,14 +80,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     private var quitting = false
     private var mailModel: MailModel {
         if let madeMailModel { return madeMailModel }
-        let made = MailModel(quill: { [unowned self] in try await self.model.sendQuill($0) },
-                             quillAllowed: { [unowned self] in self.model.allowedQuillContext.contains(.mailMessage) })
+        let made = MailModel(aiWriting: { [unowned self] in try await self.model.sendAIWriting($0) },
+                             aiWritingAllowed: { [unowned self] in self.model.allowedAIWritingContext.contains(.mailMessage) })
         made.onSendFailure = { [weak self] text in self?.mailSendFailed(text) }
         madeMailModel = made
         return made
     }
     private var viewSizeWatch: AnyCancellable?
-    private var resultWindow: QuillResultWindow?
+    private var resultWindow: ScheduledBriefResultWindow?
     private var statusMenu: StatusMenu?
     private var keyMonitor: Any?
     private var wasVisible = false
@@ -114,7 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         panel.delegate = self
         model.clipboardPasteTarget = { [weak self] in self?.previousApp?.processIdentifier }
         model.onClose = { [weak self] restore in self?.hide(restoreFocus: restore) }
-        model.openQuillSettings = { [weak self] in self?.showSettings(tab: .ai, aiPart: .quill) }
+        model.openAIWritingSettings = { [weak self] in self?.showSettings(tab: .ai, aiPart: .writing) }
         // Keys moved out of Settings › Windows, which now has one part.
         UserDefaults.standard.removeObject(forKey: "settingsWindowsPart")
         model.openSettingsTab = { [weak self] name in
@@ -134,7 +138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         UNUserNotificationCenter.current().delegate = self
         configureAutomations()
         // Snapshot runs never run tasks.
-        if UISnapshots.directory == nil { model.quillTasks.start() }
+        if UISnapshots.directory == nil { model.scheduledBriefs.start() }
         // Timers still pending with macOS come back to the list after a relaunch.
         if UISnapshots.directory == nil { Task { await model.timers.restore() } }
         model.composeMail = { [weak self] address in self?.showMail(compose: address) }
@@ -143,9 +147,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             self.show(); self.model.message = text
         }
         AppMenus.install(commands: self)
-        statusMenu = StatusMenu(preferences: preferences, updates: updates, commands: self, tasks: model.quillTasks, automations: automations,
-                                isOpen: { [weak self] in self?.wasVisible ?? false }, toggle: { [weak self] in self?.toggle() },
-                                openSettings: { [weak self] tab in self?.showSettings(tab: tab) })
+        // Snapshot and diagnostic runs add no menu-bar item, so only the running copy ever shows one.
+        if !diagnostic {
+            statusMenu = StatusMenu(preferences: preferences, updates: updates, commands: self, tasks: model.scheduledBriefs, automations: automations,
+                                    isOpen: { [weak self] in self?.wasVisible ?? false }, toggle: { [weak self] in self?.toggle() },
+                                    openSettings: { [weak self] tab in self?.showSettings(tab: tab) })
+        }
         // Snapshot runs leave global shortcuts to the running copy of the app.
         if UISnapshots.directory == nil, !diagnostic {
             configureHotkeys()
@@ -169,10 +176,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             if let editor = self.panel.firstResponder as? NSTextView, editor.hasMarkedText() { return event }
             // A view such as Mail takes ↑↓, Return, ⌫, Escape, and ⌘O; other keys type in the filter.
             if self.model.page != nil { return self.model.handleViewKey(event) ? nil : event }
-            // With Quill's answer showing, Escape goes back to the rows and row keys do nothing.
-            if self.model.quillAnswer != nil {
+            // With the AI answer showing, Escape goes back to the rows and row keys do nothing.
+            if self.model.aiWritingAnswer != nil {
                 switch event.keyCode {
-                case 53: self.model.dismissQuill(); return nil
+                case 53: self.model.dismissAIWriting(); return nil
                 case 36, 76: self.model.handleSearchReturn(event); return nil
                 case 125, 126, 51: return event.keyCode == 51 ? event : nil
                 default: if event.modifierFlags.contains(.command) { return event.charactersIgnoringModifiers == "c" ? event : nil }
@@ -525,17 +532,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         NotchAlertController.shared.onAction = { [weak self] alert, action in
             let id = alert.id
             guard let self, !self.automations.handleAlertAction(id, action, approval: alert.approvalManifest) else { return }
-            guard id.hasPrefix("quill:"), action == "open" else { return }
-            let runID = String(id.dropFirst("quill:".count))
-            if let run = self.model.quillTasks.runs.first(where: { $0.id == runID }) { self.showRun(run) }
+            guard id.hasPrefix("brief:"), action == "open" else { return }
+            let runID = String(id.dropFirst("brief:".count))
+            if let run = self.model.scheduledBriefs.runs.first(where: { $0.id == runID }) { self.showRun(run) }
         }
-        // Quill task failures use the notch panel; successes stay silent in the history.
-        model.quillTasks.onFailure = { [weak self] run in
+        // Scheduled brief failures use the notch panel; successes stay silent in the history.
+        model.scheduledBriefs.onFailure = { [weak self] run in
             guard let self, self.preferences.automationAlerts, UISnapshots.directory == nil else { return }
             let hide = self.preferences.automationHideNames
             NotchAlertController.shared.failureSeconds = self.preferences.automationFailureSeconds
-            NotchAlertController.shared.show(NotchAlert(id: "quill:" + run.id, symbol: "sparkles",
-                                                        title: hide ? "A Quill task" : run.taskName,
+            NotchAlertController.shared.show(NotchAlert(id: "brief:" + run.id, symbol: "sparkles",
+                                                        title: hide ? "A scheduled brief" : run.taskName,
                                                         message: hide ? "It did not finish." : run.preview, tone: .failure,
                                                         actions: [.init("Open", id: "open", primary: true), .init("Later", id: "later")]))
         }
@@ -545,13 +552,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     func showAutomations(automationID: String? = nil, runID: String? = nil) {
         hide(restoreFocus: false)
         if automationsWindow == nil {
-            let window = AutomationsWindow(center: automations, quill: model.quillTasks)
+            let window = AutomationsWindow(center: automations, briefCenter: model.scheduledBriefs)
             window.model.configureNewDraft = { [weak self] draft in
                 guard let self else { return }
                 draft.applyDefaults(self.preferences)
             }
-            // Quill tasks are made by typing a schedule in the launcher, so open it with an example to edit.
-            window.onNewQuillTask = { [weak self] in
+            // Scheduled briefs are made by typing a schedule in the launcher, so open it with an example to edit.
+            window.onNewScheduledBrief = { [weak self] in
                 self?.show()
                 self?.model.query = "every morning at 8 brief me on my meetings"
             }
@@ -563,9 +570,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     @objc func showAutomationsWindow() { showAutomations() }
 
     /// A scheduled task's result.
-    func showRun(_ run: QuillTaskRun) {
+    func showRun(_ run: ScheduledBriefRun) {
         hide(restoreFocus: false)
-        resultWindow = QuillResultWindow(run: run)
+        resultWindow = ScheduledBriefResultWindow(run: run)
         resultWindow?.show()
     }
     /// Shows timer and command notifications while Jevcast is in front too.
@@ -613,9 +620,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         showView(.mail)
         if let rowID { (model.page as? MailPage)?.show(rowID) }
     }
-    private func showRunView(_ run: QuillTaskRun) {
+    private func showRunView(_ run: ScheduledBriefRun) {
         showView(.tasks)
-        (model.page as? SourcePage)?.showDetail(QuillStorageKeys.runRowPrefix + run.id)
+        (model.page as? SourcePage)?.showDetail(AIWritingStorageKeys.runRowPrefix + run.id)
     }
     /// What views open outside the panel. ⌘O on Mail keeps the list's selection in the mail window.
     private var pageLinks: LauncherPages.Links {

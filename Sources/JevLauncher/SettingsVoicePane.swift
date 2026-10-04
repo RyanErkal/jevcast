@@ -10,7 +10,7 @@ struct VoicePane: View {
     @ObservedObject var preferences: Preferences
     let speech: SpeechService
     let dictation: DictationController
-    let openQuill: () -> Void
+    let openAIWritingSettings: () -> Void
     let resized: () -> Void
     @AppStorage("settingsVoicePart") private var part: Part = .voice
 
@@ -21,7 +21,7 @@ struct VoicePane: View {
             if parts.count > 1 { Section { PaneSections(selection: $part, parts: parts) } }
             switch current {
             case .voice: VoiceSettings(preferences: preferences, speech: speech)
-            case .dictation: DictationSettings(preferences: preferences, dictation: dictation, openQuill: openQuill)
+            case .dictation: DictationSettings(preferences: preferences, dictation: dictation, openAIWritingSettings: openAIWritingSettings)
             }
         }
         .formStyle(.grouped)

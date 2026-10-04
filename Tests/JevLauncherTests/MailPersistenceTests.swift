@@ -41,7 +41,7 @@ final class MailPersistenceTests: XCTestCase {
         XCTAssertEqual(snapshot.active?.uncertainSend, true)
         XCTAssertFalse(snapshot.active?.canSend ?? true)
         var attempts = 0
-        let model = MailModel(quill: { _ in throw CancellationError() }, quillAllowed: { false },
+        let model = MailModel(aiWriting: { _ in throw CancellationError() }, aiWritingAllowed: { false },
                               sendDraft: { _, _ in attempts += 1 }, undoDelay: 0, draftStore: store)
         XCTAssertFalse(model.sending)
         XCTAssertNil(model.pendingSend)
@@ -54,7 +54,7 @@ final class MailPersistenceTests: XCTestCase {
         let file = directory.appendingPathComponent("composition.json"), bytes = Data("unreadable fixture".utf8)
         try bytes.write(to: file)
         var attempts = 0
-        let model = MailModel(quill: { _ in throw CancellationError() }, quillAllowed: { false },
+        let model = MailModel(aiWriting: { _ in throw CancellationError() }, aiWritingAllowed: { false },
                               sendDraft: { _, _ in attempts += 1 }, undoDelay: 0, draftStore: MailDraftStore(directory: directory))
         model.senders = [.init(accountID: "fixture", address: "me@example.com", name: "Me", signature: "")]
         model.compose(to: "sam@example.com"); model.draft?.body = "Do not send"
@@ -90,7 +90,7 @@ final class MailPersistenceTests: XCTestCase {
     }
 
     func testSignatureKeepsExistingRichText() throws {
-        let model = MailModel(quill: { _ in throw CancellationError() }, quillAllowed: { false }, draftStore: nil)
+        let model = MailModel(aiWriting: { _ in throw CancellationError() }, aiWritingAllowed: { false }, draftStore: nil)
         model.senders = [.init(accountID: "fixture", address: "me@example.com", name: "Me", signature: "My signature")]
         var draft = MailModel.Draft(fromAccountID: "fixture", fromAddress: "me@example.com", body: "Bold answer")
         let original = NSAttributedString(string: draft.body, attributes: [.font: NSFont.boldSystemFont(ofSize: 14)])

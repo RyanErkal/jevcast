@@ -8,11 +8,11 @@ final class ScheduledSource: ThingSource {
     let section = "Scheduled Tasks"
     private let timers: TimerCenter
     private let catalogue: AppCatalogue
-    private let tasks: QuillTaskCenter?
-    private let openRun: (QuillTaskRun) -> Void
+    private let tasks: ScheduledBriefCenter?
+    private let openRun: (ScheduledBriefRun) -> Void
     private let automations: AutomationCenter?
     private let showCodex: () -> Bool
-    init(timers: TimerCenter, catalogue: AppCatalogue, tasks: QuillTaskCenter? = nil, openRun: @escaping (QuillTaskRun) -> Void = { _ in },
+    init(timers: TimerCenter, catalogue: AppCatalogue, tasks: ScheduledBriefCenter? = nil, openRun: @escaping (ScheduledBriefRun) -> Void = { _ in },
          automations: AutomationCenter? = nil, showCodex: @escaping () -> Bool = { false }) {
         self.timers = timers; self.catalogue = catalogue; self.tasks = tasks; self.openRun = openRun
         self.automations = automations; self.showCodex = showCodex
@@ -41,8 +41,8 @@ final class ScheduledSource: ThingSource {
         if let tasks {
             for task in tasks.tasks {
                 if failingOnly, tasks.lastRun(of: task.id)?.succeeded != false { continue }
-                if !text.isEmpty, SearchRanking.score(query: text, title: task.name, aliases: ["quill", task.prompt]) == nil { continue }
-                rows.append(quillRow(task, center: tasks, now: now))
+                if !text.isEmpty, SearchRanking.score(query: text, title: task.name, aliases: ["brief", task.prompt]) == nil { continue }
+                rows.append(scheduledBriefRow(task, center: tasks, now: now))
             }
         }
         if let automations { rows += automationRows(automations, text: text, failingOnly: failingOnly) }
@@ -203,29 +203,29 @@ final class ScheduledSource: ThingSource {
         return verbs
     }
 
-    private func quillRow(_ task: QuillTask, center: QuillTaskCenter, now: Date) -> LauncherResult {
+    private func scheduledBriefRow(_ task: ScheduledBrief, center: ScheduledBriefCenter, now: Date) -> LauncherResult {
         let last = center.lastRun(of: task.id)
         var parts = [task.schedule.summary]
         if task.enabled, let next = task.nextRun(after: now) { parts.append("next " + next.formatted(.relative(presentation: .named))) }
         if !task.enabled { parts.append("paused") }
         if let last { parts.append(last.succeeded ? "last run " + last.date.formatted(.relative(presentation: .named)) : "last run failed") }
         let refused = center.refused(task)
-        if !refused.isEmpty { parts.append("needs " + refused.map(\.title).joined(separator: " and ").lowercased() + " in Settings › AI › Quill") }
-        parts.append("Quill task")
+        if !refused.isEmpty { parts.append("needs " + refused.map(\.title).joined(separator: " and ").lowercased() + " in Settings › AI › Writing") }
+        parts.append("scheduled brief")
         var verbs: [Verb] = []
         let openRun = self.openRun
         if let last { verbs.append(Verb(title: "Show Last Result", after: .keepOpen) { openRun(last); return nil }) }
-        verbs.append(Verb(title: "Run Now", after: .stay) { center.run(task); return "Running \(task.name). The result shows in Quill Task Results." })
+        verbs.append(Verb(title: "Run Now", after: .stay) { center.run(task); return "Running \(task.name). The result shows in Brief Results." })
         verbs.append(Verb(title: task.enabled ? "Pause" : "Resume", after: .stay) {
             center.setEnabled(task.id, !task.enabled); return task.enabled ? "Paused \(task.name)." : "Resumed \(task.name)."
         })
         verbs.append(Verb(title: "Open Results Folder") {
-            try? FileManager.default.createDirectory(at: QuillTaskCenter.folder, withIntermediateDirectories: true)
-            Frontmost.open(QuillTaskCenter.folder); return nil
+            try? FileManager.default.createDirectory(at: ScheduledBriefCenter.folder, withIntermediateDirectories: true)
+            Frontmost.open(ScheduledBriefCenter.folder); return nil
         })
         verbs.append(Verb(title: "Delete Task", after: .stay) { center.remove(task.id); return "Deleted \(task.name)." })
         let symbol = !refused.isEmpty || last?.succeeded == false ? "exclamationmark.triangle" : task.enabled ? "sparkles" : "pause.circle"
-        return LauncherResult(id: QuillStorageKeys.taskRowPrefix + task.id, title: task.name, detail: parts.joined(separator: " · "), symbol: symbol,
+        return LauncherResult(id: AIWritingStorageKeys.taskRowPrefix + task.id, title: task.name, detail: parts.joined(separator: " · "), symbol: symbol,
                               action: .thing(Thing(verbs: verbs)), score: 3050)
     }
 

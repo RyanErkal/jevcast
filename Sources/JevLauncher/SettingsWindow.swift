@@ -105,7 +105,7 @@ final class SettingsWindow: NSWindowController, NSToolbarDelegate {
         case .windows: WindowSettings(preferences: preferences, model: model, changed: changed)
         case .library: CommandSettings(preferences: preferences, catalogue: catalogue, resized: resized)
         case .voice: VoicePane(preferences: preferences, speech: model.speech, dictation: dictation,
-                               openQuill: { [weak self] in self?.select(.ai) }, resized: resized)
+                               openAIWritingSettings: { [weak self] in self?.select(.ai) }, resized: resized)
         case .ai: AISettings(preferences: preferences, model: model, resized: resized)
         case .automations: AutomationSettingsPane(preferences: preferences, center: automations, resized: resized)
         case .mail: MailSettings(preferences: preferences, openMail: openMail)

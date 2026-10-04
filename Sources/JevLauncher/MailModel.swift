@@ -120,10 +120,10 @@ final class MailModel: ObservableObject {
     let undoDelay: TimeInterval
     /// Called when a send fails, with a note for the user. The app shows it when no mail view is on screen.
     var onSendFailure: ((String) -> Void)?
-    @Published var quillBusy = false
+    @Published var aiWritingBusy = false
 
-    let quill: (QuillRequest) async throws -> QuillReply
-    private let quillAllowed: () -> Bool
+    let aiWriting: (AIWritingRequest) async throws -> AIWritingReply
+    private let aiWritingAllowed: () -> Bool
     private var root: String? { if case .ready(let root) = status { return root }; return nil }
     private var fingerprint = ""
     private var poll: Task<Void, Never>?
@@ -162,7 +162,7 @@ final class MailModel: ObservableObject {
     /// Mail actions run one after another, so quick deletes never race each other.
     private var actionChain: Task<Void, Never>?
 
-    init(quill: @escaping (QuillRequest) async throws -> QuillReply, quillAllowed: @escaping () -> Bool, statusProvider: @escaping @Sendable () -> MailStore.Status = { MailStore.status() },
+    init(aiWriting: @escaping (AIWritingRequest) async throws -> AIWritingReply, aiWritingAllowed: @escaping () -> Bool, statusProvider: @escaping @Sendable () -> MailStore.Status = { MailStore.status() },
          setRead: @escaping (Bool, MailSummary, MailMailbox, MailMailbox?) async throws -> Void = { try await MailActions.setRead($0, $1, in: $2, fallback: $3) },
          sendDraft: @escaping (Draft, MailMailbox?) async throws -> Void = { try await MailModel.deliver($0, $1) }, undoDelay: TimeInterval = 5,
          draftStore: MailDraftStore? = MailDraftStore.standard) {
@@ -171,7 +171,7 @@ final class MailModel: ObservableObject {
         self.setReadAction = setRead
         self.sendDraft = sendDraft
         self.undoDelay = undoDelay
-        self.quill = quill; self.quillAllowed = quillAllowed
+        self.aiWriting = aiWriting; self.aiWritingAllowed = aiWritingAllowed
         if let draftStore {
             do {
                 let stored = try draftStore.load()
@@ -222,7 +222,7 @@ final class MailModel: ObservableObject {
         senders.first { $0.accountID == account }?.address ?? account
     }
     var unreadInInbox: Int { inboxes.map(\.unread).reduce(0, +) }
-    var canUseQuill: Bool { quillAllowed() }
+    var canUseAIWriting: Bool { aiWritingAllowed() }
 
     // MARK: Loading
 
@@ -908,7 +908,7 @@ final class MailModel: ObservableObject {
         if next >= messages.count - 30 { loadNextPage() }
     }
 
-    // MARK: Quill
+    // MARK: AI writing
 
     private var messageText: String? {
         guard let detail, let message = selected else { return nil }
@@ -916,13 +916,13 @@ final class MailModel: ObservableObject {
     }
 
     func summarise() {
-        guard let text = messageText, !quillBusy else { return }
-        quillBusy = true
+        guard let text = messageText, !aiWritingBusy else { return }
+        aiWritingBusy = true
         let id = selectedID
         Task { @MainActor [weak self] in
-            defer { self?.quillBusy = false }
+            defer { self?.aiWritingBusy = false }
             do {
-                let reply = try await self?.quill(.summarise(message: text))
+                let reply = try await self?.aiWriting(.summarise(message: text))
                 guard self?.selectedID == id else { return }
                 self?.summary = reply?.text
             } catch { self?.banner = error.localizedDescription }

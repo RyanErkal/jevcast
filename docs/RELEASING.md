@@ -62,7 +62,7 @@ Unit tests cannot prove these. Do them on a Mac with a real keyboard, and record
 - [ ] Start `5m test`, then quit and open Jevcast again. `timers` still lists the timer, and Cancel stops it.
 - [ ] With voice on and sound playing through the built-in speakers, the speakers mute while listening and come back after. Headphones are not muted.
 
-**Sources, Quill, and Mail:**
+**Sources, AI writing, and Mail:**
 
 - [ ] `scheduled tasks` lists your agents with plain-words schedules. Turn Off and Turn On change a test agent, and the row updates.
 - [ ] `calendar` and `reminders` ask for access once, then list items. Join Call opens a meeting link. Complete removes a reminder.
@@ -70,11 +70,11 @@ Unit tests cannot prove these. Do them on a Mac with a real keyboard, and record
 - [ ] `contact <name>` lists a person. Email opens the Jevcast compose window.
 - [ ] `tabs` in Safari and Chrome asks for Automation once, lists tabs, and Switch to Tab and Close Tab act on the right tab.
 - [ ] With a page open, `copy link` copies it. Opening the launcher over a browser without typing shows no Automation prompt.
-- [ ] With Quill on and an OpenRouter key: `ask what is 2+2` answers. With Selected text on, Fix Spelling replaces a selection in TextEdit. With it off, no selected-text request is sent, and Settings › AI › Quill logs each request.
+- [ ] With AI writing on and an OpenRouter key: `ask what is 2+2` answers. With Selected text on, Fix Spelling replaces a selection in TextEdit. With it off, no selected-text request is sent, and Settings › AI › Writing logs each request.
 - [ ] `mail` without Full Disk Access shows the setup view. With it, the Inbox lists messages. Archive, Delete, Flag, Reply, and a new message act on the right message in Apple Mail. In the mail window, F forwards, S flags, C and ⌘N write a new message, and Move To in the ⋯ menu moves the message.
 - [ ] An HTML newsletter shows its web images. With Load Images from the Web off in the ⋯ menu, it shows none. A link opens in the browser.
 - [ ] One click on a row runs it. Moving the pointer highlights rows; a still pointer does not change the selection while ↑↓ move it. The empty launcher shows only the bar, and no square edge shows at its corners in Dark Mode.
-- [ ] `every day at <two minutes from now> give me a quote` schedules a task, and the launcher shows it in the scheduled tasks list with no notification. It runs on time, and `task results` lists it. With Mail off in Settings › AI › Quill, a mail task reports that it needs the switch and sends nothing.
+- [ ] `every day at <two minutes from now> give me a quote` schedules a brief, and the launcher shows it in the scheduled tasks list with no notification. It runs on time, and `task results` lists it. With Mail off in Settings › AI › Writing, a mail brief reports that it needs the switch and sends nothing.
 - [ ] With layered matching on, `put the chrom one on the left` moves Chrome, and Settings › AI › Usage counts the extra calls.
 
 **Clipboard, dictation, and the Hyper key:**

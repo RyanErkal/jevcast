@@ -21,8 +21,66 @@ final class AutomationLayoutTests: XCTestCase {
         XCTAssertEqual(AutomationsWindow.minimumSize, L.windowMinimum)
     }
 
+    func testTheDraggedListKeepsItsLimitsAndTheDetailItsMinimum() {
+        typealias L = AutomationsLayout
+        XCTAssertEqual(L.draggedList(100, width: 1200), L.listMinimum)
+        XCTAssertEqual(L.draggedList(333.4, width: 1200), 333)
+        XCTAssertEqual(L.draggedList(900, width: 1200), L.listDragMaximum)
+        XCTAssertEqual(L.draggedList(900, width: 760), 760 - L.detailMinimum - 1, "the detail keeps its minimum")
+        XCTAssertEqual(L.draggedList(900, width: L.windowMinimum.width), L.windowMinimum.width - L.detailMinimum - 1)
+        for width in stride(from: L.listMinimum + L.detailMinimum + 1, through: 1600, by: 11) {
+            for drag in stride(from: CGFloat(0), through: 900, by: 37) {
+                let list = L.draggedList(drag, width: width)
+                XCTAssertGreaterThanOrEqual(list, L.listMinimum)
+                XCTAssertLessThanOrEqual(list, L.listDragMaximum)
+                XCTAssertGreaterThanOrEqual(width - list - 1, L.detailMinimum, "detail at \(width), drag \(drag)")
+            }
+        }
+    }
+
+    func testOneColumnArrowKeysOnlyMoveTheSelection() {
+        var column = OneColumnState(selection: nil)
+        XCTAssertFalse(column.showsDetail(selection: nil))
+        // Arrow keys choose items one after another: the list stays.
+        for id in ["a", "b", "c"] {
+            column.selectionChanged(to: id)
+            XCTAssertFalse(column.showsDetail(selection: id), "browsing \(id) keeps the list")
+        }
+        XCTAssertTrue(column.openChosen("c"), "Return opens the chosen item")
+        XCTAssertTrue(column.showsDetail(selection: "c"))
+        column.back()
+        XCTAssertFalse(column.showsDetail(selection: "c"), "Back shows the list, the item still chosen")
+        column.selectionChanged(to: "b")
+        XCTAssertFalse(column.showsDetail(selection: "b"))
+        // A click on the row that is already chosen opens it again.
+        column.selectionChanged(to: "c")
+        column.back()
+        column.open()
+        XCTAssertTrue(column.showsDetail(selection: "c"))
+        column.selectionChanged(to: nil)
+        XCTAssertFalse(column.showsDetail(selection: nil))
+        column.selectionChanged(to: "a")
+        XCTAssertFalse(column.showsDetail(selection: "a"), "after nothing was chosen, choosing keeps the list")
+        var none = OneColumnState(selection: nil)
+        XCTAssertFalse(none.openChosen(nil), "Return with nothing chosen does nothing")
+        XCTAssertTrue(OneColumnState(selection: "run").showsDetail(selection: "run"), "opening the window on a run shows it")
+    }
+
+    func testTheOneColumnOpenerActsOnlyWhileAListRegistered() {
+        let opener = OneColumnOpener()
+        XCTAssertFalse(opener.open(), "no one-column list: Return keeps its other use")
+        var column = OneColumnState(selection: nil)
+        let list = UUID(), other = UUID()
+        opener.register(list) { column.openChosen("a") }
+        opener.unregister(other)
+        XCTAssertTrue(opener.open(), "another view leaving does not remove the list")
+        XCTAssertTrue(column.showsDetail(selection: "a"))
+        opener.unregister(list)
+        XCTAssertFalse(opener.open())
+    }
+
     func testSidebarHidesOnlyWhenTheWidthCrossesTheLimit() {
-        let model = AutomationsViewModel(center: nil, quill: nil)
+        let model = AutomationsViewModel(center: nil, briefCenter: nil)
         model.resetColumns(windowWidth: 1240)
         XCTAssertEqual(model.columnVisibility, .all)
         model.windowWidthChanged(AutomationsLayout.sidebarFitsWidth - 1)
@@ -42,7 +100,7 @@ final class AutomationLayoutTests: XCTestCase {
 
     func testListsShowNewestFirstAndFoldRepeatedFailures() throws {
         let demo = AutomationsDemoData.make()
-        let model = AutomationsViewModel(center: nil, quill: nil, demo: demo)
+        let model = AutomationsViewModel(center: nil, briefCenter: nil, demo: demo)
         let backup = AutomationsDemoData.backupID
         let runs = model.runs(for: backup)
         XCTAssertEqual(runs.map(\.queued), runs.map(\.queued).sorted(by: >))
@@ -52,6 +110,8 @@ final class AutomationLayoutTests: XCTestCase {
         XCTAssertEqual(streaks.first?.runs.map(\.id), Array(runs.prefix(6)).map(\.id))
         XCTAssertEqual(model.explanation(runs[0])?.kind, .needsReview)
         XCTAssertEqual(model.runs(in: .failed).count, 8, "every failure is still listed for the week")
+        XCTAssertEqual(model.runs(in: .failed, now: Date().addingTimeInterval(3600)).count, 8,
+                       "no failure sits at the edge of the week, so the count does not depend on the clock")
         XCTAssertEqual(model.count(.failed), 3, "the badge counts the folded entries")
 
         let automation = try XCTUnwrap(model.automation(backup))

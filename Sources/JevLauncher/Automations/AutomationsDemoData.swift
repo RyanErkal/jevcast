@@ -9,8 +9,8 @@ struct AutomationsDemoData {
     var runnerStatus: AutomationCenter.RunnerStatus = .running(since: Date().addingTimeInterval(-7200))
     var codex: [CodexAutomation] = []
     var codexIssues: [String: [String]] = [:]
-    var quillTasks: [QuillTask] = []
-    var quillRuns: [QuillTaskRun] = []
+    var scheduledBriefs: [ScheduledBrief] = []
+    var scheduledBriefRuns: [ScheduledBriefRun] = []
     var outputs: [String: String] = [:]
     var proposals: [String: ProposalManifest] = [:]
 
@@ -67,7 +67,8 @@ struct AutomationsDemoData {
         d.runs[sales.id] = [run(sales, failedRunID, .failed, ago: 3 * 3600, length: 41, summary: "The sales API returned an error",
                                 error: "Sales API: request limit reached (429). Exit status 1."),
                             run(sales, "20260926T080000Z-s2", .succeeded, ago: 7 * 3600, length: 38, summary: "Refreshed 3 sources")]
-        let stopped = run(report, "20260919T080000Z-r0", .interrupted, ago: 7 * 86400, length: 300, summary: "",
+        // Six days ago: well inside the Failed list's seven days, so the list does not depend on how long a check takes.
+        let stopped = run(report, "20260920T080000Z-r0", .interrupted, ago: 6 * 86400, length: 300, summary: "",
                           error: "The runner stopped during this run. It was not repeated.")
         d.runs[report.id] = [run(report, "20260926T140000Z-r1", .running, ago: 240, length: 0, summary: "", trigger: .manual), stopped]
         // An hourly backup that a diverged branch blocks: the same failure each hour, after earlier successes.
@@ -116,9 +117,9 @@ struct AutomationsDemoData {
         d.codexIssues["weekly-summary"] = ["Still ACTIVE in Codex. Pause it there first.", "No working folder in the source. Choose one before turning it on."]
 
 
-        d.quillTasks = [QuillTask(id: "brief", name: "Morning brief", prompt: "Brief me on today's meetings and unread mail.",
+        d.scheduledBriefs = [ScheduledBrief(id: "brief", name: "Morning brief", prompt: "Brief me on today's meetings and unread mail.",
                                   schedule: .daily(hour: 8, minute: 0, weekdays: [2, 3, 4, 5, 6]), contexts: [.calendar, .unreadMail], created: week)]
-        d.quillRuns = [QuillTaskRun(taskID: "brief", taskName: "Morning brief", date: now.addingTimeInterval(-5 * 3600), succeeded: true,
+        d.scheduledBriefRuns = [ScheduledBriefRun(taskID: "brief", taskName: "Morning brief", date: now.addingTimeInterval(-5 * 3600), succeeded: true,
                                     preview: "Three meetings today · Two unread messages", file: nil)]
         return d
     }

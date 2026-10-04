@@ -1,8 +1,27 @@
 import SwiftUI
 
-/// Settings › AI: Jev, Quill, and what they cost, one part at a time.
+/// Settings › AI: Jev, AI writing, and what they cost, one part at a time.
 struct AISettings: View {
-    enum Part: String, CaseIterable { case jev = "Jev", quill = "Quill", usage = "Usage" }
+    /// The raw value is the part's title and is stored under "settingsAIPart".
+    enum Part: CaseIterable, RawRepresentable {
+        case jev, writing, usage
+        init?(rawValue: String) {
+            switch rawValue {
+            case "Jev": self = .jev
+            // "Quill" is the stored name earlier versions wrote for Writing.
+            case "Writing", "Quill": self = .writing
+            case "Usage": self = .usage
+            default: return nil
+            }
+        }
+        var rawValue: String {
+            switch self {
+            case .jev: return "Jev"
+            case .writing: return "Writing"
+            case .usage: return "Usage"
+            }
+        }
+    }
     @ObservedObject var preferences: Preferences
     let model: LauncherModel
     let resized: () -> Void
@@ -12,8 +31,8 @@ struct AISettings: View {
         Form {
             Section { PaneSections(selection: $part) }
             switch part {
-            case .jev: JevSettings(preferences: preferences, keys: model.keys, quillKeys: model.quillKeys)
-            case .quill: QuillSettings(preferences: preferences, log: model.quillLog, jevKeys: model.keys, quillKeys: model.quillKeys, tasks: model.quillTasks)
+            case .jev: JevSettings(preferences: preferences, keys: model.keys, aiWritingKeys: model.aiWritingKeys)
+            case .writing: AIWritingSettings(preferences: preferences, log: model.aiWritingLog, jevKeys: model.keys, aiWritingKeys: model.aiWritingKeys, tasks: model.scheduledBriefs)
             case .usage: UsageSettings(preferences: preferences, usage: JevUsageLog.shared)
             }
         }
@@ -70,11 +89,11 @@ struct MailSettings: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
-            Section("Quill") {
-                LabeledContent("Quill reads mail") {
-                    Text(preferences.quillEnabled && preferences.quillSendsMail ? "On" : "Off").foregroundStyle(.secondary)
+            Section("AI Writing") {
+                LabeledContent("AI writing reads mail") {
+                    Text(preferences.aiWritingEnabled && preferences.aiWritingSendsMail ? "On" : "Off").foregroundStyle(.secondary)
                 }
-                Text("Change this in Settings › AI › Quill.").font(.caption).foregroundStyle(.secondary)
+                Text("Change this in Settings › AI › Writing.").font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

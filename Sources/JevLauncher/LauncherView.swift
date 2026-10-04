@@ -32,9 +32,9 @@ struct LauncherView: View {
     /// An empty query shows the search bar alone.
     private var searchBody: some View {
         VStack(spacing: 0) {
-            if let answer = model.quillAnswer {
+            if let answer = model.aiWritingAnswer {
                 Divider()
-                QuillAnswerView(answer: answer)
+                AIWritingAnswerView(answer: answer)
             } else if !model.rows.isEmpty {
                 Divider()
                 results

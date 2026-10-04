@@ -32,6 +32,16 @@ enum InstanceGuard {
         return decision
     }
 
+    /// True while a normal copy holds the lock. Checks without taking it, so a later launch is not blocked.
+    static func isHeld(_ url: URL? = nil) -> Bool {
+        let fd = open((url ?? lockURL).path, O_RDONLY | O_CLOEXEC)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { return errno == EWOULDBLOCK }
+        flock(fd, LOCK_UN)
+        return false
+    }
+
     private static func acquireLock() -> Bool? {
         let url = lockURL
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

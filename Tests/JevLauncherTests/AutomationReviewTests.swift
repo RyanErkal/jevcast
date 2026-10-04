@@ -23,7 +23,7 @@ final class AutomationReviewTests: XCTestCase {
     }
 
     func testToolbarUsesOnlyVisibleSectionSelection() {
-        let model = AutomationsViewModel(center: nil, quill: nil, demo: AutomationsDemoData.make())
+        let model = AutomationsViewModel(center: nil, briefCenter: nil, demo: AutomationsDemoData.make())
         model.selectedAutomationID = model.automations.first?.id
         XCTAssertNotNil(model.runnableSelection)
         model.section = .codex
@@ -63,7 +63,7 @@ final class AutomationReviewTests: XCTestCase {
     func testCenterErrorsReachWindow() {
         let store = AutomationStore(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
         let center = AutomationCenter(isolatedStore: store)
-        let model = AutomationsViewModel(center: center, quill: nil)
+        let model = AutomationsViewModel(center: center, briefCenter: nil)
         center.message = "Could not save"
         XCTAssertEqual(model.banner, "Could not save")
     }

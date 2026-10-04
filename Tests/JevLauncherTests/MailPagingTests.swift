@@ -189,7 +189,7 @@ final class MailPlaceTests: XCTestCase {
         XCTAssertEqual(all.text, "x")
         XCTAssertEqual(MailModel.query(.mailbox(3), "", boxes).mailboxes, [3])
         XCTAssertEqual(MailModel.query(.inbox, "", boxes).limit, MailStore.pageSize)
-        let model = MailModel(quill: { _ in throw CancellationError() }, quillAllowed: { false })
+        let model = MailModel(aiWriting: { _ in throw CancellationError() }, aiWritingAllowed: { false })
         XCTAssertEqual(model.place, .inbox, "Inbox stays the default.")
     }
 

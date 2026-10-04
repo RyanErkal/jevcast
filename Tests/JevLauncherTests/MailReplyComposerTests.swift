@@ -142,7 +142,7 @@ final class MailReplyComposerTests: XCTestCase {
     /// force-unwrap the draft in the editor's binding and crash Jevcast.
     func testClosingTheDraftWhileTheComposerIsOnScreenDoesNotCrash() throws {
         try skipLiveMailModelOnCI()
-        let model = MailModel(quill: { _ in throw CancellationError() }, quillAllowed: { false }, statusProvider: { .noMail },
+        let model = MailModel(aiWriting: { _ in throw CancellationError() }, aiWritingAllowed: { false }, statusProvider: { .noMail },
                               setRead: { _, _, _, _ in }, sendDraft: { _, _ in }, undoDelay: 5, draftStore: nil)
         var draft = MailModel.Draft(backend: MailBackend.jevcast.rawValue, to: "sam@example.com")
         draft.body = "Hello"

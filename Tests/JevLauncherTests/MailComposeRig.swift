@@ -49,10 +49,10 @@ final class MailComposeRig {
         }
     }
 
-    func model(delay: TimeInterval, quill: @escaping (QuillRequest) async throws -> QuillReply = { _ in throw CancellationError() }) async throws -> MailModel {
+    func model(delay: TimeInterval, aiWriting: @escaping (AIWritingRequest) async throws -> AIWritingReply = { _ in throw CancellationError() }) async throws -> MailModel {
         try skipLiveMailModelOnCI()
         let fixtureRoot = root, outbox = outbox
-        let model = MailModel(quill: quill, quillAllowed: { true }, statusProvider: { .ready(root: fixtureRoot) },
+        let model = MailModel(aiWriting: aiWriting, aiWritingAllowed: { true }, statusProvider: { .ready(root: fixtureRoot) },
                               setRead: { _, _, _, _ in },
                               sendDraft: { draft, _ in
                                   outbox.add(draft)

@@ -20,7 +20,7 @@ struct AutomationsRootView: View {
         .sheet(item: $model.editor) { request in
             AutomationEditorView(model: model, draft: request.draft, dismiss: { model.editor = nil })
         }
-        .sheet(isPresented: $model.showQuillExplainer) { QuillExplainerSheet(model: model) }
+        .sheet(isPresented: $model.showScheduledBriefExplainer) { ScheduledBriefExplainerSheet(model: model) }
         .confirmationDialog(deleteTitle, isPresented: deleteShown, titleVisibility: .visible, presenting: model.pendingDelete) { automation in
             Button("Move to Trash", role: .destructive) { model.delete(automation.id) }
             Button("Cancel", role: .cancel) {}
@@ -34,7 +34,7 @@ struct AutomationsRootView: View {
         switch model.section {
         case .all: AutomationListSplit(model: model)
         case .needsYou, .running, .failed, .history: RunListSplit(model: model, section: model.section)
-        case .quill: QuillTasksView(model: model)
+        case .scheduledBriefs: ScheduledBriefsView(model: model)
         case .codex: CodexSectionView(model: model)
         }
     }
@@ -81,19 +81,19 @@ struct AutomationsRootView: View {
     }
 }
 
-/// Explains that a morning brief is a Quill task, with a button to start one.
-struct QuillExplainerSheet: View {
+/// Explains that a morning brief is a scheduled brief, with a button to start one.
+struct ScheduledBriefExplainerSheet: View {
     @ObservedObject var model: AutomationsViewModel
     var body: some View {
         VStack(spacing: 14) {
             SymbolTile(symbol: "sun.horizon", tint: .orange, size: 52)
-            Text("Morning brief is a Quill task").font(.title2.weight(.semibold))
-            Text("Quill tasks read your Calendar, Reminders, and unread Mail inside Jevcast and write a short brief at the time you choose. Type what you want in the launcher, such as “every weekday at 8am brief me on my meetings and unread email”.")
+            Text("A morning brief is a scheduled brief").font(.title2.weight(.semibold))
+            Text("Scheduled briefs read your Calendar, Reminders, and unread Mail inside Jevcast and write a short brief at the time you choose. Type what you want in the launcher, such as “every weekday at 8am brief me on my meetings and unread email”.")
                 .multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 400)
             HStack {
-                Button("Cancel") { model.showQuillExplainer = false }.keyboardShortcut(.cancelAction)
-                Button("New Quill Task") { model.newQuillTask() }.keyboardShortcut(.defaultAction)
-                    .disabled(model.onNewQuillTask == nil && !model.isDemo)
+                Button("Cancel") { model.showScheduledBriefExplainer = false }.keyboardShortcut(.cancelAction)
+                Button("New Scheduled Brief") { model.newScheduledBrief() }.keyboardShortcut(.defaultAction)
+                    .disabled(model.onNewScheduledBrief == nil && !model.isDemo)
             }
             .padding(.top, 4)
         }

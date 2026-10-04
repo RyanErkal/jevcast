@@ -356,7 +356,7 @@ final class NotchLookTests: XCTestCase {
     }
 
     @MainActor func testDetailsOpenTheExactRun() throws {
-        let model = AutomationsViewModel(center: nil, quill: nil, demo: AutomationsDemoData.make())
+        let model = AutomationsViewModel(center: nil, briefCenter: nil, demo: AutomationsDemoData.make())
         let target = try XCTUnwrap(model.allRuns.first)
         let other = try XCTUnwrap(model.automations.first { $0.id != target.automationID })
         model.open(automationID: other.id, runID: target.id)

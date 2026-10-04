@@ -122,7 +122,7 @@ final class LauncherModel: ObservableObject {
         if launchingAppID != nil { return "Opening application…" }
         if isSearchingFiles { return "Searching files…" }
         if aiStatus == Self.interpreting { return "Thinking…" }
-        if quillAnswer?.isLoading == true { return "Quill is writing…" }
+        if aiWritingAnswer?.isLoading == true { return "Writing…" }
         if catalogue.scanning && catalogue.entries.isEmpty && !isFileSearch && !isClipboardSearch { return "Finding apps…" }
         return nil
     }
@@ -152,7 +152,7 @@ final class LauncherModel: ObservableObject {
     }
     /// What Return does with the selected result, for the footer.
     var primaryActionTitle: String? {
-        if quillAnswer != nil { return quillPrimaryTitle }
+        if aiWritingAnswer != nil { return aiWritingPrimaryTitle }
         guard let selected else { return nil }
         switch selected.action {
         case .app(let app): return app.launchURL != nil ? "Open Settings" : "Open Application"
@@ -252,23 +252,23 @@ final class LauncherModel: ObservableObject {
     /// Changes each time the launcher opens, so late work from an earlier opening is dropped.
     var visibleSession = UUID()
     var sourceTask: Task<Void, Never>?
-    /// Quill's answer in the panel, while it is written and after.
-    @Published var quillAnswer: QuillAnswer?
-    var quillWork: Task<Void, Never>?
-    let quill: QuillWriting
-    let quillKeys: JevKeyCache
-    let quillLog: QuillActivityLog
-    /// Scheduled Quill tasks. Made on first use; the app starts its clock at launch.
-    lazy var quillTasks = QuillTaskCenter(defaults: preferences.storage, send: { [weak self] request in
+    /// The AI answer in the panel, while it is written and after.
+    @Published var aiWritingAnswer: AIWritingAnswer?
+    var aiWritingWork: Task<Void, Never>?
+    let aiWriting: AIWriter
+    let aiWritingKeys: JevKeyCache
+    let aiWritingLog: AIWritingActivityLog
+    /// Scheduled briefs. Made on first use; the app starts its clock at launch.
+    lazy var scheduledBriefs = ScheduledBriefCenter(defaults: preferences.storage, send: { [weak self] request in
         guard let self else { throw CancellationError() }
-        return try await self.sendQuill(request)
-    }, allowed: { [weak self] in self?.allowedQuillContext ?? [] })
+        return try await self.sendAIWriting(request)
+    }, allowed: { [weak self] in self?.allowedAIWritingContext ?? [] })
     /// Background automations, set by the app. Nil in tests and before launch finishes.
     var automationCenter: AutomationCenter?
     /// Opens a task result window, set by the app.
-    var openTaskRun: ((QuillTaskRun) -> Void)?
-    /// Opens Settings › AI › Quill, set by the app.
-    var openQuillSettings: (() -> Void)?
+    var openTaskRun: ((ScheduledBriefRun) -> Void)?
+    /// Opens Settings › AI › Writing, set by the app.
+    var openAIWritingSettings: (() -> Void)?
     /// Opens a Settings tab by its raw name, such as "ai", set by the app.
     var openSettingsTab: ((String) -> Void)?
     /// Shows a view in the panel, such as "mail", "calendar", or "tasks". Nil until the app has views.
@@ -290,9 +290,9 @@ final class LauncherModel: ObservableObject {
 
     init(preferences: Preferences, catalogue: AppCatalogue, files: FileSearching? = nil,
          jev: JevChoosing = JevService(), keys: JevKeyCache? = nil, clipboard: ClipboardHistory? = nil, usage: JevUsageLog? = nil,
-         quill: QuillWriting = QuillService(), quillKeys: JevKeyCache? = nil, quillLog: QuillActivityLog? = nil) {
+         aiWriting: AIWriter = AIWritingService(), aiWritingKeys: JevKeyCache? = nil, aiWritingLog: AIWritingActivityLog? = nil) {
         self.preferences = preferences; self.catalogue = catalogue
-        self.quill = quill; self.quillKeys = quillKeys ?? .quill; self.quillLog = quillLog ?? .shared
+        self.aiWriting = aiWriting; self.aiWritingKeys = aiWritingKeys ?? .aiWriting; self.aiWritingLog = aiWritingLog ?? .shared
         self.files = files ?? FileSearch()
         self.jev = jev
         self.usage = usage
@@ -322,7 +322,7 @@ final class LauncherModel: ObservableObject {
         previousFileResults = []; fileResults = []; promotedID = nil; semanticResult = nil; revision = UUID()
         portQuery = nil; listeners = []; portDetails = [:]; stoppedNotice = nil; isLoadingPorts = false; pendingConfirmID = nil
         sourceQuery = nil; sourceRows = []; sourceProblem = nil; sourceNote = nil; isLoadingSource = false
-        jevPick = nil; menuCommands = []; frontContext = nil; visibleSession = UUID(); dismissQuill()
+        jevPick = nil; menuCommands = []; frontContext = nil; visibleSession = UUID(); dismissAIWriting()
         contextApp = targetApp; contextState = .none
         rebuild()
         ShortcutsCatalogue.shared.refreshIfStale()
@@ -351,7 +351,7 @@ final class LauncherModel: ObservableObject {
     }
     func end() {
         applicationLaunchToken = nil; launchingAppID = nil
-        visible = false; isComposingSearch = false; revision = UUID(); sourceTask?.cancel(); dismissQuill()
+        visible = false; isComposingSearch = false; revision = UUID(); sourceTask?.cancel(); dismissAIWriting()
         startWork?.cancel(); speech.stop(); work?.cancel(); aiWork?.cancel(); files.stop()
         aiStatus = ""; aiError = nil
     }
@@ -363,7 +363,7 @@ final class LauncherModel: ObservableObject {
         guard visible else { return }
         if typed { acceptsSpeech = false; speech.stop() }
         guard text != query || force else { return }
-        dismissQuill()
+        dismissAIWriting()
         let wasFileSearch = isFileSearch
         // "/cal" lists functions, not files under "/cal".
         parsedFileQuery = FileSearchQuery(text: Self.prefix(for: text) == nil ? text : ""); fileStatus = ""
@@ -651,7 +651,7 @@ final class LauncherModel: ObservableObject {
     var selected: LauncherResult? { results.first { $0.id == selectedID && $0.isCurrent } }
     func execute(paste: Bool = false) {
         guard applicationLaunchToken == nil, !isComposingSearch else { return }
-        if quillAnswer != nil { finishQuillAnswer(paste: paste); return }
+        if aiWritingAnswer != nil { finishAIWritingAnswer(paste: paste); return }
         guard let result = selected else { message = "Choose an action first."; return }
         if result.needsConfirmation && pendingConfirmID != result.id { pendingConfirmID = result.id; return }
         pendingConfirmID = nil
@@ -681,7 +681,7 @@ final class LauncherModel: ObservableObject {
             case .appThenWindow(let app, let action): openThenArrange(app, action)
             case .shortcut(let name): runShortcut(name)
             case .workflow(let workflow): run(workflow)
-            case .snippet(let snippet): copy(snippet.expanded(clipboard: NSPasteboard.general.string(forType: .string)))
+            case .snippet(let snippet): copy(snippet.expanded(clipboard: clipboard.currentText))
             case .timer(let timer): start(timer)
             case .cancelTimer(let id): timers.cancel(id)
             case .menu(let command): pressLater(command)
@@ -699,7 +699,7 @@ final class LauncherModel: ObservableObject {
             switch result.action {
             case .copy, .snippet:
                 onClose?(true)
-                if paste { Paster.pasteSoon() }
+                if paste { clipboard.pasteSoon() }
             case .clipboard:
                 // The history pastes once its write is done.
                 onClose?(true)
@@ -720,7 +720,7 @@ final class LauncherModel: ObservableObject {
         Frontmost.reveal([URL(fileURLWithPath: path)]); onClose?(false)
     }
     func copyPath() { if let path = selected?.path { copy(path); message = "Path copied" } }
-    func copy(_ text: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
+    func copy(_ text: String) { clipboard.copy(text) }
 }
 extension LauncherResult {
     func adding(_ boost: Double) -> LauncherResult {

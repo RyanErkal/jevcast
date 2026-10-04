@@ -284,15 +284,12 @@ extension LauncherModel {
 /// Pastes into the app in front, after the launcher has closed. Needs Accessibility access.
 @MainActor
 enum Paster {
-    static func pasteSoon() {
+    /// `post` presses ⌘V; the launcher passes its clipboard's, so a test's fake clipboard never types.
+    static func pasteSoon(post: @escaping @MainActor () -> Void = { TextInserter.postPaste() }) {
         guard AXIsProcessTrusted() else { return }
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 180_000_000)
-            let source = CGEventSource(stateID: .combinedSessionState)
-            let down = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true)
-            let up = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false)
-            down?.flags = .maskCommand; up?.flags = .maskCommand
-            down?.post(tap: .cghidEventTap); up?.post(tap: .cghidEventTap)
+            post()
         }
     }
 }

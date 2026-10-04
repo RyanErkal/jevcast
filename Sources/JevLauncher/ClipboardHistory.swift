@@ -318,8 +318,20 @@ final class ClipboardHistory: ObservableObject {
         try? await Task.sleep(nanoseconds: 180_000_000)
         guard !Task.isCancelled, pasteboard.changeCount == expected,
               NSWorkspace.shared.frontmostApplication?.processIdentifier == target else { return false }
-        TextInserter.postPaste()
+        pasteboard.postPaste()
         return true
+    }
+
+    /// Puts text on the clipboard for a launcher row, such as a calculator answer. History records it like any copy.
+    func copy(_ text: String) { _ = pasteboard.write(text) }
+
+    /// The clipboard's plain text now, for snippets that insert it.
+    var currentText: String? { pasteboard.string() }
+
+    /// Pastes into the app in front once the launcher has closed. Needs Accessibility access.
+    func pasteSoon() {
+        let pasteboard = pasteboard
+        Paster.pasteSoon { pasteboard.postPaste() }
     }
 
     // MARK: Changes

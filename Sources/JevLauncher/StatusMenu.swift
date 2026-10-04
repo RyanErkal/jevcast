@@ -8,7 +8,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var item: NSStatusItem?
     private let preferences: Preferences
     private let updates: UpdateChecker
-    private let tasks: QuillTaskCenter
+    private let tasks: ScheduledBriefCenter
     private let automations: AutomationCenter
     private weak var commands: AppCommands?
     private let isOpen: () -> Bool
@@ -18,7 +18,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var updateBadge = false
     private var attention = 0
 
-    init(preferences: Preferences, updates: UpdateChecker, commands: AppCommands, tasks: QuillTaskCenter, automations: AutomationCenter,
+    init(preferences: Preferences, updates: UpdateChecker, commands: AppCommands, tasks: ScheduledBriefCenter, automations: AutomationCenter,
          isOpen: @escaping () -> Bool, toggle: @escaping () -> Void, openSettings: @escaping (SettingsWindow.Tab) -> Void) {
         self.preferences = preferences; self.updates = updates; self.commands = commands; self.tasks = tasks; self.automations = automations
         self.isOpen = isOpen; self.toggle = toggle; self.openSettings = openSettings
@@ -77,7 +77,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         }
         if !tasks.tasks.isEmpty || !tasks.runs.isEmpty {
             let running = tasks.running.count
-            menu.addItem(AppMenus.item(running > 0 ? "Quill Tasks (\(running) running)" : "Quill Task Results",
+            menu.addItem(AppMenus.item(running > 0 ? "Scheduled Briefs (\(running) running)" : "Brief Results",
                                        #selector(AppCommands.showTaskResults), commands))
         }
         menu.addItem(.separator())

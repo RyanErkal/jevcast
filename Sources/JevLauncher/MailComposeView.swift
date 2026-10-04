@@ -27,7 +27,7 @@ struct ComposeView: View {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 0) {
                     header(current, binding)
-                    if model.canUseQuill { Divider().padding(.leading, Self.gutter); quill(binding) }
+                    if model.canUseAIWriting { Divider().padding(.leading, Self.gutter); aiWritingRow(binding) }
                 }
                 // A light band, so the headers read apart from the text.
                 .background(Color.primary.opacity(0.05))
@@ -125,12 +125,12 @@ struct ComposeView: View {
         TextField("", text: text, prompt: Text(prompt)).textFieldStyle(.plain)
     }
 
-    private func quill(_ binding: Binding<MailModel.Draft>) -> some View {
+    private func aiWritingRow(_ binding: Binding<MailModel.Draft>) -> some View {
         row(symbol: "sparkles") {
-            TextField("", text: binding.instruction, prompt: Text("Tell Quill what to write, such as “yes, but next week”"))
-                .textFieldStyle(.plain).onSubmit { model.draftWithQuill() }
-            Button(model.quillBusy ? "Writing…" : "Draft with Quill") { model.draftWithQuill() }
-                .controlSize(.small).disabled(model.quillBusy)
+            TextField("", text: binding.instruction, prompt: Text("Tell the AI what to write, such as “yes, but next week”"))
+                .textFieldStyle(.plain).onSubmit { model.draftWithAI() }
+            Button(model.aiWritingBusy ? "Writing…" : "Draft with AI") { model.draftWithAI() }
+                .controlSize(.small).disabled(model.aiWritingBusy)
         }
     }
 
@@ -258,8 +258,8 @@ struct ComposeView: View {
             .keyboardShortcut(.return, modifiers: .command)
             // Enabled but dimmed while something is missing, so pressing it says what.
             .opacity(draft.canSend ? 1 : 0.5)
-            .disabled(model.quillBusy)
-            .help(model.quillBusy ? "Wait until Quill finishes writing." : draft.sendProblem ?? "Send (⌘Return). You can undo for 5 seconds.")
+            .disabled(model.aiWritingBusy)
+            .help(model.aiWritingBusy ? "Wait until AI writing finishes." : draft.sendProblem ?? "Send (⌘Return). You can undo for 5 seconds.")
         }
         .controlSize(.regular)
         .padding(.horizontal, Self.gutter).padding(.vertical, 9)

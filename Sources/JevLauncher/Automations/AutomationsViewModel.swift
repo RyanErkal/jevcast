@@ -4,11 +4,11 @@ import Combine
 import LauncherCore
 
 /// What every Automations view reads. In normal use it passes through to `AutomationCenter` and
-/// `QuillTaskCenter`; in demo mode it serves `AutomationsDemoData` and every action does nothing.
+/// `ScheduledBriefCenter`; in demo mode it serves `AutomationsDemoData` and every action does nothing.
 @MainActor
 final class AutomationsViewModel: ObservableObject {
     enum Section: String, Hashable, CaseIterable, Identifiable {
-        case needsYou, all, running, failed, history, quill, codex
+        case needsYou, all, running, failed, history, scheduledBriefs, codex
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -17,7 +17,7 @@ final class AutomationsViewModel: ObservableObject {
             case .running: return "Running"
             case .failed: return "Failed Recently"
             case .history: return "History"
-            case .quill: return "Quill Tasks"
+            case .scheduledBriefs: return "Scheduled Briefs"
             case .codex: return "Codex"
             }
         }
@@ -28,7 +28,7 @@ final class AutomationsViewModel: ObservableObject {
             case .running: return "play.circle"
             case .failed: return "exclamationmark.triangle"
             case .history: return "clock.arrow.circlepath"
-            case .quill: return "text.quote"
+            case .scheduledBriefs: return "text.quote"
             case .codex: return "chevron.left.forwardslash.chevron.right"
             }
         }
@@ -43,7 +43,7 @@ final class AutomationsViewModel: ObservableObject {
     }
 
     let center: AutomationCenter?
-    let quill: QuillTaskCenter?
+    let briefCenter: ScheduledBriefCenter?
     let demo: AutomationsDemoData?
     var isDemo: Bool { demo != nil }
 
@@ -55,7 +55,7 @@ final class AutomationsViewModel: ObservableObject {
     /// A short message shown at the bottom, such as why an automation could not be turned on.
     @Published var banner: String?
     @Published var pendingDelete: Automation?
-    @Published var showQuillExplainer = false
+    @Published var showScheduledBriefExplainer = false
     /// The split view's columns. The sidebar hides by itself when the window gets narrow and comes back
     /// when it is wide again; in between, the toolbar button's choice stays.
     @Published var columnVisibility: NavigationSplitViewVisibility = .all
@@ -64,18 +64,18 @@ final class AutomationsViewModel: ObservableObject {
     /// Whether the window was too narrow for the sidebar at the last width change. Nil until the first.
     private var narrowWindow: Bool?
 
-    /// Set by the app: opens Quill's new-task flow (the launcher).
+    /// Set by the app: opens the new scheduled brief flow (the launcher).
     var configureNewDraft: ((inout AutomationDraft) -> Void)?
-    var onNewQuillTask: (() -> Void)?
-    private var resultWindows: [QuillResultWindow] = []
+    var onNewScheduledBrief: (() -> Void)?
+    private var resultWindows: [ScheduledBriefResultWindow] = []
     private var watchers: Set<AnyCancellable> = []
 
-    init(center: AutomationCenter?, quill: QuillTaskCenter?, demo: AutomationsDemoData? = nil) {
-        self.center = center; self.quill = quill; self.demo = demo
+    init(center: AutomationCenter?, briefCenter: ScheduledBriefCenter?, demo: AutomationsDemoData? = nil) {
+        self.center = center; self.briefCenter = briefCenter; self.demo = demo
         // Views observe this object only; changes in either center redraw them.
         center?.$message.compactMap { $0 }.sink { [weak self] in self?.banner = $0 }.store(in: &watchers)
         center?.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &watchers)
-        quill?.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &watchers)
+        briefCenter?.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &watchers)
     }
 
     // MARK: Data
@@ -85,7 +85,7 @@ final class AutomationsViewModel: ObservableObject {
     var needsYou: [RunRecord] { demo?.needsYou ?? center?.needsYou ?? [] }
     var codex: [CodexAutomation] { demo?.codex ?? center?.codex ?? [] }
     var problems: [String: String] { demo == nil ? center?.problems ?? [:] : [:] }
-    var quillTasks: [QuillTask] { demo?.quillTasks ?? quill?.tasks ?? [] }
+    var scheduledBriefs: [ScheduledBrief] { demo?.scheduledBriefs ?? briefCenter?.tasks ?? [] }
 
     func automation(_ id: String) -> Automation? { automations.first { $0.id == id } }
     /// Newest first by time queued. Folder names sort by time only for runs the runner names; a Run Now
@@ -150,7 +150,7 @@ final class AutomationsViewModel: ObservableObject {
         // Repeats of one failure count once, as the list shows them.
         case .failed: let n = streaks(in: .failed).count; return n == 0 ? nil : n
         case .all: return automations.isEmpty ? nil : automations.count
-        case .quill: return quillTasks.isEmpty ? nil : quillTasks.count
+        case .scheduledBriefs: return scheduledBriefs.isEmpty ? nil : scheduledBriefs.count
         case .codex: return codex.isEmpty ? nil : codex.count
         case .history: return nil
         }
@@ -246,7 +246,7 @@ final class AutomationsViewModel: ObservableObject {
     // MARK: Editor and selection
 
     func newAutomation(_ template: AutomationTemplate = .blank) {
-        if template.isQuillTask { showQuillExplainer = true; return }
+        if template.isScheduledBrief { showScheduledBriefExplainer = true; return }
         var draft = template.draft()
         configureNewDraft?(&draft)
         editor = EditorRequest(draft: draft)
@@ -276,18 +276,18 @@ final class AutomationsViewModel: ObservableObject {
         }
     }
 
-    // MARK: Quill tasks
+    // MARK: Scheduled briefs
 
-    func quillLastRun(_ id: String) -> QuillTaskRun? { demo?.quillRuns.first { $0.taskID == id } ?? quill?.lastRun(of: id) }
-    func quillRunning(_ id: String) -> Bool { quill?.running.contains(id) ?? false }
-    func setQuillEnabled(_ id: String, _ on: Bool) { if demo == nil { quill?.setEnabled(id, on) } }
-    func runQuill(_ task: QuillTask) { if demo == nil { quill?.run(task) } }
-    func openQuillResult(_ run: QuillTaskRun) {
+    func scheduledBriefLastRun(_ id: String) -> ScheduledBriefRun? { demo?.scheduledBriefRuns.first { $0.taskID == id } ?? briefCenter?.lastRun(of: id) }
+    func scheduledBriefRunning(_ id: String) -> Bool { briefCenter?.running.contains(id) ?? false }
+    func setScheduledBriefEnabled(_ id: String, _ on: Bool) { if demo == nil { briefCenter?.setEnabled(id, on) } }
+    func runScheduledBrief(_ task: ScheduledBrief) { if demo == nil { briefCenter?.run(task) } }
+    func openScheduledBriefResult(_ run: ScheduledBriefRun) {
         guard demo == nil else { return }
-        let window = QuillResultWindow(run: run)
+        let window = ScheduledBriefResultWindow(run: run)
         resultWindows.removeAll { $0.window?.isVisible != true }
         resultWindows.append(window)
         window.show()
     }
-    func newQuillTask() { showQuillExplainer = false; onNewQuillTask?() }
+    func newScheduledBrief() { showScheduledBriefExplainer = false; onNewScheduledBrief?() }
 }

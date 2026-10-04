@@ -31,16 +31,16 @@ struct VoiceSettings: View {
 struct JevSettings: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var keys: JevKeyCache
-    @ObservedObject var quillKeys: JevKeyCache
+    @ObservedObject var aiWritingKeys: JevKeyCache
     @State private var key = ""
     @State private var keyMessage = ""
     @State private var testing = false
     private var trimmedKey: String { key.trimmingCharacters(in: .whitespacesAndNewlines) }
-    /// Quill borrows an OpenRouter Jev key when it has none of its own.
-    private var sharedWithQuill: Bool { keys.provider == .openRouter && !quillKeys.hasKey }
+    /// AI writing borrows an OpenRouter Jev key when it has none of its own.
+    private var sharedWithAIWriting: Bool { keys.provider == .openRouter && !aiWritingKeys.hasKey }
 
     var body: some View {
-        Group { sections }.task { await keys.load(); await quillKeys.load() }
+        Group { sections }.task { await keys.load(); await aiWritingKeys.load() }
     }
     @ViewBuilder private var sections: some View {
         Section {
@@ -57,8 +57,8 @@ struct JevSettings: View {
                 .font(.caption)
             }
         } header: { Text("Key") } footer: {
-            InfoCaption(sharedWithQuill ? "Used by Jev and Quill." : "Optional. A TypeSafe or OpenRouter key.",
-                        detail: "Jev, a model from TypeSafe, matches loose requests such as “make this window bigger”. Use a TypeSafe key, or an OpenRouter key (sk-or-…) to run Jev through OpenRouter. Quill uses an OpenRouter Jev key when it has no key of its own.")
+            InfoCaption(sharedWithAIWriting ? "Used by Jev and AI writing." : "Optional. A TypeSafe or OpenRouter key.",
+                        detail: "Jev, a model from TypeSafe, matches loose requests such as “make this window bigger”. Use a TypeSafe key, or an OpenRouter key (sk-or-…) to run Jev through OpenRouter. AI writing uses an OpenRouter Jev key when it has no key of its own.")
         }
         Section("Natural language") {
             // Without a key the toggle reads off, whatever the stored preference is.

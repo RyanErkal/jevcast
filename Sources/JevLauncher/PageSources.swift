@@ -2,13 +2,13 @@ import AppKit
 import SwiftUI
 import LauncherCore
 
-/// The Tasks view: scheduled Quill tasks first, then their recent results.
+/// The Tasks view: scheduled briefs first, then their recent results.
 @MainActor
-final class QuillTasksPageSource: ThingSource {
+final class ScheduledBriefsPageSource: ThingSource {
     let section = "Tasks"
-    private let center: QuillTaskCenter
+    private let center: ScheduledBriefCenter
     private let runs: TaskRunsSource
-    init(center: QuillTaskCenter, openRun: @escaping (QuillTaskRun) -> Void) {
+    init(center: ScheduledBriefCenter, openRun: @escaping (ScheduledBriefRun) -> Void) {
         self.center = center
         runs = TaskRunsSource(tasks: center, openRun: openRun)
     }
@@ -24,7 +24,7 @@ final class QuillTasksPageSource: ThingSource {
             }
             var parts = [task.enabled ? task.schedule.summary : "Off"]
             if let last = center.lastRun(of: task.id) { parts.append("last run " + last.date.formatted(.relative(presentation: .named))) }
-            return LauncherResult(id: QuillStorageKeys.taskRowPrefix + task.id, title: task.name, detail: parts.joined(separator: " · "),
+            return LauncherResult(id: AIWritingStorageKeys.taskRowPrefix + task.id, title: task.name, detail: parts.joined(separator: " · "),
                                   symbol: task.enabled ? "clock" : "clock.badge.xmark", action: .thing(Thing(verbs: [run, toggle])),
                                   score: 5000 - Double(index))
         }
@@ -43,7 +43,7 @@ enum LauncherPages {
     struct Links {
         var mail: (() -> MailModel)?
         var mailWindow: ((Int64?) -> Void)?
-        var runWindow: ((QuillTaskRun) -> Void)?
+        var runWindow: ((ScheduledBriefRun) -> Void)?
         /// The running shell, or a new one. Nil when libghostty cannot start.
         var terminal: (() -> TerminalView?)?
     }
@@ -58,12 +58,12 @@ enum LauncherPages {
                                   popOut: snapshot ? nil : { [weak model] in model?.onClose?(false); CalendarSource.openApp("com.apple.iCal") })
             return CalendarPage(list: list, readsEvents: !snapshot)
         case .tasks:
-            let center = model.quillTasks
+            let center = model.scheduledBriefs
             let openRun = links.runWindow ?? { _ in }
             let texts = ResultTexts()
-            return SourcePage(.tasks, source: QuillTasksPageSource(center: center, openRun: openRun), model: model, hasDetail: true,
+            return SourcePage(.tasks, source: ScheduledBriefsPageSource(center: center, openRun: openRun), model: model, hasDetail: true,
                               emptyText: "No scheduled tasks yet.", detailBody: { row in
-                guard row.id.hasPrefix(QuillStorageKeys.runRowPrefix), let run = center.runs.first(where: { QuillStorageKeys.runRowPrefix + $0.id == row.id }) else { return nil }
+                guard row.id.hasPrefix(AIWritingStorageKeys.runRowPrefix), let run = center.runs.first(where: { AIWritingStorageKeys.runRowPrefix + $0.id == row.id }) else { return nil }
                 // Read each result file once, not on every redraw.
                 let text = texts.text(for: run)
                 return AnyView(ScrollView {
@@ -94,7 +94,7 @@ enum LauncherPages {
 @MainActor
 private final class ResultTexts {
     private var cache: [String: String] = [:]
-    func text(for run: QuillTaskRun) -> String {
+    func text(for run: ScheduledBriefRun) -> String {
         if let cached = cache[run.id] { return cached }
         let text = run.file.flatMap { try? String(contentsOfFile: $0, encoding: .utf8) } ?? run.preview
         cache[run.id] = text

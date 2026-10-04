@@ -48,7 +48,7 @@ struct MailSetupView: View {
                     Text("4. Click Restart Jevcast. macOS applies the access only to a new start.")
                 }
                 .font(.callout).frame(maxWidth: 460, alignment: .leading)
-                Text("HTML mail loads its web images, fonts, and style sheets. Turn this off with Load Images from the Web in the ⋯ menu. A message goes to Quill only when you use Quill on it.")
+                Text("HTML mail loads its web images, fonts, and style sheets. Turn this off with Load Images from the Web in the ⋯ menu. A message is sent to the writing model only when you use AI on it.")
                     .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 460)
                 HStack {
                     Button("Open Full Disk Access") { Permissions.open("Privacy_AllFiles") }
@@ -177,7 +177,7 @@ struct MailReader: View {
                 Divider()
                 if !composing, let summary = model.summary {
                     GroupBox { Text(summary).font(.system(size: 12)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
-                        label: { Label("Quill summary", systemImage: "sparkles") }
+                        label: { Label("AI summary", systemImage: "sparkles") }
                         .padding(12)
                 }
                 body(shown)
@@ -281,7 +281,7 @@ struct MailReader: View {
                     }
                     Divider()
                     Button("Delete All from \(model.selected?.sender ?? "Sender")", role: .destructive) { model.deleteAllFromSender() }
-                    if model.canUseQuill { Button("Summarise with Quill") { model.summarise() }.disabled(model.detail == nil || model.quillBusy) }
+                    if model.canUseAIWriting { Button("Summarise") { model.summarise() }.disabled(model.detail == nil || model.aiWritingBusy) }
                 }
                 Toggle("Load Images from the Web", isOn: $model.loadsImages)
                 Toggle("Fit Wide Mail to Width", isOn: $fitsWidth)

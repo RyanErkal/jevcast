@@ -6,7 +6,7 @@ import LauncherCore
 struct DictationSettings: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var dictation: DictationController
-    let openQuill: () -> Void
+    let openAIWritingSettings: () -> Void
     @State private var confirmDelete = false
 
     var body: some View {
@@ -21,14 +21,14 @@ struct DictationSettings: View {
                 }
             }
             Section("Clean-up") {
-                LabeledContent("Quill clean-up") {
+                LabeledContent("AI clean-up") {
                     HStack {
-                        Text(preferences.quillEnabled && preferences.quillSendsDictation ? "On" : "Off").foregroundStyle(.secondary)
-                        Button("Quill Settings…", action: openQuill).controlSize(.small)
+                        Text(preferences.aiWritingEnabled && preferences.aiWritingSendsDictation ? "On" : "Off").foregroundStyle(.secondary)
+                        Button("Writing Settings…", action: openAIWritingSettings).controlSize(.small)
                     }
                 }
                 InfoCaption("“Um” and “uh” are always removed on this Mac.",
-                            detail: "Quill can also fix punctuation and corrections you speak. To send transcript text, turn on “Dictation transcripts” in Settings › AI › Quill. Audio is never sent.")
+                            detail: "AI writing can also fix punctuation and corrections you speak. To send transcript text, turn on “Dictation transcripts” in Settings › AI › Writing. Audio is never sent.")
             }
             Section("History") {
                 Picker("Keep transcripts", selection: $preferences.dictationRetention) {

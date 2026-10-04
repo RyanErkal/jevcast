@@ -22,7 +22,7 @@ struct KeyReference: View {
         }
         Section {
             row(["↩"], "Open the selected item")
-            row(["⇧", "↩"], "Paste instead of copy", note: "Answers, emoji, snippets, clipboard items, and Quill answers.")
+            row(["⇧", "↩"], "Paste instead of copy", note: "Answers, emoji, snippets, clipboard items, and AI answers.")
             row(["⌘", "K"], "Show actions")
             row(["⌘", "Y"], "Quick Look", note: "Files, folders, and apps.")
             row(["⌘", "R"], "Show in Finder")

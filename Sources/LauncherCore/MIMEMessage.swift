@@ -30,7 +30,7 @@ public struct MIMEMessage: Equatable, Sendable {
         headers.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }?.value
     }
 
-    /// Text for reading and for Quill: the plain part, or the HTML part as text.
+    /// Text for reading and for AI writing: the plain part, or the HTML part as text.
     public var readableText: String {
         if let plainText, !plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return plainText }
         return html.map(HTMLText.plain) ?? ""
@@ -323,7 +323,7 @@ public enum EncodedWords {
     }
 }
 
-/// HTML to readable plain text, for Quill and for a message with no plain part.
+/// HTML to readable plain text, for AI writing and for a message with no plain part.
 public enum HTMLText {
     public static func plain(_ html: String) -> String {
         var text = html

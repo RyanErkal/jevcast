@@ -97,7 +97,7 @@ extension LauncherModel {
     func showView(_ view: ViewID, fromHyper: Bool = false) {
         escapeClosesLauncher = fromHyper
         guard page?.id != view, let made = makePage?(view) else { return }
-        dismissQuill()
+        dismissAIWriting()
         pauseListening()
         revision = UUID(); sourceTask?.cancel()
         viewStack.append((page, query))

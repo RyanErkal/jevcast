@@ -3,7 +3,7 @@ import LauncherCore
 @testable import JevLauncher
 
 /// Sending from the mail views: Undo stops a send, a new draft or Send sends a waiting message at
-/// once, a failed send never loses text, and Quill writes only into its own draft. A fake send
+/// once, a failed send never loses text, and AI writing writes only into its own draft. A fake send
 /// action stands in for Apple Mail.
 @MainActor
 final class MailSendTests: XCTestCase {
@@ -182,51 +182,51 @@ final class MailSendTests: XCTestCase {
         XCTAssertFalse(model.sending)
     }
 
-    // MARK: Quill
+    // MARK: AI writing
 
-    func testQuillWritesOnlyIntoItsOwnUnchangedDraft() async throws {
-        let gate = QuillGate()
+    func testAIWritingWritesOnlyIntoItsOwnUnchangedDraft() async throws {
+        let gate = AIWritingGate()
         let model = try await rig.model(delay: 0) { _ in try await gate.reply() }
 
         // Applied: the same draft, unchanged.
         model.reply(all: false)
         model.draft?.instruction = "say yes"
-        model.draftWithQuill()
-        XCTAssertTrue(model.quillBusy)
-        XCTAssertEqual(model.send(), "Wait until Quill finishes writing.", "No send while Quill writes")
+        model.draftWithAI()
+        XCTAssertTrue(model.aiWritingBusy)
+        XCTAssertEqual(model.send(), "Wait until AI writing finishes.", "No send while AI writing runs")
         gate.open()
-        try await rig.wait { !model.quillBusy }
-        XCTAssertEqual(model.draft?.body, "Quill text")
+        try await rig.wait { !model.aiWritingBusy }
+        XCTAssertEqual(model.draft?.body, "AI text")
 
         // Dropped: the body changed meanwhile.
         gate.reset()
-        model.draftWithQuill()
+        model.draftWithAI()
         model.draft?.body = "My own words"
         gate.open()
-        try await rig.wait { !model.quillBusy }
+        try await rig.wait { !model.aiWritingBusy }
         XCTAssertEqual(model.draft?.body, "My own words")
-        XCTAssertEqual(model.composeNote, "Quill's text was not used because you changed the message.")
+        XCTAssertEqual(model.composeNote, "The AI draft was not used because you changed the message.")
 
         // Dropped: another draft took its place.
         gate.reset()
-        model.draftWithQuill()
+        model.draftWithAI()
         model.draft = nil
         model.forward()
         gate.open()
-        try await rig.wait { !model.quillBusy }
+        try await rig.wait { !model.aiWritingBusy }
         XCTAssertEqual(model.draft?.mode, .forward)
-        XCTAssertEqual(model.draft?.body, "", "Quill's text for the reply never lands in the forward")
+        XCTAssertEqual(model.draft?.body, "", "The AI draft for the reply never lands in the forward")
     }
 }
 
-/// Holds Quill's answer until the test opens it.
-private final class QuillGate: @unchecked Sendable {
+/// Holds the writing model's answer until the test opens it.
+private final class AIWritingGate: @unchecked Sendable {
     private let lock = NSLock()
     private var isOpen = false
     func open() { lock.withLock { isOpen = true } }
     func reset() { lock.withLock { isOpen = false } }
-    func reply() async throws -> QuillReply {
+    func reply() async throws -> AIWritingReply {
         while !lock.withLock({ isOpen }) { try await Task.sleep(nanoseconds: 5_000_000) }
-        return QuillReply(text: "Quill text", inputTokens: 0, outputTokens: 0, cost: nil)
+        return AIWritingReply(text: "AI text", inputTokens: 0, outputTokens: 0, cost: nil)
     }
 }

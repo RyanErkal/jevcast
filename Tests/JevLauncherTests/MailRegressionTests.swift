@@ -203,7 +203,7 @@ final class MailRegressionTests: XCTestCase {
     @MainActor private func makeModel() throws -> MailModel {
         try skipLiveMailModelOnCI()
         let fixtureRoot = root
-        return MailModel(quill: { _ in throw CancellationError() }, quillAllowed: { false }, statusProvider: { .ready(root: fixtureRoot) })
+        return MailModel(aiWriting: { _ in throw CancellationError() }, aiWritingAllowed: { false }, statusProvider: { .ready(root: fixtureRoot) })
     }
 
     @MainActor private func wait(_ predicate: () -> Bool) async throws {

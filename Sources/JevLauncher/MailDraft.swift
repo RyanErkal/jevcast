@@ -3,7 +3,7 @@ import LauncherCore
 
 extension MailModel {
     /// A reply, forward, or new message being written. Each draft has its own `id`, so a view, a
-    /// late Quill result, or a failed send can tell one draft from the next.
+    /// late AI writing result, or a failed send can tell one draft from the next.
     struct Draft: Codable, Equatable, Identifiable {
         enum Mode: Codable, Equatable { case new, reply(all: Bool), forward }
         var id = UUID()
@@ -27,7 +27,7 @@ extension MailModel {
         /// The message a reply or forward answers.
         var original: MailSummary?
         /// The answered message's text and headers from when the draft started. The selection can
-        /// move to another message later, so the composer, its To line, and Quill read this.
+        /// move to another message later, so the composer, its To line, and AI writing read this.
         var source: Source?
         /// True when the reply leaves out the original. Optional for older drafts. Use `includesQuote`.
         var quoteLeftOut: Bool?

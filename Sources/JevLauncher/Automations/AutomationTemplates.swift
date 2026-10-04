@@ -28,8 +28,8 @@ enum AutomationTemplate: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Morning brief is a Quill task, not a background automation.
-    var isQuillTask: Bool { self == .morningBrief }
+    /// Morning brief is a scheduled brief, not a background automation.
+    var isScheduledBrief: Bool { self == .morningBrief }
 
     /// A filled draft. Templates hold no personal paths; folders use `~` or are left for the user.
     func draft(now: Date = Date()) -> AutomationDraft {

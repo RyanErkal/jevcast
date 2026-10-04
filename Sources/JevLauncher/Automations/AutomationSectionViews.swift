@@ -79,24 +79,24 @@ struct CodexCard: View {
     }
 }
 
-/// Quill tasks live in their own center; this lists them with the same look.
-struct QuillTasksView: View {
+/// Scheduled briefs live in their own center; this lists them with the same look.
+struct ScheduledBriefsView: View {
     @ObservedObject var model: AutomationsViewModel
 
     var body: some View {
-        if model.quillTasks.isEmpty {
-            EmptyStateView(symbol: "text.quote", title: "No Quill tasks",
-                           message: "Quill tasks write a brief from your Calendar, Reminders, or unread Mail at a set time.",
-                           actionTitle: "New Quill Task") { model.showQuillExplainer = true }
+        if model.scheduledBriefs.isEmpty {
+            EmptyStateView(symbol: "text.quote", title: "No scheduled briefs",
+                           message: "A scheduled brief summarises your Calendar, Reminders, or unread Mail at a set time.",
+                           actionTitle: "New Scheduled Brief") { model.showScheduledBriefExplainer = true }
         } else {
             List {
                 Section {
-                    ForEach(model.quillTasks) { task in QuillTaskRow(model: model, task: task) }
+                    ForEach(model.scheduledBriefs) { task in ScheduledBriefRow(model: model, task: task) }
                 } footer: {
                     HStack {
-                        Text("Quill tasks run inside Jevcast while it is open.").font(.caption).foregroundStyle(.secondary)
+                        Text("Scheduled briefs run inside Jevcast while it is open.").font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        Button("New Quill Task") { model.showQuillExplainer = true }.controlSize(.small)
+                        Button("New Scheduled Brief") { model.showScheduledBriefExplainer = true }.controlSize(.small)
                     }
                     .padding(.top, 6)
                 }
@@ -106,13 +106,13 @@ struct QuillTasksView: View {
     }
 }
 
-struct QuillTaskRow: View {
+struct ScheduledBriefRow: View {
     @ObservedObject var model: AutomationsViewModel
-    let task: QuillTask
+    let task: ScheduledBrief
 
     var body: some View {
-        let last = model.quillLastRun(task.id)
-        let running = model.quillRunning(task.id)
+        let last = model.scheduledBriefLastRun(task.id)
+        let running = model.scheduledBriefRunning(task.id)
         HStack(spacing: 10) {
             SymbolTile(symbol: "text.quote", tint: task.enabled ? .orange : .gray, size: 30)
             VStack(alignment: .leading, spacing: 2) {
@@ -122,17 +122,17 @@ struct QuillTaskRow: View {
             Spacer()
             if let last {
                 StatusChip(title: last.succeeded ? "Done" : "Failed", tint: last.succeeded ? .green : .red)
-                Button("Open Result") { model.openQuillResult(last) }.controlSize(.small)
+                Button("Open Result") { model.openScheduledBriefResult(last) }.controlSize(.small)
             }
-            Button(running ? "Running…" : "Run Now") { model.runQuill(task) }.controlSize(.small).disabled(running)
-            Toggle("", isOn: Binding(get: { task.enabled }, set: { model.setQuillEnabled(task.id, $0) }))
+            Button(running ? "Running…" : "Run Now") { model.runScheduledBrief(task) }.controlSize(.small).disabled(running)
+            Toggle("", isOn: Binding(get: { task.enabled }, set: { model.setScheduledBriefEnabled(task.id, $0) }))
                 .toggleStyle(.switch).controlSize(.mini).labelsHidden()
                 .accessibilityLabel(task.enabled ? "Pause \(task.name)" : "Turn on \(task.name)")
         }
         .padding(.vertical, 4)
     }
 
-    private func details(_ last: QuillTaskRun?) -> String {
+    private func details(_ last: ScheduledBriefRun?) -> String {
         var parts = [task.schedule.summary]
         if !task.contexts.isEmpty { parts.append("reads " + task.contexts.map(\.title).joined(separator: ", ").lowercased()) }
         if let last { parts.append("last run " + AutomationFormat.relative(last.date)) }

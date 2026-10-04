@@ -13,7 +13,7 @@ struct AutomationsSidebar: View {
                 row(.all); row(.running); row(.failed); row(.history)
             }
             Section("More") {
-                row(.quill); row(.codex)
+                row(.scheduledBriefs); row(.codex)
             }
         }
         .listStyle(.sidebar)

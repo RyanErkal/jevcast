@@ -32,7 +32,8 @@ struct ClipPayload: Sendable {
     var fileURLs: [URL] = []
 }
 
-/// The pasteboard surface ClipboardHistory needs, so tests can inject a fake.
+/// The pasteboard surface ClipboardHistory needs, so tests can inject a fake. Every copy and paste the launcher
+/// makes goes through it, so tests never change the user's clipboard or type into the app in front.
 @MainActor
 protocol PasteboardReading: AnyObject {
     var changeCount: Int { get }
@@ -44,6 +45,8 @@ protocol PasteboardReading: AnyObject {
     func read(limit: Int, expected: Int) async -> ClipRaw?
     /// Writes an entry and returns the new change count.
     func write(_ payload: ClipPayload) -> Int
+    /// Presses ⌘V in the app in front. Fakes do nothing.
+    func postPaste()
 }
 
 extension PasteboardReading {
@@ -54,6 +57,7 @@ extension PasteboardReading {
     func write(_ payload: ClipPayload) -> Int {
         write(payload.string ?? payload.fileURLs.map(\.path).joined(separator: "\n"))
     }
+    func postPaste() {}
 }
 
 @MainActor
@@ -62,6 +66,7 @@ final class SystemPasteboard: PasteboardReading {
     var changeCount: Int { pasteboard.changeCount }
     var types: [String] { pasteboard.types?.map(\.rawValue) ?? [] }
     func string() -> String? { pasteboard.string(forType: .string) }
+    func postPaste() { TextInserter.postPaste() }
     func write(_ text: String) -> Int {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)

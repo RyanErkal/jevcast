@@ -1,9 +1,10 @@
+import AppKit
 import XCTest
 import LauncherCore
 @testable import JevLauncher
 
 final class LauncherFlowTests: XCTestCase {
-    @MainActor private func withModel(_ body: (LauncherModel) -> Void) {
+    @MainActor private func withModel(board: FakePasteboard? = nil, _ body: (LauncherModel) -> Void) {
         let suite = "JevLauncherTests." + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -12,7 +13,7 @@ final class LauncherFlowTests: XCTestCase {
         preferences.jevEnabled = false
         preferences.fileFolders = []
         let model = LauncherModel(preferences: preferences, catalogue: AppCatalogue(loadCache: false),
-                                  keys: JevKeyCache(key: nil), clipboard: ClipboardHistory(pasteboard: FakePasteboard()))
+                                  keys: JevKeyCache(key: nil), clipboard: ClipboardHistory(pasteboard: board ?? FakePasteboard()))
         model.begin()
         defer { model.end() }
         body(model)
@@ -169,12 +170,15 @@ final class LauncherFlowTests: XCTestCase {
         }
     }
     @MainActor func testCalculatorAndWebAreNotRemembered() {
-        withModel { model in
+        let board = FakePasteboard(), system = NSPasteboard.general.changeCount
+        withModel(board: board) { model in
             model.updateQuery("2+2", typed: true)
             model.execute()
             XCTAssertTrue(model.preferences.frecency.records.isEmpty)
             XCTAssertTrue(model.preferences.recentIDs.isEmpty)
         }
+        XCTAssertEqual(board.text, "4", "The answer goes to the launcher's clipboard.")
+        XCTAssertEqual(NSPasteboard.general.changeCount, system, "A test never changes the user's clipboard.")
     }
     @MainActor func testMessageNoticeWinsAndVoiceErrorLeavesFooter() {
         withModel { model in

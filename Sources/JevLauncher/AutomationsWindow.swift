@@ -1,17 +1,19 @@
 import AppKit
 import SwiftUI
 
-/// The Automations window: background automations, runs that need you, Quill tasks, and Codex.
+/// The Automations window: background automations, runs that need you, scheduled briefs, and Codex.
 @MainActor
 final class AutomationsWindow: NSWindowController, NSWindowDelegate {
     let center: AutomationCenter?
-    let quill: QuillTaskCenter?
+    let briefCenter: ScheduledBriefCenter?
     let model: AutomationsViewModel
+    /// Opens the chosen item when a one-column list shows, for Return.
+    private let opener = OneColumnOpener()
 
-    /// Opens Quill's new-task flow. Set by the app.
-    var onNewQuillTask: (() -> Void)? {
-        get { model.onNewQuillTask }
-        set { model.onNewQuillTask = newValue }
+    /// Opens the new scheduled brief flow. Set by the app.
+    var onNewScheduledBrief: (() -> Void)? {
+        get { model.onNewScheduledBrief }
+        set { model.onNewScheduledBrief = newValue }
     }
 
     /// The default size, and the smallest size: the list and the detail side by side with the sidebar hidden.
@@ -20,20 +22,20 @@ final class AutomationsWindow: NSWindowController, NSWindowDelegate {
     nonisolated static let minimumSize = AutomationsLayout.windowMinimum
     static let autosaveName = "JevcastAutomations"
 
-    convenience init(center: AutomationCenter, quill: QuillTaskCenter) {
-        self.init(model: AutomationsViewModel(center: center, quill: quill), autosaveName: Self.autosaveName)
+    convenience init(center: AutomationCenter, briefCenter: ScheduledBriefCenter) {
+        self.init(model: AutomationsViewModel(center: center, briefCenter: briefCenter), autosaveName: Self.autosaveName)
     }
 
     /// Takes a view model directly, for demo snapshots.
     init(model: AutomationsViewModel, autosaveName: String) {
-        self.center = model.center; self.quill = model.quill
+        self.center = model.center; self.briefCenter = model.briefCenter
         self.model = model
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: Self.defaultSize),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         window.title = "Automations"
         window.isReleasedWhenClosed = false
         window.minSize = Self.minimumSize
-        let hosting = NSHostingController(rootView: AutomationsRootView(model: model))
+        let hosting = NSHostingController(rootView: AutomationsRootView(model: model).environment(\.oneColumnOpener, opener))
         hosting.sceneBridgingOptions = [.toolbars, .title]
         // The window sets its own size; SwiftUI only reports the minimum.
         hosting.sizingOptions = [.minSize]
@@ -106,7 +108,8 @@ final class AutomationsWindow: NSWindowController, NSWindowDelegate {
     }
     func windowWillClose(_ notification: Notification) { windowDidResignKey(notification) }
 
-    /// ⌘N new, ⌘R run now, Return edits, ⌫ asks to delete. Text fields and sheets keep their own keys.
+    /// ⌘N new, ⌘R run now, Return edits (or, in a one-column list, opens the chosen item), ⌫ asks to delete.
+    /// Text fields and sheets keep their own keys.
     private func handle(_ event: NSEvent) -> Bool {
         guard window?.attachedSheet == nil else { return false }
         let flags = event.modifierFlags.intersection([.command, .control, .option, .shift])
@@ -119,6 +122,7 @@ final class AutomationsWindow: NSWindowController, NSWindowDelegate {
             guard model.section == .all, model.selectedAutomationID != nil else { return false }
             model.requestDeleteSelected(); return true
         case 36, 76: // Return
+            if opener.open() { return true }
             guard model.section == .all, let id = model.selectedAutomationID else { return false }
             model.edit(id); return true
         default: return false
@@ -132,7 +136,7 @@ final class AutomationsWindow: NSWindowController, NSWindowDelegate {
     static func snapshotView(demo: Bool, section: AutomationsViewModel.Section = .needsYou, size: NSSize = defaultSize,
                              automationID: String? = "desktop-tidy-demo", tab: AutomationDetailView.Tab = .overview,
                              sidebar: Bool = false) -> some View {
-        let model = AutomationsViewModel(center: nil, quill: nil, demo: demo ? AutomationsDemoData.make() : nil)
+        let model = AutomationsViewModel(center: nil, briefCenter: nil, demo: demo ? AutomationsDemoData.make() : nil)
         model.section = section
         model.initialDetailTab = tab
         switch section {
@@ -141,7 +145,9 @@ final class AutomationsWindow: NSWindowController, NSWindowDelegate {
         case .all: model.selectedAutomationID = demo ? automationID : nil
         default: break
         }
-        if sidebar { model.windowWidthChanged(size.width); model.columnVisibility = .all }
+        // Every capture starts from its width, as an opened window does, so a narrow one hides the sidebar.
+        model.resetColumns(windowWidth: size.width)
+        if sidebar { model.columnVisibility = .all }
         return AutomationsRootView(model: model).frame(width: size.width, height: size.height)
     }
 
@@ -165,7 +171,7 @@ final class AutomationsWindow: NSWindowController, NSWindowDelegate {
 
     /// The approval screen alone, with demo data, for `--snapshot-ui --demo`. Standalone, so it renders fully.
     static func snapshotApproval() -> some View {
-        let model = AutomationsViewModel(center: nil, quill: nil, demo: AutomationsDemoData.make())
+        let model = AutomationsViewModel(center: nil, briefCenter: nil, demo: AutomationsDemoData.make())
         return Group {
             if let run = model.run(AutomationsDemoData.approvalRunID) { ApprovalView(model: model, run: run) }
         }
@@ -174,7 +180,7 @@ final class AutomationsWindow: NSWindowController, NSWindowDelegate {
 
     /// The editor for `--snapshot-ui`, filled from a template.
     static func snapshotEditor(_ template: AutomationTemplate = .desktopTidy) -> some View {
-        let model = AutomationsViewModel(center: nil, quill: nil, demo: AutomationsDemoData.make())
+        let model = AutomationsViewModel(center: nil, briefCenter: nil, demo: AutomationsDemoData.make())
         return AutomationEditorView(model: model, draft: template.draft(), dismiss: {})
     }
 

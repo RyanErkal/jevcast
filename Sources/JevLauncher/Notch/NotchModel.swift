@@ -80,6 +80,9 @@ struct NotchAlert: Identifiable, Equatable {
     var runID: String?
     /// For a stack: the alerts it holds, highest priority first. Empty for a single alert.
     var stack: [NotchAlert]
+    /// A finished run's outcome (done, failed, needs review). It rests as the small pill beside the notch, its mark in
+    /// place of the running ring, for a few seconds, then leaves. It never opens by itself; a click opens its card.
+    var minimized = false
 
     var stackCount: Int { stack.count }
     var isStack: Bool { !stack.isEmpty }

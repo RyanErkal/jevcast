@@ -33,6 +33,8 @@ struct NotchPresentation: Equatable {
     var stackCount: Int = 1
     /// A running stack's distinct looks, in its order, at most `maxIdentities`.
     var identities: [Identity] = []
+    /// A finished run's outcome that rests in the pill (`NotchAlert.minimized`), or a stack of them.
+    var minimized = false
     /// A question's answers. Each sends `NotchAlert.choiceAction(index)`.
     var choices: [NotchAlert.Action]
     /// Two are drawn as buttons; the rest, and every `menuOnly` one, go in an overflow menu.
@@ -77,12 +79,14 @@ struct NotchPresentation: Equatable {
                   retry: alert.retry, attempt: alert.attempt, lastSuccess: alert.lastSuccess,
                   stackCount: max(1, alert.stackCount), identities: Self.identities(alert.stack),
                   choices: Array(choices), actions: actions)
+        minimized = alert.minimized
     }
 
-    /// Distinct looks of the running members, first come first, so the pill never cycles or reorders.
+    /// Distinct looks of the members the pill draws (running ones, or finished outcomes), first come first, so the
+    /// pill never cycles or reorders.
     static func identities(_ members: [NotchAlert]) -> [Identity] {
         var seen: [Identity] = []
-        for member in members where member.kind == .running {
+        for member in members where member.kind == .running || member.minimized {
             let look = Identity(symbol: member.symbol, accent: member.accent)
             if !seen.contains(look) { seen.append(look) }
             if seen.count == maxIdentities { break }
@@ -100,6 +104,8 @@ struct NotchPresentation: Equatable {
     var isBrief: Bool { (phase == .success || phase == .info) && detail == nil && actions.count <= 1 && stackCount == 1 }
     /// Two or more automations running together.
     var isRunningStack: Bool { phase == .running && stackCount > 1 }
+    /// Two or more that the pill draws side by side: running together, or finished together.
+    var isPillStack: Bool { stackCount > 1 && (phase == .running || minimized) }
     /// Up to two buttons for a row in a stack list: the primary one, then Later or the next one. Menu-only actions
     /// go in the row's overflow menu (`rowMenu`).
     var rowActions: [NotchAlert.Action] {

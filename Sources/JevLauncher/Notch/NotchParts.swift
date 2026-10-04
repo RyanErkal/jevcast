@@ -218,34 +218,59 @@ struct NotchProgressBar: View {
     }
 }
 
-/// The one status mark at the right: a ring while running (or a retry mark while a retry waits), the number of
-/// automations running together, or a stack's "+N". No elapsed time: the open running card shows that once.
+/// The one status mark at the right: a ring while running (or a retry mark while a retry waits), a finished run's
+/// outcome in the pill, the number of automations running or finished together, or a stack's "+N". No elapsed time:
+/// the open running card shows that once.
 struct NotchStatus: View {
     let p: NotchPresentation
     let reduceMotion: Bool
     /// Off where the stack count already shows elsewhere.
     var showsBadge = true
+    /// The pill draws a finished run's outcome where its ring was. Cards show the outcome on the icon instead.
+    var showsOutcome = false
     var ringSize: CGFloat = 14
+
+    /// The outcome mark: done, failed, or needs review.
+    static func outcome(_ phase: NotchPresentation.Phase) -> (symbol: String, label: String)? {
+        switch phase {
+        case .success: return ("checkmark.circle.fill", "Done")
+        case .failure: return ("exclamationmark.circle.fill", "Failed")
+        case .review: return ("eye.circle.fill", "Needs review")
+        case .running, .question, .approval, .info: return nil
+        }
+    }
 
     var body: some View {
         HStack(spacing: 6) {
-            if p.isRunningStack {
+            if p.isPillStack {
                 Text("\(p.stackCount)")
                     .foregroundStyle(.white.opacity(0.85))
-                    .accessibilityLabel("\(p.stackCount) running")
+                    .accessibilityLabel("\(p.stackCount) " + (p.phase == .running ? "running" : "finished"))
             } else if showsBadge && p.stackCount > 1 {
                 Text("+\(p.stackCount - 1)")
                     .accessibilityLabel("\(p.stackCount) alerts")
             }
             if p.phase == .running {
-                if p.retry != nil {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: ringSize * 0.8, weight: .semibold))
-                        .frame(width: ringSize, height: ringSize)
-                        .accessibilityLabel("Waiting to retry")
-                } else {
-                    NotchProgressRing(progress: p.progress, tint: NotchStyle.ring, size: ringSize, reduceMotion: reduceMotion)
+                Group {
+                    if p.retry != nil {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: ringSize * 0.8, weight: .semibold))
+                            .frame(width: ringSize, height: ringSize)
+                            .accessibilityLabel("Waiting to retry")
+                    } else {
+                        NotchProgressRing(progress: p.progress, tint: NotchStyle.ring, size: ringSize, reduceMotion: reduceMotion)
+                    }
                 }
+                .transition(.opacity)
+            } else if showsOutcome, p.minimized, let mark = Self.outcome(p.phase) {
+                // The ring gives way to the mark: it grows in, in the outcome's colour, where the ring turned.
+                Image(systemName: mark.symbol)
+                    .font(.system(size: ringSize + 2, weight: .semibold))
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(NotchStyle.tint(p.phase))
+                    .frame(width: ringSize + 2, height: ringSize + 2)
+                    .transition(reduceMotion ? .opacity : .scale(scale: 0.3).combined(with: .opacity))
+                    .accessibilityLabel(mark.label)
             }
         }
         .font(NotchStyle.Font.meta)

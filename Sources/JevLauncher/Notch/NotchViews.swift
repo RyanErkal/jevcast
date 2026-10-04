@@ -78,14 +78,19 @@ struct NotchIsland: View {
     private var hasNotch: Bool { geometry.hasNotch }
 
     /// Content identity: a new alert or mode cross-fades. A reply is keyed by the question it answers, so its field,
-    /// draft, and focus stay when that question joins or leaves a stack.
+    /// draft, and focus stay when that question joins or leaves a stack. The pill is keyed by its run, so when the run
+    /// finishes its icon stays and only the ring turns into the outcome mark.
     struct ContentKey: Hashable {
         let id: String
         let mode: NotchMode
     }
 
     static func contentKey(alert: NotchAlert, mode: NotchMode, replyTarget: String?) -> ContentKey {
-        ContentKey(id: mode == .reply ? (replyTarget ?? alert.id) : alert.id, mode: mode)
+        if mode == .reply { return ContentKey(id: replyTarget ?? alert.id, mode: mode) }
+        if mode == .compact, !alert.isStack, let run = alert.runID, let automation = alert.automationID {
+            return ContentKey(id: "pill:\(automation)/\(run)", mode: mode)
+        }
+        return ContentKey(id: alert.id, mode: mode)
     }
 
     var body: some View {
@@ -133,13 +138,13 @@ struct NotchIsland: View {
     /// refuse it once that alert has changed or gone.
     private func perform(_ id: String, row: String? = nil) { handlers.perform(id, row ?? alert.id) }
 
-    // MARK: Compact: the automation's icon (or a few, when several run) left of the notch, one status mark right of it.
-    // A click opens the detail.
+    // MARK: Compact: the automation's icon (or a few, when several run or finished) left of the notch, one status mark
+    // right of it: the running ring, or a finished run's outcome. A click opens the detail or the outcome's card.
 
     private var compact: some View {
         HStack(spacing: 8) {
             Group {
-                if p.isRunningStack {
+                if p.isPillStack {
                     NotchIconStack(identities: p.identities, diameter: 20)
                 } else {
                     NotchIcon(p: p, diameter: 20, reduceMotion: reduceMotion, showsBadge: false)
@@ -154,14 +159,14 @@ struct NotchIsland: View {
                     .lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 0)
             }
-            NotchStatus(p: p, reduceMotion: reduceMotion)
+            NotchStatus(p: p, reduceMotion: reduceMotion, showsOutcome: true)
         }
         .padding(.horizontal, hasNotch ? 12 : 8)
         .padding(.trailing, hasNotch ? 0 : 4)
         .frame(height: hasNotch ? geometry.notchHeight : NotchGeometry.pillBody)
         .contentShape(Rectangle())
-        .onTapGesture { if p.phase == .running { perform(NotchAlert.expandAction) } }
-        .accessibilityAddTraits(p.phase == .running ? .isButton : [])
+        .onTapGesture { if p.phase == .running || p.minimized { perform(NotchAlert.expandAction) } }
+        .accessibilityAddTraits(p.phase == .running || p.minimized ? .isButton : [])
         .accessibilityAction(named: "Show details") { perform(NotchAlert.expandAction) }
     }
 

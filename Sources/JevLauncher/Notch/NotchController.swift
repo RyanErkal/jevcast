@@ -1,7 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// Shows notch alerts: one alert, a stack, or a running pill, out of the MacBook notch.
+/// Shows notch alerts: one alert, a stack, or a pill, out of the MacBook notch. A run shows in the pill while it works;
+/// when it finishes, the pill's ring turns into its outcome mark for a few seconds and the pill leaves. Only alerts that
+/// need an answer or approval open as cards by themselves.
 /// On a screen without a notch the shape drops from the top centre.
 /// The panel takes keyboard focus only after the user clicks Reply. It plays no sound.
 /// A press outside an open card, list, or reply closes it (`outsideClick`): running work returns to its pill, alerts that
@@ -95,11 +97,15 @@ final class NotchAlertController {
     func alert(_ id: String) -> NotchAlert? { queue.alert(id) }
     var current: NotchAlert? { state.alert }
 
-    /// Shows the most recent alerts again that still apply. Returns false when there is none.
+    /// Shows the most recent alerts again that still apply. Returns false when there is none. Asked for, they come back
+    /// as cards, also a finished run's outcome that first showed only in the pill.
     @discardableResult func showLast() -> Bool {
         recent = recent.map { $0.filter { stillApplies?($0) ?? true } }.filter { !$0.isEmpty }
         guard let batch = recent.popLast() else { return false }
-        for alert in batch where !queue.containsRunOrID(alert) { queue.add(alert) }
+        for var alert in batch where !queue.containsRunOrID(alert) {
+            alert.minimized = false
+            queue.add(alert)
+        }
         refresh()
         return true
     }
@@ -115,7 +121,8 @@ final class NotchAlertController {
         switch action {
         case NotchAlert.expandAction:
             endReply()
-            setMode(state.mode == .detail ? Self.restingMode(for: shown) : .detail)
+            let resting = Self.restingMode(for: shown)
+            setMode(state.mode == resting ? Self.openMode(for: shown) : resting)
             return
         case NotchAlert.collapseAction:
             // Cancel or Escape in a reply discards what was typed.
@@ -283,9 +290,15 @@ final class NotchAlertController {
 
     // MARK: Presentation
 
-    /// The mode an alert rests in: a pill for running indicators, otherwise the card.
+    /// The mode an alert rests in: a pill for running indicators and finished runs' outcomes, otherwise the card.
     static func restingMode(for alert: NotchAlert) -> NotchState.Mode {
-        alert.kind == .running && (alert.stack.isEmpty || alert.stack.allSatisfy { $0.kind == .running }) ? .pill : .card
+        let members = alert.isStack ? alert.stack : [alert]
+        return members.allSatisfy { $0.kind == .running } || members.allSatisfy(\.minimized) ? .pill : .card
+    }
+
+    /// The mode a click on a resting alert opens: a stack's list or a running card, otherwise the alert's card.
+    static func openMode(for alert: NotchAlert) -> NotchState.Mode {
+        alert.isStack || alert.kind == .running ? .detail : .card
     }
 
     /// The mode after the alert on screen changes. Detail and reply stay while the same alert or stack stays.
@@ -301,6 +314,9 @@ final class NotchAlertController {
         // And an open running card that more automations join opens as their list, instead of snapping to the pill.
         if let previous, !previous.isStack, previous.kind == .running, previousMode == .detail, next.isStack, resting == .pill,
            next.stack.contains(where: { $0.id == previous.id }) { return .detail }
+        // A running card the user opened shows its run's outcome as a card; a closed one only changes its mark.
+        if let previous, !previous.isStack, previous.kind == .running, previousMode == .detail, !next.isStack, next.minimized,
+           next.runID != nil, next.runID == previous.runID, next.automationID == previous.automationID { return .card }
         guard let previous, previous.id == next.id else { return resting }
         switch previousMode {
         case .reply:
@@ -308,7 +324,7 @@ final class NotchAlertController {
             let old = replyAlert(in: previous, target: replyTarget)
             let new = replyAlert(in: next, target: replyTarget)
             return old != nil && old == new ? .reply : resting
-        case .detail: return resting == .pill && next.kind != .running ? .card : .detail
+        case .detail: return resting == .pill && next.kind != .running && !next.minimized ? .card : .detail
         case .pill, .card: return resting
         }
     }
@@ -423,12 +439,18 @@ final class NotchAlertController {
         for alert in presented.record(alerts) { onPresented(alert) }
     }
 
-    /// The alerts whose words are visible in `mode`: a single alert, or the rows a stack's open list draws
-    /// (the first `NotchGeometry.maxRows`; the rest are only counted, so they are not presented).
+    /// The alerts `mode` draws: a single alert, the rows a stack's open list draws (the first `NotchGeometry.maxRows`;
+    /// the rest are only counted, so they are not presented), or finished runs whose outcome mark the pill draws.
     static func presentedAlerts(_ shown: NotchAlert, mode: NotchState.Mode) -> [NotchAlert] {
         guard shown.kind != .running else { return [] }
-        if shown.isStack { return mode == .detail ? shown.stack.prefix(NotchGeometry.maxRows).filter { $0.kind != .running } : [] }
-        return mode == .pill ? [] : [shown]
+        if shown.isStack {
+            switch mode {
+            case .detail: return shown.stack.prefix(NotchGeometry.maxRows).filter { $0.kind != .running }
+            case .pill: return shown.stack.filter(\.minimized)
+            case .card, .reply: return []
+            }
+        }
+        return mode == .pill && !shown.minimized ? [] : [shown]
     }
 
     // Ignore input while the shape morphs. Its final outline is not its visible outline yet.

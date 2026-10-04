@@ -6,8 +6,19 @@ enum NotchTiming {
     /// The result of Approve all, with Undo.
     static let resultSeconds: TimeInterval = 10
     static let defaultFailureSeconds: TimeInterval = 8
+    /// A finished run's mark in the pill: long enough to notice, short enough not to distract.
+    static let doneSeconds: TimeInterval = 4
 
-    static func seconds(for kind: NotchAlert.Kind, failureSeconds: TimeInterval) -> TimeInterval? {
+    /// `minimized`: a finished run's outcome in the pill. It always leaves by itself: done after `doneSeconds`, a
+    /// failure or a run that needs review after `failureSeconds`. The run stays in the Automations window.
+    static func seconds(for kind: NotchAlert.Kind, failureSeconds: TimeInterval, minimized: Bool = false) -> TimeInterval? {
+        if minimized {
+            switch kind {
+            case .success: return doneSeconds
+            case .failure, .review: return failureSeconds
+            case .running, .question, .approval, .info: break
+            }
+        }
         switch kind {
         case .running, .question, .approval, .review: return nil
         case .failure: return failureSeconds
@@ -24,8 +35,9 @@ enum NotchTiming {
 /// - One alert per ID and per run: a newer alert for the same run replaces the older one.
 /// - Everything that is not a running indicator shows together. Two or more become one stack.
 /// - Running indicators show only when nothing else waits.
-/// - Timed alerts count down only while their words are drawn (a single card, or a row of the open list), and not
-///   while the pointer is over them. A collapsed stack and rows past the list's end wait untimed.
+/// - Timed alerts count down only while they are drawn (a single card, a row of the open list, or a finished run's
+///   mark in the pill), and not while the pointer is over them. A collapsed stack and rows past the list's end wait
+///   untimed.
 struct NotchQueue {
     struct Entry: Equatable {
         var alert: NotchAlert
@@ -113,6 +125,8 @@ struct NotchQueue {
         let symbol: String
         if alerts.allSatisfy({ $0.kind == .running }) {
             title = "\(n) automations running"; symbol = "gearshape.2"
+        } else if alerts.allSatisfy({ $0.kind == .success }) {
+            title = "\(n) automations done"; symbol = "checkmark.circle"
         } else if alerts.contains(where: { priority($0.kind) == 3 }) {
             title = "\(n) automations need you"; symbol = "bell.badge"
         } else if alerts.allSatisfy({ $0.kind == .failure }) {
@@ -121,10 +135,13 @@ struct NotchQueue {
             title = "\(n) alerts"; symbol = "bell"
         }
         let kind = alerts.first?.kind ?? .info
-        return NotchAlert(id: stackID, kind: kind, symbol: symbol, title: title,
-                          message: alerts.prefix(3).map(\.title).joined(separator: ", ") + (n > 3 ? "…" : ""),
-                          actions: [.init("Show", id: NotchAlert.expandAction, primary: true), .init("Later", id: "later")],
-                          stack: alerts)
+        var stack = NotchAlert(id: stackID, kind: kind, symbol: symbol, title: title,
+                               message: alerts.prefix(3).map(\.title).joined(separator: ", ") + (n > 3 ? "…" : ""),
+                               actions: [.init("Show", id: NotchAlert.expandAction, primary: true), .init("Later", id: "later")],
+                               stack: alerts)
+        // Finished runs together stay as small as one: the pill, with their icons and the most important mark.
+        stack.minimized = alerts.allSatisfy(\.minimized)
+        return stack
     }
 
     /// Starts the countdown of drawn timed alerts that have none, and stops it for alerts no longer drawn; those start
@@ -133,7 +150,8 @@ struct NotchQueue {
     mutating func startTimers(now: Date, drawn: Set<String>) {
         for i in entries.indices {
             guard drawn.contains(entries[i].alert.id) else { entries[i].deadline = nil; continue }
-            if entries[i].deadline == nil, let seconds = NotchTiming.seconds(for: entries[i].alert.kind, failureSeconds: failureSeconds) {
+            if entries[i].deadline == nil, let seconds = NotchTiming.seconds(for: entries[i].alert.kind, failureSeconds: failureSeconds,
+                                                                              minimized: entries[i].alert.minimized) {
                 entries[i].deadline = now.addingTimeInterval(seconds)
             }
         }

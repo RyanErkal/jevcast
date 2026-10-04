@@ -169,6 +169,8 @@ extension AutomationCenter {
             alert.actions = [.init("Open", id: "open", primary: true), .init("Later", id: "later")]
         }
         alert.tone = NotchAlert.tone(for: alert.kind)
+        // A finished run never takes over the screen: its outcome shows as a mark in the pill, then leaves.
+        alert.minimized = [.success, .failure, .review].contains(alert.kind)
         return alert
     }
 

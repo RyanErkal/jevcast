@@ -183,6 +183,8 @@ extension AutomationCenter {
         }
         // Automation alerts carry their automation's colour; the test uses a fixed one.
         if kind != .info { alert.accent = accent }
+        // As a finished run's are, these show as a mark in the pill and then leave.
+        alert.minimized = kind == .failure || kind == .review
         NotchAlertController.shared.show(alert)
     }
 }

@@ -6,6 +6,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Changed
 
+- **Quiet automation outcomes.** A finished run no longer opens a card. In the small pill beside the notch, the running ring turns into a mark: a green tick when it is done, red when it failed, amber when it needs review. The mark stays for a few seconds, then the pill leaves. Point at it to keep it, or click it to open the card. Only a question or an approval opens a card by itself. Show notifications brings recent outcomes back as cards, and every run stays in the Automations window.
+- **Alerts name the automation.** The notch shows the automation's name. To show only the kind of work, for example while sharing your screen, turn on Hide automation names in Settings › Automations.
 - **Plain names for AI writing.** "Quill" is now named for what it does: Ask AI answers questions, AI writing works on selected text, mail, and dictation, and Scheduled Briefs write a brief at a set time. The settings are in Settings › AI › Writing. Your settings, key, briefs, and history carry over.
 - **The launcher keeps the system appearance.** In Dark Mode the panel stays dark over a white page. In Light Mode it stays light over a dark desktop. The glass edge still shows.
 

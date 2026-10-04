@@ -78,7 +78,16 @@ enum NotchSnapshots {
                                                .init("Dismiss", id: "dismiss")])
         let many = NotchQueue.stack([report, backup, sync, tidy, long,
                                      Demo.running("sample-mail", "Sample inbox digest", symbol: "envelope", accent: .cyan, started: 8, now: now)])
+        // Finished runs: the pill keeps the icon, and the ring becomes the outcome mark.
+        func finished(_ alert: NotchAlert) -> NotchAlert { var a = alert; a.minimized = true; return a }
+        var done = finished(ready); done.runID = "demo-done"
+        let doneTogether = NotchQueue.stack([finished(success), done])
         let shots: [(String, NotchAlert, NotchMode, NotchGeometry, String?)] = [
+            ("notch-pill-done", done, .compact, notch, nil),
+            ("notch-pill-failed", finished(failure), .compact, notch, nil),
+            ("notch-pill-review", finished(review), .compact, notch, nil),
+            ("notch-pill-done-together", doneTogether, .compact, notch, nil),
+            ("notch-plain-pill-failed", finished(failure), .compact, plain, nil),
             // One automation running: its icon and colour, one ring, no timer.
             ("notch-pill-running", report, .compact, notch, nil),
             ("notch-detail-running", report, .detail, notch, nil),

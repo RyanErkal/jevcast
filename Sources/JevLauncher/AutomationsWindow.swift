@@ -14,9 +14,10 @@ final class AutomationsWindow: NSWindowController, NSWindowDelegate {
         set { model.onNewQuillTask = newValue }
     }
 
-    /// The default size, and the smallest size that fits the sidebar, the list, and the detail side by side.
+    /// The default size, and the smallest size: the list and the detail side by side with the sidebar hidden.
+    /// Narrower layouts are in `AutomationsLayout`.
     nonisolated static let defaultSize = NSSize(width: 1240, height: 780)
-    nonisolated static let minimumSize = NSSize(width: 980, height: 560)
+    nonisolated static let minimumSize = AutomationsLayout.windowMinimum
     static let autosaveName = "JevcastAutomations"
 
     convenience init(center: AutomationCenter, quill: QuillTaskCenter) {
@@ -73,8 +74,6 @@ final class AutomationsWindow: NSWindowController, NSWindowDelegate {
     func show(automationID: String?, runID: String?) {
         center?.start()
         model.open(automationID: automationID, runID: runID)
-        // Each open shows the sidebar at its ideal width, even if it was hidden last time.
-        model.columnVisibility = .all
         guard let window else { return }
         let pointer = NSEvent.mouseLocation
         let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }) ?? window.screen ?? NSScreen.main
@@ -85,6 +84,8 @@ final class AutomationsWindow: NSWindowController, NSWindowDelegate {
             }
             if frame != window.frame { window.setFrame(frame, display: false) }
         }
+        // Each open shows the sidebar at its ideal width when the window has room, even if it was hidden last time.
+        model.resetColumns(windowWidth: window.frame.width)
         showWindow(nil)
         Frontmost.show(window)
     }
@@ -127,16 +128,39 @@ final class AutomationsWindow: NSWindowController, NSWindowDelegate {
     // MARK: Snapshots
 
     /// The root view for `--snapshot-ui`. Demo mode shows invented data; otherwise it shows empty states.
-    static func snapshotView(demo: Bool, section: AutomationsViewModel.Section = .needsYou) -> some View {
+    /// `sidebar` keeps the sidebar shown even when the width would hide it, to capture the one-column layout.
+    static func snapshotView(demo: Bool, section: AutomationsViewModel.Section = .needsYou, size: NSSize = defaultSize,
+                             automationID: String? = "desktop-tidy-demo", tab: AutomationDetailView.Tab = .overview,
+                             sidebar: Bool = false) -> some View {
         let model = AutomationsViewModel(center: nil, quill: nil, demo: demo ? AutomationsDemoData.make() : nil)
         model.section = section
+        model.initialDetailTab = tab
         switch section {
         case .needsYou: model.selectedRunID = demo ? AutomationsDemoData.approvalRunID : nil
-        case .failed: model.selectedRunID = demo ? AutomationsDemoData.failedRunID : nil
-        case .all: model.selectedAutomationID = demo ? "desktop-tidy-demo" : nil
+        case .failed: model.selectedRunID = demo ? model.streaks(in: .failed).first?.id : nil
+        case .all: model.selectedAutomationID = demo ? automationID : nil
         default: break
         }
-        return AutomationsRootView(model: model).frame(width: 1240, height: 780)
+        if sidebar { model.windowWidthChanged(size.width); model.columnVisibility = .all }
+        return AutomationsRootView(model: model).frame(width: size.width, height: size.height)
+    }
+
+    /// Demo captures of the Automations window at its normal size and at narrow sizes, for `--snapshot-ui --demo`.
+    static func snapshotWindows() -> [(String, AnyView, NSSize)] {
+        let backup = AutomationsDemoData.backupID
+        let shots: [(String, AutomationsViewModel.Section, NSSize, String?, AutomationDetailView.Tab, Bool)] = [
+            ("automations-all", .all, defaultSize, backup, .overview, false),
+            ("automations-runs", .all, defaultSize, backup, .runs, false),
+            ("automations-failed", .failed, defaultSize, nil, .overview, false),
+            ("automations-all-980", .all, NSSize(width: 980, height: 620), nil, .overview, false),
+            ("automations-failed-980", .failed, NSSize(width: 980, height: 620), nil, .overview, false),
+            ("automations-all-minimum", .all, minimumSize, backup, .overview, false),
+            ("automations-runs-minimum", .all, minimumSize, backup, .runs, false),
+            ("automations-stacked-sidebar", .all, minimumSize, backup, .overview, true)
+        ]
+        return shots.map { name, section, size, id, tab, sidebar in
+            (name, AnyView(snapshotView(demo: true, section: section, size: size, automationID: id, tab: tab, sidebar: sidebar)), size)
+        }
     }
 
     /// The approval screen alone, with demo data, for `--snapshot-ui --demo`. Standalone, so it renders fully.

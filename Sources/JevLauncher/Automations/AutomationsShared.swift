@@ -87,8 +87,32 @@ struct StatusChip: View {
 extension StatusChip {
     init(_ state: RunState) { self.init(title: state.title, tint: state.tint, symbol: state.symbol) }
     /// A run's chip. A run that stopped for review says so; it is never shown as failed or done.
+    /// A failure with a known cause that needs a person reads "Needs review"; an interruption reads calmly.
     init(run: RunRecord) {
-        if run.needsReview { self.init(title: "Needs review", tint: .orange, symbol: "eye.fill") } else { self.init(run.state) }
+        if run.needsReview || run.explainedKind == .needsReview {
+            self.init(title: "Needs review", tint: .orange, symbol: "eye.fill")
+        } else {
+            self.init(title: run.state.title, tint: run.displayTint, symbol: run.displaySymbol)
+        }
+    }
+}
+
+extension RunRecord {
+    var explainedKind: FailureExplanation.Kind? { FailureExplainer.explain(self, catchUp: nil)?.kind }
+    /// The state's colour, except an interruption by a runner stop, which is not the job's failure.
+    var displayTint: Color {
+        switch explainedKind {
+        case .needsReview?: return .orange
+        case .interrupted?: return .secondary
+        case nil: return state.tint
+        }
+    }
+    var displaySymbol: String {
+        switch explainedKind {
+        case .needsReview?: return "exclamationmark.triangle.fill"
+        case .interrupted?: return "pause.circle.fill"
+        case nil: return state.symbol
+        }
     }
 }
 
@@ -102,13 +126,14 @@ struct EmptyStateView: View {
     var body: some View {
         VStack(spacing: 10) {
             Image(systemName: symbol).font(.system(size: 34, weight: .light)).foregroundStyle(.tertiary)
-            Text(title).font(.title3.weight(.semibold))
-            Text(message).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 360)
+            Text(title).font(.title3.weight(.semibold)).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+            Text(message).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true).frame(maxWidth: 360)
             if let actionTitle, let action {
                 Button(actionTitle, action: action).buttonStyle(.borderedProminent).controlSize(.large).padding(.top, 4)
             }
         }
-        .padding(30)
+        .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

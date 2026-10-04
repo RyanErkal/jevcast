@@ -2,6 +2,19 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.18.1] - 2026-10-04
+
+### Added
+
+- **Keep awake on power for automations.** An optional setting prevents idle system sleep while the Mac is plugged in and scheduled automations are enabled. The display can still sleep and lock. Battery power, lid close, manual sleep, and shutdown retain their normal behavior; missed runs follow each automation's catch-up setting.
+
+### Fixed
+
+- **Small Automations windows.** Columns adapt to the available width, the sidebar hides when needed, and narrow layouts provide a Back button. Titles and explanations wrap. Hourly schedules read “Hourly · On the hour” without changing their times.
+- **Repeated failures.** Consecutive matching failures appear as one expandable row with a count. Git divergence reads “Needs review” and explains why another run cannot fix it. Every run and its original error remain available.
+- **Run ordering.** Manual and scheduled runs sort by their recorded time before history limits are applied. An older manual run no longer appears above newer work or hides it from repeat-failure checks.
+- **Interrupted runs.** The detail view explains runner interruptions and the configured catch-up behavior. Run states, timeout limits, and orphan-process protections remain unchanged.
+
 ## [1.18.0] - 2026-10-03
 
 ### Added

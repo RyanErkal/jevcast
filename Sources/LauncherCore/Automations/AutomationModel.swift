@@ -396,6 +396,10 @@ public struct AutomationSettings: Codable, Equatable, Sendable {
     public var scriptPath: String
     /// Keep the Mac from idle sleep while a run is active.
     public var preventIdleSleep: Bool
+    /// Keep the Mac from idle sleep while it is on power and at least one automation is on a schedule, so
+    /// scheduled times are not missed. The display still sleeps and locks; on battery the Mac sleeps as usual.
+    /// It cannot stop lid-close sleep or shutdown. Off by default. See `KeepAwakePolicy`.
+    public var keepAwakeOnPower: Bool = false
     /// Claude signs in through the gateway set in `~/.claude/settings.json` (`ANTHROPIC_BASE_URL`), not the
     /// account login. Restricted mode ignores that file, so the runner passes just those values with `--settings`.
     public var claudeUsesSettingsSignIn: Bool = false
@@ -407,7 +411,7 @@ public struct AutomationSettings: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case maxConcurrentRuns, historyDays, codexPath, claudePath, scriptPath, preventIdleSleep, claudeUsesSettingsSignIn
+        case maxConcurrentRuns, historyDays, codexPath, claudePath, scriptPath, preventIdleSleep, keepAwakeOnPower, claudeUsesSettingsSignIn
     }
     /// Older files lack newer keys; each missing key keeps its default.
     public init(from decoder: Decoder) throws {
@@ -419,6 +423,7 @@ public struct AutomationSettings: Codable, Equatable, Sendable {
         claudePath = try c.decodeIfPresent(String.self, forKey: .claudePath) ?? d.claudePath
         scriptPath = try c.decodeIfPresent(String.self, forKey: .scriptPath) ?? d.scriptPath
         preventIdleSleep = try c.decodeIfPresent(Bool.self, forKey: .preventIdleSleep) ?? d.preventIdleSleep
+        keepAwakeOnPower = try c.decodeIfPresent(Bool.self, forKey: .keepAwakeOnPower) ?? false
         claudeUsesSettingsSignIn = try c.decodeIfPresent(Bool.self, forKey: .claudeUsesSettingsSignIn) ?? false
     }
 }

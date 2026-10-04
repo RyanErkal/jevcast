@@ -140,6 +140,14 @@ enum ScheduleText {
         }
     }
 
+    /// Every time of day, when `summary` shortens a long list; otherwise nil.
+    static func allTimes(_ schedule: Schedule) -> String? {
+        guard case .rrule(let text) = schedule.rule, let rule = try? RRule(text) else { return nil }
+        let zone = TimeZone(identifier: schedule.timeZone) ?? .current
+        guard rule.summaryShortensTimes(anchor: schedule.anchor, timeZone: zone) else { return nil }
+        return rule.timeList(anchor: schedule.anchor, timeZone: zone)
+    }
+
     static func upcoming(_ schedule: Schedule, limit: Int, now: Date = Date()) -> [Date] {
         switch schedule.rule {
         case .manual: return []

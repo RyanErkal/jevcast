@@ -6,7 +6,13 @@ struct AutomationDetailView: View {
     enum Tab: String, CaseIterable { case overview = "Overview", runs = "Runs" }
     @ObservedObject var model: AutomationsViewModel
     let automation: Automation
-    @State private var tab: Tab = .overview
+    @State private var tab: Tab
+
+    init(model: AutomationsViewModel, automation: Automation) {
+        _model = ObservedObject(wrappedValue: model)
+        self.automation = automation
+        _tab = State(initialValue: model.initialDetailTab)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -82,6 +88,7 @@ struct AutomationOverview: View {
                 sourceWarning
                 DetailCard(title: "Schedule", symbol: "calendar") {
                     FactRow(label: "When", value: automation.scheduleSummary)
+                    if let times = ScheduleText.allTimes(automation.schedule) { FactRow(label: "Times", value: times) }
                     FactRow(label: "Time zone", value: automation.schedule.timeZone)
                     let upcoming = ScheduleText.upcoming(automation.schedule, limit: 5)
                     if !upcoming.isEmpty {

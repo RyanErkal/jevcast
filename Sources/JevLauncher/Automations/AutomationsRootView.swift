@@ -15,7 +15,8 @@ struct AutomationsRootView: View {
         .navigationTitle(model.section.title)
         .searchable(text: $model.search, placement: .toolbar, prompt: "Search")
         .toolbar { toolbar }
-        .frame(minWidth: 980, minHeight: 560)
+        .frame(minWidth: AutomationsLayout.windowMinimum.width, minHeight: AutomationsLayout.windowMinimum.height)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { model.windowWidthChanged($0) }
         .sheet(item: $model.editor) { request in
             AutomationEditorView(model: model, draft: request.draft, dismiss: { model.editor = nil })
         }

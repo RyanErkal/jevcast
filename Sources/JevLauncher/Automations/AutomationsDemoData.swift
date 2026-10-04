@@ -18,6 +18,7 @@ struct AutomationsDemoData {
 
     static let approvalRunID = "20260926T180000Z-demo"
     static let failedRunID = "20260926T120000Z-fail"
+    static let backupID = "notes-backup-demo"
 
     static func make(now: Date = Date()) -> AutomationsDemoData {
         var d = AutomationsDemoData()
@@ -44,7 +45,12 @@ struct AutomationsDemoData {
         let backup = Automation(id: "docs-backup-demo", name: "Documents backup", symbol: "externaldrive",
                                 kind: .script(ScriptTask(executable: "/bin/zsh", arguments: ["scripts/backup.sh"], workingDirectory: home + "/Documents")),
                                 schedule: Schedule(rule: .manual, anchor: week), enabled: false, created: week)
-        d.automations = [tidy, sales, report, backup]
+        let hours = (0...23).map(String.init).joined(separator: ",")
+        let notes = Automation(id: backupID, name: "Notes and projects hourly backup", symbol: "arrow.triangle.2.circlepath",
+                               kind: .script(ScriptTask(executable: "/bin/zsh", arguments: ["scripts/backup.sh"], workingDirectory: home + "/Projects")),
+                               schedule: Schedule(rule: .rrule("FREQ=DAILY;BYHOUR=\(hours);BYMINUTE=0"), anchor: week),
+                               policy: Policy(catchUp: .runOnce), enabled: true, created: week)
+        d.automations = [tidy, sales, report, backup, notes]
 
         func run(_ a: Automation, _ id: String, _ state: RunState, ago: TimeInterval, length: TimeInterval, summary: String,
                  trigger: RunTrigger = .schedule, tokens: TokenUsage? = nil, error: String? = nil) -> RunRecord {
@@ -61,7 +67,26 @@ struct AutomationsDemoData {
         d.runs[sales.id] = [run(sales, failedRunID, .failed, ago: 3 * 3600, length: 41, summary: "The sales API returned an error",
                                 error: "Sales API: request limit reached (429). Exit status 1."),
                             run(sales, "20260926T080000Z-s2", .succeeded, ago: 7 * 3600, length: 38, summary: "Refreshed 3 sources")]
-        d.runs[report.id] = [run(report, "20260926T140000Z-r1", .running, ago: 240, length: 0, summary: "", trigger: .manual)]
+        let stopped = run(report, "20260919T080000Z-r0", .interrupted, ago: 7 * 86400, length: 300, summary: "",
+                          error: "The runner stopped during this run. It was not repeated.")
+        d.runs[report.id] = [run(report, "20260926T140000Z-r1", .running, ago: 240, length: 0, summary: "", trigger: .manual), stopped]
+        // An hourly backup that a diverged branch blocks: the same failure each hour, after earlier successes.
+        let diverged = "Exited with code 1. Backup blocked. projects: Local main has diverged from origin/main (3 ahead, 2 behind); refusing backup"
+        let top = (now.timeIntervalSince1970 / 3600).rounded(.down) * 3600
+        var backupRuns: [RunRecord] = (0..<6).map { i in
+            let at = Date(timeIntervalSince1970: top - Double(i) * 3600)
+            var r = run(notes, RunID.occurrence(automationID: notes.id, date: at), .failed, ago: now.timeIntervalSince(at), length: 28,
+                        summary: "Backup blocked", error: diverged)
+            r.exitCode = 1
+            return r
+        }
+        backupRuns += (6..<9).map { i in
+            let at = Date(timeIntervalSince1970: top - Double(i) * 3600)
+            return run(notes, RunID.occurrence(automationID: notes.id, date: at), .succeeded, ago: now.timeIntervalSince(at), length: 31,
+                       summary: "Backed up 2 folders")
+        }
+        d.runs[notes.id] = backupRuns
+        d.outputs[backupRuns[0].id] = "[notes] up to date\n[projects] local main has diverged from origin/main (3 ahead, 2 behind)\n[projects] refusing backup"
         d.outputs[failedRunID] = "[sales] fetching orders…\n[sales] retry 1/1 after 30s\nError: request limit reached (429)\n    at fetchOrders (scripts/refresh-sales.sh:41)"
         d.outputs["20260926T080000Z-s2"] = "## Refresh complete\n\n- **Orders**: 3 days closed through 2026-09-25\n- **Leads**: 42 new\n\nNo problems found."
 

@@ -399,11 +399,10 @@ public final class AutomationStore: @unchecked Sendable {
         guard (try? SecureFile.isDirectory(folder(id))) == true, (try? SecureFile.isDirectory(runs)) == true,
               let names = try? FileManager.default.contentsOfDirectory(atPath: runs.path) else { return [] }
         var list: [RunRecord] = []
-        for name in names.filter(RunID.isValid).sorted(by: >) {
+        for name in names.filter(RunID.isValid) {
             if let r = loadRun(id, name) { list.append(r) }
-            if list.count >= limit { break }
         }
-        return list
+        return Array(list.sorted { ($0.queued, $0.id) > ($1.queued, $1.id) }.prefix(limit))
     }
 
     private func loadRun(_ automationID: String, _ runID: String) -> RunRecord? {

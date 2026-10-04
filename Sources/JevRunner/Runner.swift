@@ -16,6 +16,8 @@ final class Runner: @unchecked Sendable {
     private var pending: [(String, String)] = []
     private var timer: DispatchSourceTimer?
     private var activity: NSObjectProtocol?
+    /// The optional keep-awake-on-power assertion, separate from `activity`, which covers active runs.
+    private let keepAwake = KeepAwake()
     private var shuttingDown = false
     private var ticks = 0
     /// Shared locks held by programs earlier runs left that could not be confirmed stopped. Recomputed each tick,
@@ -52,6 +54,7 @@ final class Runner: @unchecked Sendable {
         handleRequests(settings)
         scheduleDue(settings)
         startQueued(settings)
+        updateKeepAwake(settings)
         if ticks % 120 == 1 { store.prune(now: Date(), settings: settings) }
     }
 
@@ -259,6 +262,14 @@ final class Runner: @unchecked Sendable {
         }
     }
 
+    /// Checked each tick, so a change to the setting, the power source, or the automations applies within 30 seconds.
+    private func updateKeepAwake(_ settings: AutomationSettings) {
+        let wanted = KeepAwakePolicy.wanted(settings: settings, automations: store.loadAutomations().automations,
+                                            power: settings.keepAwakeOnPower ? KeepAwake.powerSource() : .unknown,
+                                            shuttingDown: shuttingDown, now: Date())
+        keepAwake.update(wanted: wanted)
+    }
+
     /// At start, runs another runner left active can no longer be owned by anyone (this process holds the lock).
     /// A queued run that never started is kept and started again when it is recent. An interrupted report
     /// workflow gets one recovery run, which plans from the saved artifacts; missed hours are never queued.
@@ -311,6 +322,7 @@ final class Runner: @unchecked Sendable {
         queue.async {
             self.shuttingDown = true
             self.timer?.cancel()
+            self.keepAwake.release()
             for a in self.active.values { a.control.cancel() }
             // Queued runs that never started stay queued without an owner; the next runner start takes them.
             for (automationID, runID) in self.pending {

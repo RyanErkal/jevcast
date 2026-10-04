@@ -34,6 +34,32 @@ final class RRuleTests: XCTestCase {
         for (text, summary) in cases { XCTAssertEqual(try RRule(text).summary(), summary, text) }
     }
 
+    /// Every hour of the day reads as hourly, not as 24 times. The rule and its occurrences are unchanged.
+    func testEveryHourSummaries() throws {
+        let allHours = (0...23).map(String.init).joined(separator: ",")
+        let cases: [(String, String)] = [
+            ("FREQ=DAILY;BYHOUR=\(allHours);BYMINUTE=0", "Hourly · On the hour"),
+            ("FREQ=DAILY;BYHOUR=\(allHours);BYMINUTE=15", "Hourly · At :15"),
+            ("FREQ=DAILY;BYHOUR=\(allHours);BYMINUTE=0,30", "Hourly · At :00 and :30"),
+            ("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=\(allHours);BYMINUTE=0", "Weekdays, hourly on the hour"),
+            ("FREQ=DAILY;INTERVAL=2;BYHOUR=\(allHours);BYMINUTE=5", "Every 2 days, hourly at :05"),
+            ("FREQ=DAILY;BYHOUR=1,5,9,13,17,21;BYMINUTE=0", "Daily, 6 times from 01:00 to 21:00"),
+            ("FREQ=DAILY;BYHOUR=8,12,16,20;BYMINUTE=0", "Daily at 08:00, 12:00, 16:00 and 20:00"),
+            // 23 hours is not every hour.
+            ("FREQ=DAILY;BYHOUR=\((0...22).map(String.init).joined(separator: ","));BYMINUTE=0", "Daily, 23 times from 00:00 to 22:00"),
+        ]
+        for (text, summary) in cases { XCTAssertEqual(try RRule(text).summary(timeZone: london), summary, text) }
+
+        let hourly = try RRule("FREQ=DAILY;BYHOUR=\(allHours);BYMINUTE=0")
+        XCTAssertEqual(hourly.text, "FREQ=DAILY;BYHOUR=\(allHours);BYMINUTE=0")
+        XCTAssertFalse(hourly.summaryShortensTimes(timeZone: london))
+        XCTAssertEqual(try next(hourly.text, after: "2026-10-04T04:30:00Z", count: 3),
+                       ["Sun 2026-10-04 06:00", "Sun 2026-10-04 07:00", "Sun 2026-10-04 08:00"])
+        let six = try RRule("FREQ=DAILY;BYHOUR=1,5,9,13,17,21;BYMINUTE=0")
+        XCTAssertTrue(six.summaryShortensTimes(timeZone: london))
+        XCTAssertEqual(six.timeList(timeZone: london), "01:00, 05:00, 09:00, 13:00, 17:00 and 21:00")
+    }
+
     func testWeeklyMoThSa() throws {
         XCTAssertEqual(try next("RRULE:FREQ=WEEKLY;BYDAY=MO,TH,SA;BYHOUR=4;BYMINUTE=0", after: "2026-09-23T11:00:00Z", count: 4),
                        ["Thu 2026-09-24 04:00", "Sat 2026-09-26 04:00", "Mon 2026-09-28 04:00", "Thu 2026-10-01 04:00"])

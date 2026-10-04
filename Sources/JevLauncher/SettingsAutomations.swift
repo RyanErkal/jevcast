@@ -67,7 +67,7 @@ private struct RunnerSettingsSection: View {
                 }
             }
         } header: { Text("Background runner") } footer: {
-            Text("Runs even when Jevcast is closed. It does not run while you are logged out or the Mac is off; sleep delays it.")
+            Text("Runs even when Jevcast is closed. It does not run while you are logged out, the Mac is off, or the Mac sleeps. After wake or login, each automation's Missed runs setting decides what happens to missed times.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -117,6 +117,11 @@ private struct RunSettingsSection: View {
                 Text("7 days").tag(7); Text("30 days").tag(30); Text("90 days").tag(90)
             }
             Toggle("Keep Mac awake while running", isOn: center.setting(\.preventIdleSleep))
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle("Keep awake on power for automations", isOn: center.setting(\.keepAwakeOnPower))
+                Text("While the Mac is on power and an automation is on a schedule, it does not idle sleep, so runs start on time. The display still sleeps and locks. On battery it sleeps as usual. Closing the lid, choosing Sleep, or shutting down still stops runs. After wake or login, each automation's Missed runs setting runs the newest missed time once or skips it.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             HStack {
                 Button("Open Automations Folder") {
                     try? center.store.ensureRoot()

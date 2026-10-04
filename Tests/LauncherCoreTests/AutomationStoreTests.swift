@@ -77,6 +77,19 @@ final class AutomationStoreTests: XCTestCase {
         XCTAssertNil(store.readOutput(run))
     }
 
+    func testRandomManualIDsAreSortedByQueuedTimeBeforeLimiting() throws {
+        let a = sample(); try store.save(a)
+        let ids = ["ffffffff-older-manual", "20261004T050000Z-occ-1234", "00000000-newest-manual"]
+        for (index, id) in ids.enumerated() {
+            var run = RunRecord(id: id, automation: a, trigger: .manual, occurrence: nil,
+                                queued: Date(timeIntervalSince1970: 1_800_000_000 + Double(index) * 60))
+            run.state = index == 0 ? .failed : .succeeded
+            try store.saveRun(run)
+        }
+        XCTAssertEqual(store.runs(for: a.id, limit: 2).map(\.id), [ids[2], ids[1]])
+        XCTAssertEqual(store.allRecentRuns(limit: 1).map(\.id), [ids[2]])
+    }
+
     func testRequestsSettingsHeartbeatState() throws {
         let r = RunnerRequest(action: .runNow(automationID: "tidy-1a2b", test: true))
         try store.submit(r)

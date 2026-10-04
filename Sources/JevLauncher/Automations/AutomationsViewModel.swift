@@ -56,8 +56,13 @@ final class AutomationsViewModel: ObservableObject {
     @Published var banner: String?
     @Published var pendingDelete: Automation?
     @Published var showQuillExplainer = false
-    /// The split view's columns. The window sets `.all` each time it opens.
+    /// The split view's columns. The sidebar hides by itself when the window gets narrow and comes back
+    /// when it is wide again; in between, the toolbar button's choice stays.
     @Published var columnVisibility: NavigationSplitViewVisibility = .all
+    /// The tab an automation's detail opens on. Snapshots set Runs; the window keeps Overview.
+    var initialDetailTab: AutomationDetailView.Tab = .overview
+    /// Whether the window was too narrow for the sidebar at the last width change. Nil until the first.
+    private var narrowWindow: Bool?
 
     /// Set by the app: opens Quill's new-task flow (the launcher).
     var configureNewDraft: ((inout AutomationDraft) -> Void)?
@@ -83,11 +88,28 @@ final class AutomationsViewModel: ObservableObject {
     var quillTasks: [QuillTask] { demo?.quillTasks ?? quill?.tasks ?? [] }
 
     func automation(_ id: String) -> Automation? { automations.first { $0.id == id } }
-    func runs(for id: String) -> [RunRecord] { demo?.runs[id] ?? center?.runs[id] ?? [] }
+    /// Newest first by time queued. Folder names sort by time only for runs the runner names; a Run Now
+    /// run has a random ID, so name order alone can show an older manual run above newer scheduled ones.
+    func runs(for id: String) -> [RunRecord] { Self.newestFirst(demo?.runs[id] ?? center?.runs[id] ?? []) }
+    static func newestFirst(_ runs: [RunRecord]) -> [RunRecord] { runs.sorted { ($0.queued, $0.id) > ($1.queued, $1.id) } }
     func lastRun(_ id: String) -> RunRecord? { runs(for: id).first }
     var allRuns: [RunRecord] {
         let source = demo?.runs ?? center?.runs ?? [:]
-        return source.values.flatMap { $0 }.sorted { $0.queued > $1.queued }
+        return Self.newestFirst(source.values.flatMap { $0 })
+    }
+    /// Each automation's runs, newest first, for finding back-to-back repeated failures.
+    var runHistory: [String: [RunRecord]] { (demo?.runs ?? center?.runs ?? [:]).mapValues(Self.newestFirst) }
+
+    /// A section's runs with a failure that repeats the one before it folded into one entry. Nothing is removed
+    /// from the store; each entry keeps every run it stands for.
+    func streaks(in section: Section, now: Date = Date()) -> [RunStreak] {
+        RunStreaks.collapse(runs(in: section, now: now), history: runHistory)
+    }
+    func streaks(for id: String) -> [RunStreak] { RunStreaks.collapse(runs(for: id), history: [id: runs(for: id)]) }
+
+    /// The plain explanation for a run that did not succeed, when its cause is known.
+    func explanation(_ run: RunRecord) -> FailureExplanation? {
+        FailureExplainer.explain(run, catchUp: automation(run.automationID)?.policy.catchUp)
     }
     func run(_ id: String) -> RunRecord? { allRuns.first { $0.id == id } }
 
@@ -125,7 +147,8 @@ final class AutomationsViewModel: ObservableObject {
         switch section {
         case .needsYou: return needsYou.isEmpty ? nil : needsYou.count
         case .running: let n = allRuns.filter { $0.state.isActive }.count; return n == 0 ? nil : n
-        case .failed: let n = runs(in: .failed).count; return n == 0 ? nil : n
+        // Repeats of one failure count once, as the list shows them.
+        case .failed: let n = streaks(in: .failed).count; return n == 0 ? nil : n
         case .all: return automations.isEmpty ? nil : automations.count
         case .quill: return quillTasks.isEmpty ? nil : quillTasks.count
         case .codex: return codex.isEmpty ? nil : codex.count
@@ -202,6 +225,22 @@ final class AutomationsViewModel: ObservableObject {
         if draft.isNew, draft.enableAfterSaving, let message = center.setEnabled(automation.id, true) { banner = message }
         section = .all; selectedAutomationID = automation.id
         return nil
+    }
+
+    // MARK: Layout
+
+    /// Hides or shows the sidebar only when the width crosses `AutomationsLayout.sidebarFitsWidth`.
+    func windowWidthChanged(_ width: CGFloat) {
+        let narrow = !AutomationsLayout.sidebarFits(windowWidth: width)
+        guard narrow != narrowWindow else { return }
+        narrowWindow = narrow
+        columnVisibility = narrow ? .detailOnly : .all
+    }
+
+    /// Each open starts from the window's width: the sidebar at its ideal width when it fits.
+    func resetColumns(windowWidth: CGFloat) {
+        narrowWindow = nil
+        windowWidthChanged(windowWidth)
     }
 
     // MARK: Editor and selection

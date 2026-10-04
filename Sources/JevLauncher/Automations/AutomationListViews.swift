@@ -11,22 +11,20 @@ struct AutomationListSplit: View {
                            message: "Automations run a prompt or a script on a schedule, in the background. Start from a template in the New menu, or a blank one.",
                            actionTitle: "New Automation") { model.newAutomation() }
         } else {
-            HSplitView {
-                list.frame(minWidth: 280, idealWidth: 330, maxWidth: 440)
-                Group {
-                    if let automation = model.selectedAutomation {
-                        AutomationDetailView(model: model, automation: automation)
-                    } else {
-                        EmptyStateView(symbol: "square.stack.3d.up", title: "No automation selected",
-                                       message: "Choose an automation to see its schedule, runs, and settings.")
-                    }
+            ResponsiveSplit(selection: model.selectedAutomation?.id, listTitle: "All Automations") { openDetail in
+                list(openDetail: openDetail)
+            } detail: {
+                if let automation = model.selectedAutomation {
+                    AutomationDetailView(model: model, automation: automation)
+                } else {
+                    EmptyStateView(symbol: "square.stack.3d.up", title: "No automation selected",
+                                   message: "Choose an automation to see its schedule, runs, and settings.")
                 }
-                .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }
 
-    @ViewBuilder private var list: some View {
+    @ViewBuilder private func list(openDetail: @escaping () -> Void) -> some View {
         let items = model.filteredAutomations
         if items.isEmpty {
             EmptyStateView(symbol: "magnifyingglass", title: "No matches", message: "Nothing matches “\(model.search)”.",
@@ -34,7 +32,7 @@ struct AutomationListSplit: View {
         } else {
             List(selection: $model.selectedAutomationID) {
                 ForEach(items) { automation in
-                    AutomationRow(model: model, automation: automation)
+                    AutomationRow(model: model, automation: automation, openDetail: openDetail)
                         .tag(automation.id)
                         .contextMenu { AutomationMenu(model: model, automation: automation) }
                 }
@@ -55,6 +53,7 @@ struct AutomationListSplit: View {
 struct AutomationRow: View {
     @ObservedObject var model: AutomationsViewModel
     let automation: Automation
+    var openDetail: () -> Void = {}
 
     var body: some View {
         let last = model.lastRun(automation.id)
@@ -68,6 +67,11 @@ struct AutomationRow: View {
                 }
             }
             .layoutPriority(1)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                model.selectedAutomationID = automation.id
+                openDetail()
+            }
             Spacer(minLength: 6)
             Toggle("", isOn: Binding(get: { automation.enabled }, set: { model.setEnabled(automation.id, $0) }))
                 .toggleStyle(.switch).controlSize(.mini).labelsHidden()

@@ -24,20 +24,18 @@ struct RunListSplit: View {
         if runs.isEmpty {
             empty
         } else {
-            HSplitView {
+            let selected = model.selectedRun.flatMap { run in runs.contains(where: { $0.id == run.id }) ? run : nil }
+            ResponsiveSplit(selection: selected?.id, listTitle: section.title) { openDetail in
                 List(selection: $model.selectedRunID) {
-                    ForEach(runs) { run in RunRow(model: model, run: run, showsName: true).tag(run.id) }
+                    StreakRows(model: model, streaks: model.streaks(in: section), showsName: true, openDetail: openDetail)
                 }
                 .listStyle(.inset)
-                .frame(minWidth: 300, idealWidth: 340, maxWidth: 440)
-                Group {
-                    if let run = model.selectedRun, runs.contains(where: { $0.id == run.id }) {
-                        RunScreen(model: model, run: run).id(run.id)
-                    } else {
-                        EmptyStateView(symbol: "doc.text.magnifyingglass", title: "No run selected", message: "Choose a run to see what happened.")
-                    }
+            } detail: {
+                if let selected {
+                    RunScreen(model: model, run: selected).id(selected.id)
+                } else {
+                    EmptyStateView(symbol: "doc.text.magnifyingglass", title: "No run selected", message: "Choose a run to see what happened.")
                 }
-                .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }
@@ -70,7 +68,7 @@ struct AutomationRunsTab: View {
         } else {
             VSplitView {
                 List(selection: $selection) {
-                    ForEach(runs) { run in RunRow(model: model, run: run, showsName: false).tag(run.id) }
+                    StreakRows(model: model, streaks: model.streaks(for: automation.id), showsName: false)
                 }
                 .listStyle(.inset)
                 .frame(minHeight: 120, idealHeight: 200)
@@ -85,31 +83,95 @@ struct AutomationRunsTab: View {
     }
 }
 
+/// Runs as list rows, a repeated failure as one row with its count. The row's disclosure button (or its
+/// context menu) lists every run of the streak; each stays selectable, and none is removed from the store.
+struct StreakRows: View {
+    @ObservedObject var model: AutomationsViewModel
+    let streaks: [RunStreak]
+    let showsName: Bool
+    var openDetail: () -> Void = {}
+    @State private var expanded: Set<String> = []
+
+    var body: some View {
+        ForEach(streaks) { streak in
+            let open = expanded.contains(streak.id)
+            RunRow(model: model, run: streak.latest, showsName: showsName, streak: streak.count > 1 ? streak : nil,
+                   expanded: open, toggle: { toggle(streak.id) }, openDetail: openDetail)
+                .tag(streak.latest.id)
+                .contextMenu {
+                    if streak.count > 1 {
+                        Button(open ? "Hide Earlier Runs" : "Show All \(streak.count) Runs") { toggle(streak.id) }
+                    }
+                }
+            if open {
+                ForEach(streak.earlier) { run in
+                    RunRow(model: model, run: run, showsName: showsName, openDetail: openDetail).padding(.leading, 22).tag(run.id)
+                }
+            }
+        }
+    }
+
+    private func toggle(_ id: String) {
+        if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
+    }
+}
+
 struct RunRow: View {
     @ObservedObject var model: AutomationsViewModel
     let run: RunRecord
     let showsName: Bool
+    /// Set when this row stands for a repeated failure.
+    var streak: RunStreak?
+    var expanded = false
+    var toggle: () -> Void = {}
+    var openDetail: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 10) {
             if showsName, let automation = model.automation(run.automationID) {
                 SymbolTile(symbol: automation.symbol, tint: AutomationTint.color(for: automation), size: 26)
             } else {
-                Image(systemName: run.state.symbol).foregroundStyle(run.state.tint).frame(width: 18).accessibilityHidden(true)
+                Image(systemName: run.displaySymbol).foregroundStyle(run.displayTint).frame(width: 18).accessibilityHidden(true)
             }
-            VStack(alignment: .leading, spacing: 2) {
+            // The chip sits under the title, as in automation rows, so a narrow list keeps the name readable.
+            VStack(alignment: .leading, spacing: 3) {
                 Text(showsName ? run.automationName : (run.started ?? run.queued).formatted(date: .abbreviated, time: .shortened))
-                    .font(.body.weight(.medium)).lineLimit(1)
-                Text(details).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    .font(.body.weight(.medium)).lineLimit(1).truncationMode(.tail)
+                HStack(spacing: 5) {
+                    StatusChip(run: run)
+                    Text(details).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                }
+            }
+            .layoutPriority(1)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                model.selectedRunID = run.id
+                openDetail()
             }
             Spacer(minLength: 6)
-            StatusChip(run: run)
+            if let streak {
+                Button(action: toggle) {
+                    HStack(spacing: 3) {
+                        Text("\(streak.count)×").font(.system(size: 11, weight: .semibold)).monospacedDigit()
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 9, weight: .bold))
+                    }
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(.quaternary, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+                .help(expanded ? "Hide the earlier runs" : "Show all \(streak.count) runs")
+                .accessibilityLabel(expanded ? "Hide the earlier runs" : "Show all \(streak.count) runs with this failure")
+            }
         }
         .padding(.vertical, 3)
     }
 
     private var details: String {
         var parts: [String] = []
+        if let streak {
+            parts.append("\(streak.count) times since " + streak.since.formatted(.dateTime.day().month(.abbreviated).hour().minute()))
+        }
         if showsName { parts.append(AutomationFormat.relative(run.started ?? run.queued)) }
         parts.append(AutomationFormat.trigger(run.trigger))
         if let d = run.duration { parts.append(AutomationFormat.duration(d)) }
@@ -147,15 +209,30 @@ struct RunDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 RunHeader(model: model, run: run)
-                if let error = run.error, !error.isEmpty {
+                let explanation = model.explanation(run)
+                if let explanation {
+                    ExplainedFailureCard(explanation: explanation, error: run.error)
+                } else if let error = run.error, !error.isEmpty {
                     DetailCard(title: "Error", symbol: "xmark.octagon") {
                         Text(error).font(.system(.callout, design: .monospaced)).foregroundStyle(.red).textSelection(.enabled)
                     }
                 }
+                if let streak = model.streaks(for: run.automationID).first(where: { $0.runs.contains { $0.id == run.id } }), streak.count > 1 {
+                    Label("The same result \(streak.count) times in a row, from "
+                          + streak.since.formatted(date: .abbreviated, time: .shortened) + " to "
+                          + (streak.latest.started ?? streak.latest.queued).formatted(date: .abbreviated, time: .shortened)
+                          + ". Each run is kept in History and in its run folder.", systemImage: "square.stack")
+                        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
                 if run.state.isFinished, [.failed, .interrupted, .expired].contains(run.state) {
                     HStack {
-                        Button { model.runNow(run.automationID) } label: { Label("Retry", systemImage: "arrow.clockwise") }
-                            .buttonStyle(.borderedProminent)
+                        if explanation?.retryHelps == false {
+                            Button { model.runNow(run.automationID) } label: { Label("Run Again", systemImage: "arrow.clockwise") }
+                                .help("Runs it again now. It gives the same result until the cause is fixed.")
+                        } else {
+                            Button { model.runNow(run.automationID) } label: { Label("Retry", systemImage: "arrow.clockwise") }
+                                .buttonStyle(.borderedProminent)
+                        }
                         Button("Open Run Folder") { model.reveal(run) }
                     }
                 }
@@ -217,21 +294,37 @@ struct RunDetailView: View {
     }
 }
 
+/// A failure with a known cause: what happened in plain words, then the saved error as evidence.
+struct ExplainedFailureCard: View {
+    let explanation: FailureExplanation
+    let error: String?
+
+    var body: some View {
+        DetailCard(title: explanation.title, symbol: explanation.kind == .needsReview ? "exclamationmark.triangle" : "pause.circle") {
+            Text(explanation.message).font(.callout).fixedSize(horizontal: false, vertical: true)
+            if let error, !error.isEmpty {
+                Text(error).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
 struct RunHeader: View {
     @ObservedObject var model: AutomationsViewModel
     let run: RunRecord
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 8) {
-                    Text(run.automationName).font(.title3.weight(.semibold))
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(run.automationName).font(.title3.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
                     StatusChip(run: run)
                 }
                 Text(AutomationFormat.trigger(run.trigger) + " · " + (run.started ?? run.queued).formatted(date: .abbreviated, time: .shortened))
                     .font(.callout).foregroundStyle(.secondary)
-                if !run.summary.isEmpty { Text(run.summary).font(.body) }
+                if !run.summary.isEmpty { Text(run.summary).font(.body).fixedSize(horizontal: false, vertical: true) }
             }
-            Spacer()
+            Spacer(minLength: 8)
             if run.state.isActive || run.state.needsUser {
                 Button("Cancel Run", role: .destructive) { model.cancel(run) }
             }

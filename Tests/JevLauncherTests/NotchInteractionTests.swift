@@ -176,6 +176,123 @@ final class NotchInteractionTests: XCTestCase {
                      "an alert that has already gone closes nothing")
     }
 
+    func testAPressOutsideNeverRemovesAnAlertWithoutLater() throws {
+        var q = NotchQueue()
+        // The result of Approve all: Undo and Open, no Later. It could not come back from Show notifications.
+        let result = alert("result:t/1", .success, actions: [.init("Undo", id: "undo", primary: true), .init("Open", id: "open")])
+        q.add(result)
+        XCTAssertNil(NotchAlertController.outsideClick(shown: result, mode: .card, queue: q), "the card stays as it is")
+        XCTAssertEqual(NotchAlertController.outsideClick(shown: result, mode: .detail, queue: q), .rest, "an open card only rests")
+        let failure = alert("run:f/1", .failure, actions: [.init("Retry", id: "retry", primary: true), .init("Dismiss", id: "dismiss")])
+        q.add(failure)
+        let both = try XCTUnwrap(q.presentation)
+        XCTAssertEqual(NotchAlertController.outsideClick(shown: both, mode: .detail, queue: q), .rest,
+                       "a list where nothing offers Later rests and keeps every row")
+        XCTAssertNil(NotchAlertController.outsideClick(shown: both, mode: .card, queue: q))
+    }
+
+    func testAPressOutsideOnAMixedStackMovesOnlyTheAlertsThatOfferLater() throws {
+        var q = NotchQueue()
+        let asked = question("run:q/1")
+        let result = alert("result:t/1", .success, actions: [.init("Undo", id: "undo", primary: true), .init("Open", id: "open")])
+        let failure = alert("run:f/1", .failure, actions: [.init("Retry", id: "retry", primary: true), .init("Dismiss", id: "dismiss")])
+        for a in [asked, result, failure] { q.add(a) }
+        let stack = try XCTUnwrap(q.presentation)
+        for mode in [NotchState.Mode.card, .detail, .reply] {
+            XCTAssertEqual(NotchAlertController.outsideClick(shown: stack, mode: mode, queue: q), .later([asked]),
+                           "only the question goes to Later; the result and the failure stay (\(mode))")
+        }
+        // What stays still shows, as a stack of its own.
+        _ = q.removeAll { $0.id == asked.id }
+        let rest = try XCTUnwrap(q.presentation)
+        XCTAssertEqual(rest.stack.map(\.id), [failure.id, result.id])
+        XCTAssertEqual(NotchAlertController.restingMode(for: rest), .card)
+    }
+
+    // MARK: The outside watch
+
+    func testTheOutsideWatchRunsOnlyWhileAnOpenIslandShows() {
+        typealias C = NotchAlertController
+        for mode in [NotchState.Mode.card, .detail, .reply] {
+            XCTAssertTrue(C.watchesOutside(visible: true, showing: true, closing: false, available: true, mode: mode))
+        }
+        XCTAssertFalse(C.watchesOutside(visible: true, showing: true, closing: false, available: true, mode: .pill),
+                       "a pill (also after a press rested it) stops the watch")
+        XCTAssertFalse(C.watchesOutside(visible: false, showing: true, closing: false, available: true, mode: .card), "hidden panel")
+        XCTAssertFalse(C.watchesOutside(visible: true, showing: false, closing: false, available: true, mode: .card), "nothing shows")
+        XCTAssertFalse(C.watchesOutside(visible: true, showing: true, closing: true, available: true, mode: .card),
+                       "a press that emptied the queue closes the island and stops the watch")
+        XCTAssertFalse(C.watchesOutside(visible: true, showing: true, closing: false, available: false, mode: .card),
+                       "locked session or a menu under the notch")
+    }
+
+    func testAPressBeforeTheCardSettledOrOnTheIslandDoesNothing() {
+        func accepts(visible: Bool = true, available: Bool = true, expanded: Bool = true, closing: Bool = false,
+                     ready: Bool = true, ownMenu: Bool = false, inside: Bool = false) -> Bool {
+            NotchAlertController.acceptsOutsidePress(visible: visible, available: available, expanded: expanded, closing: closing,
+                                                     ready: ready, ownMenu: ownMenu, inside: inside)
+        }
+        XCTAssertTrue(accepts())
+        XCTAssertFalse(accepts(ready: false), "a press while the card still grows (before inputReadyAt) does nothing")
+        XCTAssertFalse(accepts(expanded: false), "not grown yet")
+        XCTAssertFalse(accepts(inside: true), "a press on the island itself")
+        XCTAssertFalse(accepts(ownMenu: true), "the island's own menu is open or just closed")
+        XCTAssertFalse(accepts(closing: true))
+        XCTAssertFalse(accepts(visible: false))
+        XCTAssertFalse(accepts(available: false))
+    }
+
+    func testTheOutsideMonitorStartsOnceAndStops() {
+        var presses = 0
+        let watch = NotchOutsideClick { _ in presses += 1 }
+        XCTAssertFalse(watch.isWatching)
+        watch.start()
+        XCTAssertTrue(watch.isWatching)
+        watch.start()
+        watch.stop()
+        XCTAssertFalse(watch.isWatching, "a second start adds no second monitor, so one stop ends the watch")
+        watch.stop()
+        XCTAssertFalse(watch.isWatching)
+        XCTAssertEqual(presses, 0)
+    }
+
+    // MARK: Each state of a run is reported as shown
+
+    func testASecondQuestionForTheSameRunIsReportedAgain() {
+        var log = NotchPresentedLog()
+        let first = question("run:q/1", "Which folder?")
+        XCTAssertEqual(log.record([first]).map(\.message), ["Which folder?"])
+        XCTAssertTrue(log.record([first]).isEmpty, "drawn again unchanged: one report")
+        // Answered; the alert leaves the queue.
+        log.keep([])
+        let second = question("run:q/1", "Keep the old copies?")
+        XCTAssertEqual(log.record([second]).map(\.message), ["Keep the old copies?"], "same ID, new question: reported")
+        // Replaced in place, without leaving the queue, by yet another question.
+        let third = question("run:q/1", "And the PDFs?")
+        log.keep([third])
+        XCTAssertEqual(log.record([third]).map(\.message), ["And the PDFs?"])
+        log.keep([third])
+        XCTAssertTrue(log.record([third]).isEmpty)
+    }
+
+    func testAnApprovalThatBecomesASuccessIsReportedAgain() {
+        var log = NotchPresentedLog()
+        let approval = NotchAlert(id: "run:t/1", kind: .approval, symbol: "bell", title: "Desktop tidy", message: "4 changes",
+                                  actions: [.init("Review", id: "review", primary: true), .init("Later", id: "later")],
+                                  automationID: "t", runID: "1")
+        XCTAssertEqual(log.record([approval]).count, 1)
+        // `show` replaces it in place by ID: the run finished and the automation alerts on success.
+        var q = NotchQueue()
+        q.add(approval)
+        let success = NotchAlert(id: "run:t/1", kind: .success, symbol: "bell", title: "Desktop tidy", message: "4 changes",
+                                 actions: [.init("Open", id: "open", primary: true), .init("Dismiss", id: "dismiss")],
+                                 automationID: "t", runID: "1")
+        q.add(success)
+        log.keep(q.entries.map(\.alert))
+        XCTAssertEqual(log.record([success]).map(\.kind), [.success])
+        XCTAssertTrue(log.keys.allSatisfy { $0.kind == .success }, "the approval's key went when it changed")
+    }
+
     // MARK: An unsent reply comes back with its exact question
 
     func testAnUnsentReplyReturnsOnlyWithItsExactQuestion() {

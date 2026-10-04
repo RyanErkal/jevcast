@@ -4,8 +4,8 @@ import SwiftUI
 /// Shows notch alerts: one alert, a stack, or a running pill, out of the MacBook notch.
 /// On a screen without a notch the shape drops from the top centre.
 /// The panel takes keyboard focus only after the user clicks Reply. It plays no sound.
-/// A press outside an open card, list, or reply closes it (`outsideClick`): running work returns to its pill, other alerts
-/// go as Later does.
+/// A press outside an open card, list, or reply closes it (`outsideClick`): running work returns to its pill, alerts that
+/// offer Later go as Later does, and alerts without Later stay.
 /// It hides, without losing anything, while the session is locked or a menu is open under it.
 @MainActor
 final class NotchAlertController {
@@ -16,8 +16,9 @@ final class NotchAlertController {
     var onAction: ((NotchAlert, String) -> Void)?
     /// Whether a remembered alert still applies, for "Show notifications". Nil keeps every one.
     var stillApplies: ((NotchAlert) -> Bool)?
-    /// Called once per alert after it was actually drawn on screen: the panel is visible, the session is
-    /// unlocked, and the expanded shape has finished growing. A queued or hidden alert is never reported.
+    /// Called once per alert and content after it was actually drawn on screen: the panel is visible, the session is
+    /// unlocked, and the expanded shape has finished growing. A queued or hidden alert is never reported. A later state
+    /// of the same run (a new question, a success after an approval) is reported again (`NotchPresentedLog`).
     /// A stack reports its members only when its list is open, because a collapsed stack shows titles only.
     var onPresented: ((NotchAlert) -> Void)?
     /// Seconds a failure stays up when the pointer is not over it.
@@ -48,8 +49,8 @@ final class NotchAlertController {
     private var pointerTimer: Timer?
     private var inputReadyAt = Date.distantFuture
     private var announced: Set<String> = []
-    /// Alerts already reported through `onPresented`, by ID.
-    private var presented: Set<String> = []
+    /// Alerts already reported through `onPresented`, by ID and what they showed.
+    private var presented = NotchPresentedLog()
     /// Watches for a press outside the island only while an open card, list, or reply is on screen.
     private lazy var outside = NotchOutsideClick { [weak self] point in self?.pressed(at: point) }
 
@@ -175,51 +176,72 @@ final class NotchAlertController {
 
     /// What a press outside the open island does.
     enum OutsideClick: Equatable {
-        /// A running card or list returns to its pill. The runs go on.
+        /// The open card, list, or reply returns to how it rests: running work to its pill, other alerts to their card.
+        /// Nothing leaves the screen and the runs go on.
         case rest
-        /// Any other card, list, or reply closes as Later does: it leaves the screen and waits in Show notifications.
-        /// Nothing is answered, approved, retried, or cancelled, so a question or approval stays unfinished.
+        /// These alerts offer Later and close as Later does: they leave the screen and wait in Show notifications.
+        /// Nothing is answered, approved, retried, or cancelled, so a question or approval stays unfinished. Alerts
+        /// shown with them that do not offer Later stay, and what stays rests.
         case later([NotchAlert])
     }
 
-    /// Nil leaves the island as it is: a pill is already minimized. An open reply closes as Later with its question, and
-    /// its unsent text comes back when that exact question opens again. `later` names the alerts as the queue holds them.
+    /// Nil leaves the island as it is: a pill is already minimized, and a card that does not offer Later (a failure, or
+    /// the result of Approve all with its Undo) is never removed by a press elsewhere. An open reply closes as Later with
+    /// its question, and its unsent text comes back when that exact question opens again. `later` names the alerts as
+    /// the queue holds them.
     static func outsideClick(shown: NotchAlert, mode: NotchState.Mode, queue: NotchQueue) -> OutsideClick? {
-        switch mode {
-        case .pill: return nil
-        case .card, .detail, .reply:
-            if restingMode(for: shown) == .pill { return .rest }
-            let members = (shown.isStack ? shown.stack : [shown]).compactMap { queue.alert($0.id) }
-            return members.isEmpty ? nil : .later(members)
-        }
+        guard mode != .pill else { return nil }
+        let resting = restingMode(for: shown)
+        if resting == .pill { return .rest }
+        let members = (shown.isStack ? shown.stack : [shown]).compactMap { queue.alert($0.id) }
+        let later = members.filter { $0.offers("later") }
+        if !later.isEmpty { return .later(later) }
+        return members.isEmpty || mode == resting ? nil : .rest
     }
 
-    /// A press anywhere while an open card, list, or reply shows. Acts only once the shape has settled (the same wait as pointer
-    /// input, so a press made as an alert appears does not close it), never while the island's own menu is open or has
-    /// just closed, and never for a press on the island itself.
+    /// Whether a press outside may act now: once the shape has settled (the same wait as pointer input, so a press made
+    /// as an alert appears does nothing), never while the island's own menu is open or has just closed, and never for a
+    /// press on the island itself.
+    static func acceptsOutsidePress(visible: Bool, available: Bool, expanded: Bool, closing: Bool, ready: Bool,
+                                    ownMenu: Bool, inside: Bool) -> Bool {
+        visible && available && expanded && !closing && ready && !ownMenu && !inside
+    }
+
+    /// Whether to watch for presses outside: only while an open card, list, or reply is on screen.
+    static func watchesOutside(visible: Bool, showing: Bool, closing: Bool, available: Bool, mode: NotchState.Mode) -> Bool {
+        visible && showing && !closing && available && mode != .pill
+    }
+
+    /// A press anywhere while an open card, list, or reply shows (`acceptsOutsidePress`).
     private func pressed(at point: CGPoint) {
-        guard let panel, panel.isVisible, available, state.expanded, !state.closing, Date() >= inputReadyAt,
-              !NotchMenuGuard.ownMenuActive(now: Date()), let shown = state.alert,
-              !state.geometry.contains(point, mode: state.mode, alert: shown) else { return }
+        guard let panel, let shown = state.alert,
+              Self.acceptsOutsidePress(visible: panel.isVisible, available: available, expanded: state.expanded,
+                                       closing: state.closing, ready: Date() >= inputReadyAt,
+                                       ownMenu: NotchMenuGuard.ownMenuActive(now: Date()),
+                                       inside: state.geometry.contains(point, mode: state.mode, alert: shown)) else { return }
         switch Self.outsideClick(shown: shown, mode: state.mode, queue: queue) {
         case nil:
             return
         case .rest?:
+            // The draft is already kept; ending the reply gives keyboard focus back.
+            endReply()
             setMode(Self.restingMode(for: shown))
         case .later(let members)?:
-            // The draft is already kept; ending the reply gives keyboard focus back.
             endReply()
             _ = queue.removeAll { alert in members.contains { $0.id == alert.id } }
             remember(members)
             for member in members { onAction?(member, "later") }
             refresh()
+            // What stays, such as a result with Undo that was in the list, rests instead of staying open.
+            if queue.presentation != nil, let now = state.alert { setMode(Self.restingMode(for: now)) }
         }
     }
 
-    /// Watches for presses outside only while an open card, list, or reply is on screen, and stops otherwise.
+    /// Starts or stops the outside watch (`watchesOutside`).
     private func updateOutsideWatch() {
-        let open = state.mode != .pill
-        if panel?.isVisible == true, state.alert != nil, !state.closing, available, open { outside.start() } else { outside.stop() }
+        let watch = Self.watchesOutside(visible: panel?.isVisible == true, showing: state.alert != nil, closing: state.closing,
+                                        available: available, mode: state.mode)
+        if watch { outside.start() } else { outside.stop() }
     }
 
     /// A draft stays while its exact question can still come back: in the queue, or closed into Show notifications.
@@ -303,6 +325,8 @@ final class NotchAlertController {
     /// Brings the screen in line with the queue.
     private func refresh() {
         state.keepDrafts { [queue, recent] in Self.draftStillWaits($0, queue: queue, recent: recent) }
+        // An alert that left or changed is reported again when it is next drawn.
+        presented.keep(queue.entries.map(\.alert))
         guard let next = queue.presentation else { close(); return }
         guard available else {
             queue.pauseTimers()
@@ -395,8 +419,8 @@ final class NotchAlertController {
               let shown = state.alert, shown.id == ticket.alertID, state.mode == ticket.mode,
               panel.occlusionState.contains(.visible) else { return }
         let alerts = Self.presentedAlerts(shown, mode: state.mode)
-        presented.formIntersection(Set(queue.entries.map(\.alert.id)).union(alerts.map(\.id)))
-        for alert in alerts where presented.insert(alert.id).inserted { onPresented(alert) }
+        presented.keep(queue.entries.map(\.alert) + alerts)
+        for alert in presented.record(alerts) { onPresented(alert) }
     }
 
     /// The alerts whose words are visible in `mode`: a single alert, or the rows a stack's open list draws

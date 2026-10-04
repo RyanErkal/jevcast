@@ -10,6 +10,8 @@ import LauncherCore
 final class KeepAwake {
     private var assertion: IOPMAssertionID?
     private var heldSince: Date?
+    /// The error of the current failure streak, so a failure that repeats every tick is logged once.
+    private var lastFailure: IOReturn?
 
     var isHeld: Bool { assertion != nil }
 
@@ -17,14 +19,25 @@ final class KeepAwake {
         switch KeepAwakePolicy.step(wanted: wanted, heldSince: heldSince, now: now) {
         case .none: break
         case .create:
-            assertion = Self.create(); heldSince = assertion == nil ? nil : now
-            log(assertion == nil ? "Could not keep the Mac awake for automations." : "Keeping the Mac awake on power for automations.")
+            switch Self.create() {
+            case .success(let id):
+                assertion = id; heldSince = now; lastFailure = nil
+                log("Keeping the Mac awake on power for automations.")
+            case .failure(let error):
+                failed(error.code, "Could not keep the Mac awake for automations")
+            }
         case .renew:
             // The new one is made before the old one goes, so there is no gap.
             let old = assertion
-            if let renewed = Self.create() {
-                assertion = renewed; heldSince = now
+            switch Self.create() {
+            case .success(let id):
+                if lastFailure != nil { log("Renewed the keep-awake assertion for automations.") }
+                assertion = id; heldSince = now; lastFailure = nil
                 if let old { IOPMAssertionRelease(old) }
+            case .failure(let error):
+                failed(error.code, "Could not renew the keep-awake assertion for automations")
+                // `heldSince` stays the old one's start, so the next tick tries again or makes a new one.
+                if let since = heldSince, !KeepAwakePolicy.keepsOldAfterFailedRenew(heldSince: since, now: now) { release() }
             }
         case .release:
             release()
@@ -37,7 +50,14 @@ final class KeepAwake {
         assertion = nil; heldSince = nil
     }
 
-    private static func create() -> IOPMAssertionID? {
+    /// Logs a failure once per streak: again only after a success or a different error.
+    private func failed(_ code: IOReturn, _ message: String) {
+        guard lastFailure != code else { return }
+        lastFailure = code
+        log(message + String(format: " (IOKit error 0x%08x).", UInt32(bitPattern: code)))
+    }
+
+    private static func create() -> Result<IOPMAssertionID, IOReturnError> {
         var id = IOPMAssertionID(0)
         let result = IOPMAssertionCreateWithDescription(
             kIOPMAssertPreventUserIdleSystemSleep as CFString,
@@ -45,7 +65,7 @@ final class KeepAwake {
             "Scheduled automations are on and the Mac is on power." as CFString,
             "Jevcast keeps the Mac awake on power so scheduled automations run on time." as CFString,
             nil, KeepAwakePolicy.assertionTimeout, kIOPMAssertionTimeoutActionRelease as CFString, &id)
-        return result == kIOReturnSuccess ? id : nil
+        return result == kIOReturnSuccess ? .success(id) : .failure(IOReturnError(code: result))
     }
 
     /// AC, battery, or unknown, from the providing power source. Desktop Macs report AC.
@@ -59,3 +79,6 @@ final class KeepAwake {
         }
     }
 }
+
+/// An IOKit error code, so `create` can return a `Result`.
+struct IOReturnError: Error { let code: IOReturn }

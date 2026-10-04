@@ -30,6 +30,13 @@ public struct RunnerEvents: Sendable {
     public static let maxCommands = 20
     /// File changes, web searches, and tool calls the agent made, besides commands.
     public private(set) var otherToolUses = 0
+    /// MCP tool calls by server and tool name, at most `maxCommands`. `otherToolUses` still counts every one.
+    public private(set) var toolCalls: [ToolCall] = []
+
+    public struct ToolCall: Equatable, Sendable {
+        public var server: String
+        public var tool: String
+    }
 
     public init(runner: AgentRunner) { self.runner = runner }
 
@@ -59,7 +66,11 @@ public struct RunnerEvents: Sendable {
                 record(item)
             case ("item.completed", "file_change"): note("Changed files"); otherToolUses += 1
             case ("item.completed", "web_search"): note("Searched the web"); otherToolUses += 1
-            case ("item.completed", "mcp_tool_call"): note("Used a tool"); otherToolUses += 1
+            case ("item.completed", "mcp_tool_call"):
+                note("Used a tool"); otherToolUses += 1
+                if toolCalls.count < Self.maxCommands {
+                    toolCalls.append(ToolCall(server: item["server"] as? String ?? "", tool: item["tool"] as? String ?? ""))
+                }
             case ("item.completed", "error"): error = (item["message"] as? String).map { oneLine($0, 500) } ?? error
             default: break
             }

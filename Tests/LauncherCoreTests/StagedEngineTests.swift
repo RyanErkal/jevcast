@@ -178,6 +178,19 @@ final class StagedEngineTests: XCTestCase {
         XCTAssertTrue(r.error?.contains("shell was off") == true, r.error ?? "")
     }
 
+    /// Defence in depth: the worker's own record must show one call to its one tool and nothing else.
+    func testWorkerOtherToolUseOrSecondCallVoidsTheFetch() throws {
+        for mode in ["fetch-other-tool", "fetch-called-twice"] {
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent("mode-fetch-other-tool"))
+            let a = try automation()
+            try fx.mode(mode)
+            try handoff(StagedFixture.handoff("work", items: [StagedFixture.item("generate", fetch: true)]))
+            let r = try run(a)
+            XCTAssertEqual(r.state, .failed, mode)
+            XCTAssertTrue(r.error?.contains("exactly one call to its one tool") == true, r.error ?? "")
+        }
+    }
+
     func testAnalystFailureStopsTheItem() throws {
         let a = try automation(fetch: false)
         try fx.mode("analyst-fail")
@@ -240,7 +253,21 @@ final class StagedEngineTests: XCTestCase {
         let r = try run(a)
         XCTAssertEqual(r.state, .failed)
         XCTAssertTrue(r.error?.hasPrefix("Needs review") == true)
+        XCTAssertTrue(r.needsReview, "the engine's own review marker")
         XCTAssertTrue(fx.codexCalls().isEmpty)
+    }
+
+    /// A planner's own words never become a trusted marker; only the engine writes one.
+    func testPlannerTextCannotSetAMarker() throws {
+        let a = try automation()
+        try handoff(StagedFixture.handoff("blocked", summary: "Needs review: planner text"))
+        let blocked = try run(a)
+        XCTAssertEqual(blocked.state, .failed)
+        XCTAssertFalse(blocked.needsReview)
+        try handoff(StagedFixture.handoff("no_due", summary: "Report ready: nothing"))
+        let quiet = try run(a)
+        XCTAssertEqual(quiet.state, .succeeded, quiet.error ?? "")
+        XCTAssertFalse(quiet.hasReadyReport)
     }
 
     func testOutputWriteFailureFailsClosed() throws {
@@ -308,6 +335,31 @@ final class StagedEngineTests: XCTestCase {
         for _ in 0..<40 where ProcessInfoReader.groupExists(group) { usleep(50_000) }
         XCTAssertFalse(StagedRecovery.mayRun(store: store, run: crashed))
         XCTAssertEqual(claims.acquire("other-client", run: next, pid: getpid(), start: Date()), .acquired, "taken over once the group is gone")
+    }
+
+    /// An unreadable record, or one naming group 0 or 1, is never checked as a group (0 is the caller's own).
+    /// It still blocks, with a reason that names the file and how to clear it, and clears once the file is gone.
+    func testUnreadableFetchRecordBlocksWithAReasonAndNeverChecksGroupZero() throws {
+        XCTAssertEqual(OrphanRecovery.groupState(pgid: 0, start: nil), .gone)
+        XCTAssertEqual(OrphanRecovery.groupState(pgid: -1, start: Date()), .gone)
+        let a = try automation()
+        var crashed = RunRecord(id: RunID.make(), automation: a, trigger: .schedule, occurrence: nil)
+        crashed.state = .interrupted; crashed.finished = Date()
+        try store.saveRun(crashed)
+        let claims = StagedClaims(store: store)
+        XCTAssertEqual(claims.acquire("other-client", run: crashed, pid: 999_999, start: Date.distantPast), .acquired)
+        let next = RunRecord(id: RunID.make(), automation: a, trigger: .schedule, occurrence: nil)
+        for content in [Data("{".utf8), try AutomationJSON.encoder().encode(FetchToolChild(pgid: 0, start: nil))] {
+            try store.writeRunFile(automationID: a.id, runID: crashed.id, name: "item1-fetch-child.json", data: content)
+            XCTAssertEqual(StagedRecovery.fetchRecords(store: store, run: crashed).map(\.child), [nil])
+            let reason = try XCTUnwrap(StagedRecovery.blockReason(store: store, run: crashed))
+            XCTAssertTrue(reason.contains("item1-fetch-child.json") && reason.contains("move that file to the Trash"), reason)
+            XCTAssertTrue(StagedRecovery.mayRun(store: store, run: crashed))
+            XCTAssertEqual(claims.acquire("other-client", run: next, pid: getpid(), start: Date()), .held(reason))
+        }
+        try FileManager.default.removeItem(at: store.runFolder(automationID: a.id, runID: crashed.id).appendingPathComponent("item1-fetch-child.json"))
+        XCTAssertNil(StagedRecovery.blockReason(store: store, run: crashed))
+        XCTAssertEqual(claims.acquire("other-client", run: next, pid: getpid(), start: Date()), .acquired, "cleared once the file is gone")
     }
 
     func testUnconfirmedFetchGroupKeepsTheClaimAndBlocks() throws {

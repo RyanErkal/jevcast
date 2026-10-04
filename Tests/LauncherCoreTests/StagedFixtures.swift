@@ -72,6 +72,10 @@ struct StagedFixture {
             if mode("fetch-turn-fail"):
                 say({"type": "turn.failed", "error": {"message": "model stream ended early"}})
                 sys.exit(1)
+            if mode("fetch-other-tool"):
+                say({"type": "item.completed", "item": {"type": "web_search", "query": "x"}})
+            if mode("fetch-called-twice"):
+                say({"type": "item.completed", "item": {"type": "mcp_tool_call", "server": "jevfetch", "tool": "fetch_report_bundle"}})
             if mode("fetch-ran-shell"):
                 say({"type": "item.completed", "item": {"type": "command_execution", "command": "ls", "exit_code": 0, "aggregated_output": ""}})
             reply = {"summary": "Fetched", "report_markdown": "manifest", "pdf_html": ""}

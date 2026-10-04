@@ -66,9 +66,7 @@ public struct StagedClaims {
             // The owning run's record is gone, so its programs cannot be checked. The claim stays.
             return "The claim's run \(owner.runID) cannot be read, so its programs cannot be checked. Check \(folder.path)."
         }
-        if StagedRecovery.hasLeftovers(store: store, run: run) {
-            return "A program from an earlier run of \(owner.automationID) could not be confirmed stopped. Check Activity Monitor."
-        }
+        if let why = StagedRecovery.blockReason(store: store, run: run) { return why }
         guard run.state.isActive else { return nil }
         let ownerAlive = owner.ownerPID == pid
             || ProcessInfoReader.startTime(owner.ownerPID).map { abs($0.timeIntervalSince(owner.ownerStart)) < 30 } == true
@@ -112,14 +110,19 @@ public enum FailureDedupe {
 /// checked, also after a finished result, because a timeout or cancel can leave members behind. A group
 /// that may still run blocks work and is never signalled unless it is provably ours.
 public enum StagedRecovery {
-    /// Every fetch group the run recorded.
-    public static func fetchChildren(store: AutomationStore, run: RunRecord) -> [FetchToolChild] {
+    /// One `item<n>-fetch-child.json`. `child` is nil when the record cannot be read or names no real group.
+    public struct FetchRecord: Equatable, Sendable {
+        public var name: String
+        public var child: FetchToolChild?
+    }
+
+    /// Every fetch group record the run has. A record that cannot be read still says a group was started.
+    public static func fetchRecords(store: AutomationStore, run: RunRecord) -> [FetchRecord] {
         store.runFileNames(automationID: run.automationID, runID: run.id).filter { $0.hasSuffix("-fetch-child.json") }.map { name in
-            guard let data = try? store.readRunFile(automationID: run.automationID, runID: run.id, name: name) else {
-                // A child file that cannot be read still says a group was started.
-                return FetchToolChild(pgid: 0, start: nil)
-            }
-            return (try? AutomationJSON.decoder().decode(FetchToolChild.self, from: data)) ?? FetchToolChild(pgid: 0, start: nil)
+            let child = (try? store.readRunFile(automationID: run.automationID, runID: run.id, name: name))
+                .flatMap { try? AutomationJSON.decoder().decode(FetchToolChild.self, from: $0) }
+            // Group IDs 0 and 1 are never a fetch group (0 would mean the caller's own group), so the record is not usable.
+            return FetchRecord(name: name, child: child.flatMap { $0.pgid > 1 ? $0 : nil })
         }
     }
 
@@ -133,17 +136,36 @@ public enum StagedRecovery {
 
     /// The same check whatever the run's state, for the engine at the end of its own run.
     public static func hasLeftovers(store: AutomationStore, run: RunRecord) -> Bool {
-        if run.orphanPGID != nil, OrphanRecovery.groupMayRun(pgid: run.orphanPGID, start: run.orphanStart) { return true }
-        return fetchChildren(store: store, run: run).contains { child in
-            // An unreadable record (pgid 0) cannot be checked, so it blocks.
-            child.pgid <= 1 || OrphanRecovery.groupMayRun(pgid: child.pgid, start: child.start)
+        blockReason(store: store, run: run) != nil
+    }
+
+    /// Why this run's leftovers block work, in words the user can act on, whatever the run's state. Nil when
+    /// nothing it started may still run. An unknown group or an unreadable record blocks; neither is signalled.
+    public static func blockReason(store: AutomationStore, run: RunRecord) -> String? {
+        if let pgid = run.orphanPGID, OrphanRecovery.groupMayRun(pgid: pgid, start: run.orphanStart) {
+            return "A program from run \(run.id) (process group \(pgid)) may still be running and could not be confirmed stopped. "
+                + "This automation waits until it ends. Check Activity Monitor."
         }
+        for record in fetchRecords(store: store, run: run) {
+            guard let child = record.child else {
+                let path = store.runFolder(automationID: run.automationID, runID: run.id).appendingPathComponent(record.name).path
+                return "The fetch record \(path) cannot be read, so Jevcast cannot check whether its command still runs. "
+                    + "This automation waits. When no fetch command from run \(run.id) is running (check Activity Monitor), "
+                    + "move that file to the Trash to clear the block."
+            }
+            if OrphanRecovery.groupMayRun(pgid: child.pgid, start: child.start) {
+                return "A fetch command from run \(run.id) (process group \(child.pgid)) may still be running and could not be "
+                    + "confirmed stopped. This automation waits until it ends. Check Activity Monitor."
+            }
+        }
+        return nil
     }
 
     /// Stops the run's fetch groups that are provably ours. Returns the first group that may still run, or nil.
+    /// An unusable record comes back with group 0, which is never a real group.
     public static func stopFetchChildren(store: AutomationStore, run: RunRecord, grace: TimeInterval) -> FetchToolChild? {
-        for child in fetchChildren(store: store, run: run) {
-            guard child.pgid > 1 else { return child }
+        for record in fetchRecords(store: store, run: run) {
+            guard let child = record.child else { return FetchToolChild(pgid: 0, start: nil) }
             var probe = run
             probe.childPGID = child.pgid; probe.childStart = child.start
             switch OrphanRecovery.stopChild(of: probe, grace: grace) {

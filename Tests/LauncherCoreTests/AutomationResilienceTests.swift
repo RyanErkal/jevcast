@@ -123,6 +123,38 @@ final class AutomationResilienceTests: XCTestCase {
         XCTAssertNil(FailureExplainer.explain(stopped, catchUp: .runOnce), "a program that may still run keeps its full warning")
     }
 
+    func testRunThatNeverStartedIsNotDescribedAsStoppedDuringTheRun() {
+        var late = run(automation(), "q1", .interrupted, at: 0,
+                       error: "The runner stopped before this run started, and it is too old to start late.")
+        late.started = nil
+        let explained = FailureExplainer.explain(late, catchUp: .runOnce)
+        XCTAssertEqual(explained?.title, "Not started")
+        XCTAssertTrue(explained?.message.contains("before this run started") == true)
+        XCTAssertFalse(explained?.message.contains("during this run") == true)
+    }
+
+    func testDivergenceIsReadOnlyFromTheErrorNotAModelSummary() {
+        var agent = run(automation(), "g1", .failed, at: 0, error: nil)
+        agent.summary = "The output diverged from the expected schema (3 ahead, 1 behind)."
+        XCTAssertNil(FailureExplainer.explain(agent, catchUp: nil), "a model-written summary is never classified")
+        agent.error = "The agent failed: timeout."
+        XCTAssertNil(FailureExplainer.explain(agent, catchUp: nil))
+    }
+
+    func testDivergenceCountsComeFromTheParenthesisAfterThePhrase() {
+        let text = "Exited with code 1. backup (step 2): Local main has diverged from origin/main (5 ahead, 7 behind); refusing"
+        XCTAssertEqual(FailureExplainer.divergence(in: text), " (5 ahead, 7 behind)")
+        XCTAssertEqual(FailureExplainer.divergence(in: "Exited (2 ahead, 3 behind). main has diverged from origin/main"), "",
+                       "a parenthesis before the phrase is not used")
+    }
+
+    func testFailedRenewKeepsTheOldAssertionOnlyWellInsideItsTimeout() {
+        let t = anchor
+        XCTAssertTrue(KeepAwakePolicy.keepsOldAfterFailedRenew(heldSince: t, now: t.addingTimeInterval(KeepAwakePolicy.renewInterval)))
+        XCTAssertFalse(KeepAwakePolicy.keepsOldAfterFailedRenew(heldSince: t, now: t.addingTimeInterval(KeepAwakePolicy.assertionTimeout - 30)))
+        XCTAssertFalse(KeepAwakePolicy.keepsOldAfterFailedRenew(heldSince: t, now: t.addingTimeInterval(-5)), "a clock that moved back drops it")
+    }
+
     // MARK: Folding repeated failures
 
     func testRepeatedFailuresFoldIntoOneEntryAndKeepEveryRun() {

@@ -50,6 +50,11 @@ final class RRuleTests: XCTestCase {
         ]
         for (text, summary) in cases { XCTAssertEqual(try RRule(text).summary(timeZone: london), summary, text) }
 
+        // Weekly with no BYDAY runs on the anchor's weekday only, so it is not "Hourly".
+        let weekly = try RRule("FREQ=WEEKLY;BYHOUR=\(allHours);BYMINUTE=0")
+        XCTAssertEqual(weekly.summary(anchor: anchor, timeZone: london), "Wed, hourly on the hour")
+        XCTAssertEqual(weekly.summary(timeZone: london), "Weekly, hourly on the hour")
+
         let hourly = try RRule("FREQ=DAILY;BYHOUR=\(allHours);BYMINUTE=0")
         XCTAssertEqual(hourly.text, "FREQ=DAILY;BYHOUR=\(allHours);BYMINUTE=0")
         XCTAssertFalse(hourly.summaryShortensTimes(timeZone: london))

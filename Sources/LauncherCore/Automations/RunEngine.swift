@@ -83,6 +83,12 @@ public final class RunEngine: @unchecked Sendable {
     public func execute(_ run: RunRecord, automation: Automation, control: RunControl = RunControl(),
                         followUp: RunFollowUp? = nil) -> RunRecord {
         var run = run
+        // Only the staged workflow writes the summary markers the app trusts; other kinds' summaries come from a script or a model.
+        let markers: Bool
+        if case .staged = automation.kind { markers = true } else { markers = false }
+        func finish(_ run: inout RunRecord, _ state: RunState, error: String?) -> RunRecord {
+            self.finish(&run, state, error: error, markers: markers)
+        }
         guard run.revision == automation.revision else {
             return finish(&run, .failed, error: "The automation changed after this run was queued. Start a new run.")
         }
@@ -296,13 +302,15 @@ public final class RunEngine: @unchecked Sendable {
         return true
     }
 
-    private func finish(_ run: inout RunRecord, _ state: RunState, error: String?) -> RunRecord {
+    /// Without `markers`, a summary from a script, a model, or an error can never start with a marker the app trusts.
+    private func finish(_ run: inout RunRecord, _ state: RunState, error: String?, markers: Bool) -> RunRecord {
         run.state = state
         run.error = state == .succeeded || state.needsUser ? nil : error
         if state.isFinished { run.finished = Date() }
         if !state.isActive { run.ownerPID = nil; run.ownerStart = nil }
         run.childPGID = nil; run.childStart = nil
         if run.summary.isEmpty, let error { run.summary = String(error.prefix(200)) }
+        if !markers { run.summary = Self.unmarked(run.summary) }
         save(&run)
         return run
     }

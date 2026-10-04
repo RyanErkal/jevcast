@@ -179,6 +179,16 @@ final class AutomationPortTests: XCTestCase {
         XCTAssertFalse(StagedHandoff.isPeriodKey("2026-9-1"))
     }
 
+    /// The finish script gets the ID as `--item <id>`, so an ID that reads as an option is refused.
+    func testHandoffRejectsItemIDsThatStartWithADash() {
+        for id in ["--adopt", "-x", "-"] {
+            let json = #"{"schema":"jevcast.staged.v1","outcome":"work","summary":"s","items":[{"id":"\#(id)","job":"j","period_key":"2026-09-26","action":"generate","title":"T"}]}"#
+            XCTAssertThrowsError(try StagedHandoff.parse(Data(json.utf8)), id) { error in
+                XCTAssertTrue("\(error)".contains("starts with \"-\""), "\(error)")
+            }
+        }
+    }
+
     // MARK: Setup tool
 
     func setupSpec(model: String = "gpt-6.1-sol", fetchAccess: String = "readOnly") throws -> Data {

@@ -73,6 +73,8 @@ public struct StagedHandoff: Equatable, Sendable {
             guard id.allSatisfy({ $0.isASCII && ($0.isLowercase || $0.isNumber || ":._-".contains($0)) }), seen.insert(id).inserted else {
                 throw ParseError.invalid("item IDs use a-z, 0-9, and :._- and are unique")
             }
+            // The finish script gets it as `--item <id>`, so it must never read as an option.
+            guard !id.hasPrefix("-") else { throw ParseError.invalid("item ID \(id) starts with \"-\"") }
             let job = try StagedJSON.text(d, "job", max: 80, required: true)
             let period = try StagedJSON.text(d, "period_key", max: 10, required: true)
             guard isPeriodKey(period) else { throw ParseError.invalid("period_key \(period) is not YYYY-MM-DD or YYYY-MM") }

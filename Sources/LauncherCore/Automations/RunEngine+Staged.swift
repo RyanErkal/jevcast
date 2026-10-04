@@ -7,9 +7,19 @@ extension RunEngine {
     public static let stagesFile = "stages.json"
     static let stagedOutputBytes = 1024 * 1024
     /// Starts the summary of a run that stopped on something the user must review. The app reads it, so keep it in step.
+    /// Only this engine's staged workflow writes it; text from a script or a model never does (see `unmarked`).
     public static let needsReviewPrefix = "Needs review: "
-    /// Starts the summary of a run with a report ready to show.
+    /// Starts the summary of a run with a report ready to show. Only `finishStaged` writes it.
     public static let reportReadyPrefix = "Report ready: "
+
+    /// Text from a script or a model, changed so it cannot start with a marker the app trusts:
+    /// "Needs review: x" becomes "Needs review - x". Other text is unchanged.
+    static func unmarked(_ text: String) -> String {
+        for prefix in [needsReviewPrefix, reportReadyPrefix] where text.hasPrefix(prefix) {
+            return String(prefix.dropLast(2)) + " - " + text.dropFirst(prefix.count)
+        }
+        return text
+    }
 
     /// One line of `stages.json`, saved after every stage so a crash leaves a trail.
     struct StageEntry: Codable, Equatable {
@@ -26,8 +36,13 @@ extension RunEngine {
         var sections: [String] = []
         var stages: [StageEntry] = []
         var publications: [PublicationItem] = []
-        var failures: [String] = []
+        private(set) var failures: [String] = []
         var recorded = 0
+
+        /// A failure in words from a script, a model, or this engine. It never carries a marker.
+        mutating func fail(_ text: String) { failures.append(RunEngine.unmarked(text)) }
+        /// A stop only the user can settle. The one place a staged failure gets the needs-review marker.
+        mutating func review(_ text: String) { failures.append(RunEngine.needsReviewPrefix + text) }
     }
 
     func runStaged(_ run: inout RunRecord, _ task: StagedTask, automation: Automation, control: RunControl) -> Step {
@@ -65,18 +80,18 @@ extension RunEngine {
         if let step = pre.stop { return finishStaged(&run, state, stop: step) }
         let handoff: StagedHandoff
         do { handoff = try StagedHandoff.parse(pre.stdout) } catch {
-            state.failures.append("\(error) " + pre.failureText)
+            state.fail("\(error) " + pre.failureText)
             return finishStaged(&run, state, stop: nil)
         }
         // A non-zero exit may only explain a block; it never counts as work or as nothing due.
         guard pre.exitedZero || handoff.outcome == .blocked else {
-            state.failures.append("The preflight failed. " + pre.failureText)
+            state.fail("The preflight failed. " + pre.failureText)
             return finishStaged(&run, state, stop: nil)
         }
         if !handoff.markdown.isEmpty { state.sections.append(handoff.markdown) }
         switch handoff.outcome {
         case .blocked:
-            state.failures.append(handoff.summary)
+            state.fail(handoff.summary)
             return finishStaged(&run, state, stop: nil)
         case .noDue:
             return finishStaged(&run, state, stop: nil, quietSummary: handoff.summary)
@@ -101,7 +116,7 @@ extension RunEngine {
         switch item.action {
         case .review:
             state.sections.append("## \(item.title)\n\n" + (item.display.isEmpty ? "Needs your review before anything else runs." : item.display))
-            state.failures.append(Self.needsReviewPrefix + item.title)
+            state.review(item.title)
             return false
         case .present:
             let wanted = PublicationItem(job: item.job, periodKey: item.periodKey, title: item.title, artifactHashes: item.artifactHashes)
@@ -119,7 +134,7 @@ extension RunEngine {
             var manifest = ""
             if item.fetch {
                 guard let fetch = task.fetch else {
-                    state.failures.append("The planner asked for a fetch, but this workflow has no fetch stage.")
+                    state.fail("The planner asked for a fetch, but this workflow has no fetch stage.")
                     return false
                 }
                 switch runFetch(&run, fetch, item: item, index: index, work: work, automation: automation,
@@ -127,7 +142,7 @@ extension RunEngine {
                 case .success(let text): manifest = text
                 case .failure(let why):
                     state.sections.append("## \(item.title)\n\nThe fetch stopped: \(why)")
-                    state.failures.append(why)
+                    state.fail(why)
                     return false
                 }
             }
@@ -214,6 +229,12 @@ extension RunEngine {
             if !t.events.commands.isEmpty || t.events.commandsTruncated {
                 return fail("The fetch worker ran a command although its shell was off. Its result is not used.")
             }
+            // And exactly one call to its one tool, and no other tool use of any kind.
+            let approved = t.events.toolCalls.filter { $0.server == FetchToolServer.serverName && $0.tool == FetchToolSpec.toolName }
+            guard approved.count == 1, t.events.otherToolUses == 1 else {
+                return fail("The fetch worker did not make exactly one call to its one tool (\(approved.count) calls, "
+                            + "\(t.events.otherToolUses) tool uses in all). Its result is not used.")
+            }
         }
         log(&run, &state, StageEntry(stage: "fetch", item: item.id, state: "succeeded", started: started, finished: Date(),
                                      detail: words.joined(separator: " ")))
@@ -238,7 +259,7 @@ extension RunEngine {
         let started = Date()
         let tag = "item\(index)-analyst"
         guard timeout >= 10 else {
-            state.failures.append("The run reached its time limit before the analyst.")
+            state.fail("The run reached its time limit before the analyst.")
             return nil
         }
         var task = analyst
@@ -252,7 +273,7 @@ extension RunEngine {
         func fail(_ why: String) -> String? {
             log(&run, &state, StageEntry(stage: "analyst", item: item.id, state: "failed", started: started, finished: Date(), detail: why))
             state.sections.append("## \(item.title)\n\nThe analyst stopped: \(why)")
-            state.failures.append(why)
+            state.fail(why)
             return nil
         }
         let t: AgentTurn
@@ -292,12 +313,12 @@ extension RunEngine {
               result.exitedZero || finish.status == .blocked else {
             let why = result.stopText ?? ("The finish script did not report a valid result. " + result.failureText)
             state.sections.append("## \(item.title)\n\nThe report was not finished: \(why)")
-            state.failures.append(why)
+            state.fail(why)
             return false
         }
         state.sections.append("## \(item.title)\n\n" + finish.markdown)
         guard finish.status == .validated, var publication = finish.publication else {
-            state.failures.append(finish.summary)
+            state.fail(finish.summary)
             return false
         }
         if publication.title.isEmpty { publication.title = item.title }
@@ -325,7 +346,7 @@ extension RunEngine {
             guard result.stop == nil, result.exitedZero, let answer = try? StagedPublish.parse(result.stdout) else {
                 let why = "Posting receipts for run \(prior.id) could not be recorded: \(result.stopText ?? result.failureText)"
                 state.sections.append(why + " The reports and proof are kept and tried again next run.")
-                state.failures.append(why)
+                state.fail(why)
                 continue
             }
             for index in record.items.indices where record.items[index].state == .pending {
@@ -338,7 +359,7 @@ extension RunEngine {
                     record.items[index].state = .refused
                     record.items[index].detail = refused.reason
                     state.sections.append("The posting receipt for \(item.title) was refused: \(refused.reason)")
-                    state.failures.append(Self.needsReviewPrefix + "\(item.title) changed after it was shown.")
+                    state.review("\(item.title) changed after it was shown.")
                 }
             }
             if let data = try? JSONEncoder.sortedPretty().encode(record) {
@@ -449,7 +470,7 @@ extension RunEngine {
             run.quiet = false
             return .done(.succeeded, nil)
         }
-        run.summary = quietSummary.isEmpty ? (state.recorded > 0 ? "Posting receipts recorded" : "Nothing due") : String(quietSummary.prefix(200))
+        run.summary = quietSummary.isEmpty ? (state.recorded > 0 ? "Posting receipts recorded" : "Nothing due") : String(Self.unmarked(quietSummary).prefix(200))
         run.quiet = true
         return .done(.succeeded, nil)
     }

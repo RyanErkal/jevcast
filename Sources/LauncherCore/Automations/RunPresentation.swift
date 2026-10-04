@@ -20,8 +20,8 @@ public enum FailureExplainer {
     public static func explain(_ run: RunRecord, catchUp: CatchUp?) -> FailureExplanation? {
         switch run.state {
         case .failed:
-            let text = run.error ?? run.summary
-            if let counts = divergence(in: text) {
+            // Only the runner's error text, which holds a script's own output. An agent's summary is model-written.
+            if let text = run.error, let counts = divergence(in: text) {
                 return FailureExplanation(
                     kind: .needsReview, title: "Needs review: Git branches diverged",
                     message: "The local branch and its remote each have commits the other lacks\(counts). The script stopped "
@@ -39,6 +39,13 @@ public enum FailureExplainer {
             case .skip?: next = "Missed times are skipped. The next scheduled time runs as usual."
             case nil: next = "The next scheduled time runs as usual."
             }
+            if run.started == nil {
+                return FailureExplanation(
+                    kind: .interrupted, title: "Not started",
+                    message: "The runner stopped before this run started, and it was not started late. Nothing from this run "
+                        + "ran. This happens when the Mac shuts down or restarts, you log out, or the runner restarts. " + next,
+                    retryHelps: true)
+            }
             return FailureExplanation(
                 kind: .interrupted, title: "Interrupted",
                 message: "The runner stopped during this run. This happens when the Mac shuts down or restarts, you log out, "
@@ -50,10 +57,15 @@ public enum FailureExplainer {
     }
 
     /// " (42 ahead, 42 behind)" for a Git divergence message, "" when it has no counts, nil when it is not one.
+    /// The counts come from the parenthesis right after the divergence phrase, not from any earlier one.
     static func divergence(in text: String) -> String? {
         let lower = text.lowercased()
-        guard lower.contains("diverged from") || (lower.contains("have diverged") && lower.contains("branch")) else { return nil }
-        guard let open = lower.range(of: "("), let close = lower.range(of: ")", range: open.upperBound..<lower.endIndex) else { return "" }
+        let phrase: Range<String.Index>
+        if let from = lower.range(of: "diverged from") { phrase = from }
+        else if let have = lower.range(of: "have diverged"), lower.contains("branch") { phrase = have }
+        else { return nil }
+        guard let open = lower.range(of: "(", range: phrase.upperBound..<lower.endIndex),
+              let close = lower.range(of: ")", range: open.upperBound..<lower.endIndex) else { return "" }
         let inside = lower[open.upperBound..<close.lowerBound]
         guard inside.contains("ahead"), inside.contains("behind"), inside.count <= 40 else { return "" }
         return " (" + inside + ")"

@@ -7,7 +7,8 @@ extension RRule {
     public func summary(anchor: Date? = nil, timeZone: TimeZone = .current) -> String {
         if frequency == .hourly { return interval == 1 ? "Every hour" : "Every \(interval) hours" }
         let times = times(anchor: anchor, timeZone: timeZone)
-        let everyDay = weekdays.isEmpty || Set(weekdays) == Set(1...7)
+        // Weekly with no BYDAY runs only on the anchor's weekday, so it is not every day.
+        let everyDay = (frequency == .daily && weekdays.isEmpty) || Set(weekdays) == Set(1...7)
         if let hourly = hourlyPhrase(times) {
             if everyDay, interval == 1 { return "Hourly · " + hourly.capitalizedFirst }
             return dayPrefix(anchor: anchor, timeZone: timeZone) + ", hourly " + hourly

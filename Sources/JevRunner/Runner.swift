@@ -48,13 +48,15 @@ final class Runner: @unchecked Sendable {
         guard !shuttingDown else { return }
         ticks += 1
         let settings = store.loadSettings()
+        // Read once per tick; an edit made during the tick applies on the next one.
+        let automations = store.loadAutomations().automations
         beat()
-        expireWaitingRuns()
-        refreshLeftoverLocks()
+        expireWaitingRuns(automations)
+        refreshLeftoverLocks(automations)
         handleRequests(settings)
-        scheduleDue(settings)
+        scheduleDue(settings, automations)
         startQueued(settings)
-        updateKeepAwake(settings)
+        updateKeepAwake(settings, automations)
         if ticks % 120 == 1 { store.prune(now: Date(), settings: settings) }
     }
 
@@ -66,9 +68,9 @@ final class Runner: @unchecked Sendable {
 
     /// A proposal older than seven days can no longer be approved. Its run becomes expired,
     /// so it stops blocking the next run. Journals and other run files stay.
-    private func expireWaitingRuns() {
+    private func expireWaitingRuns(_ automations: [Automation]) {
         let now = Date()
-        for automation in store.loadAutomations().automations {
+        for automation in automations {
             for run in store.runs(for: automation.id, limit: 20) where active[run.id] == nil {
                 guard let expired = WaitingRunExpiry.expired(run, now: now) else { continue }
                 saveRun(expired)
@@ -119,10 +121,10 @@ final class Runner: @unchecked Sendable {
         return true
     }
 
-    private func scheduleDue(_ settings: AutomationSettings) {
+    private func scheduleDue(_ settings: AutomationSettings, _ automations: [Automation]) {
         let now = Date()
         let claim = OccurrenceClaim(store: store)
-        for automation in store.loadAutomations().automations where automation.enabled {
+        for automation in automations where automation.enabled {
             let result = claim.claimDue(automation, now: now, busy: isBusy(automation.id)) { self.prepare(&$0, automation) }
             switch result {
             case .queued(let run):
@@ -227,9 +229,21 @@ final class Runner: @unchecked Sendable {
         for run in store.runs(for: automationID, limit: 20) {
             if run.state.isActive || run.state.needsUser { busy = true; continue }
             if let resolved = OrphanRecovery.resolvedOrphan(run) { saveRun(resolved); continue }
-            if StagedRecovery.mayRun(store: store, run: run) { busy = true }
+            if leftoverBlocks(run) { busy = true }
         }
         return busy
+    }
+
+    /// True when a finished run left a program that may still run, or a record that cannot be checked. The reason
+    /// goes on that run's error once, so the user sees why the automation waits and what clears it.
+    private func leftoverBlocks(_ run: RunRecord) -> Bool {
+        guard !run.state.isActive, let reason = StagedRecovery.blockReason(store: store, run: run) else { return false }
+        if run.error?.contains(reason) != true {
+            var r = run; r.error = [run.error, "Blocked: " + reason].compactMap { $0 }.joined(separator: " ")
+            saveRun(r)
+            log("\(run.automationID) waits: \(reason)")
+        }
+        return true
     }
 
     private func lockTaken(_ name: String?) -> Bool {
@@ -237,12 +251,13 @@ final class Runner: @unchecked Sendable {
         return active.values.contains { $0.sharedLock == name } || leftoverLocks.contains(name)
     }
 
-    private func refreshLeftoverLocks() {
+    /// Reads the automations itself unless the caller already has them.
+    private func refreshLeftoverLocks(_ known: [Automation]? = nil) {
         var locks = Set<String>()
-        for automation in store.loadAutomations().automations {
+        for automation in known ?? store.loadAutomations().automations {
             guard let lock = automation.policy.sharedLock, !lock.isEmpty, !locks.contains(lock) else { continue }
             let runs = store.runs(for: automation.id, limit: 20).filter { active[$0.id] == nil && !$0.state.isActive }
-            if runs.contains(where: { StagedRecovery.mayRun(store: store, run: $0) }) { locks.insert(lock) }
+            if runs.contains(where: leftoverBlocks) { locks.insert(lock) }
         }
         if locks != leftoverLocks, !locks.isEmpty { log("Waiting for programs left by earlier runs; locks held: \(locks.sorted().joined(separator: ", "))") }
         leftoverLocks = locks
@@ -263,8 +278,8 @@ final class Runner: @unchecked Sendable {
     }
 
     /// Checked each tick, so a change to the setting, the power source, or the automations applies within 30 seconds.
-    private func updateKeepAwake(_ settings: AutomationSettings) {
-        let wanted = KeepAwakePolicy.wanted(settings: settings, automations: store.loadAutomations().automations,
+    private func updateKeepAwake(_ settings: AutomationSettings, _ automations: [Automation]) {
+        let wanted = KeepAwakePolicy.wanted(settings: settings, automations: automations,
                                             power: settings.keepAwakeOnPower ? KeepAwake.powerSource() : .unknown,
                                             shuttingDown: shuttingDown, now: Date())
         keepAwake.update(wanted: wanted)
@@ -301,7 +316,8 @@ final class Runner: @unchecked Sendable {
                 var r = OrphanRecovery.interrupt(run)
                 if let left = StagedRecovery.stopFetchChildren(store: store, run: r, grace: 10), r.orphanPGID == nil {
                     r.orphanPGID = left.pgid > 1 ? left.pgid : nil; r.orphanStart = left.start
-                    r.error = (r.error ?? "") + " Its fetch command could not be confirmed stopped; this automation waits until it ends."
+                    r.error = (r.error ?? "") + " " + (StagedRecovery.blockReason(store: store, run: r)
+                        ?? "Its fetch command could not be confirmed stopped; this automation waits until it ends.")
                 }
                 saveRun(r)
                 if case .staged = automation.kind, automation.enabled, run.trigger != .recovery { recover = true }

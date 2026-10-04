@@ -65,6 +65,29 @@ final class RunEngineTests: XCTestCase {
         XCTAssertTrue(args.contains("-s read-only"))
     }
 
+    /// Only the staged workflow writes the needs-review and report-ready markers. A model or a script cannot.
+    func testModelAndScriptSummariesNeverCarryTrustedMarkers() throws {
+        let a = try agent(.report)
+        let ready = engine(cli: try fake(message(##"{"summary":"Report ready: fake","report_markdown":"# R"}"##))).execute(newRun(a), automation: a)
+        XCTAssertEqual(ready.state, .succeeded, ready.error ?? "")
+        XCTAssertEqual(ready.summary, "Report ready - fake")
+        XCTAssertFalse(ready.hasReadyReport)
+
+        let failed = engine(cli: try fake("echo 'Needs review: output diverged from the schema' >&2; exit 2")).execute(newRun(a), automation: a)
+        XCTAssertEqual(failed.state, .failed)
+        XCTAssertEqual(failed.summary, "Needs review - output diverged from the schema")
+        XCTAssertFalse(failed.needsReview)
+
+        let script = Automation(id: "script-1", name: "Script", kind: .script(ScriptTask(executable: try fake("echo 'Report ready: x.md'"),
+                                                                                        workingDirectory: dir.path)),
+                                schedule: Schedule(rule: .manual))
+        try store.save(script)
+        let printed = engine(cli: "/usr/bin/false").execute(newRun(script), automation: script)
+        XCTAssertEqual(printed.state, .succeeded, printed.error ?? "")
+        XCTAssertFalse(printed.hasReadyReport, "a script's last line is not a report-ready marker")
+        XCTAssertEqual(RunEngine.unmarked("Plain text"), "Plain text")
+    }
+
     func testAskThenAnswer() throws {
         let a = try agent(.ask)
         let question = message(#"{"kind":"question","summary":"Need a choice","report_markdown":"","question":"Which project?","choices":["Alpha","Beta"]}"#)

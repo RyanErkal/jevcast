@@ -44,4 +44,11 @@ public enum KeepAwakePolicy {
             return age >= renewInterval || age < 0 ? .renew : .none
         }
     }
+
+    /// After a failed renew, the old assertion is kept only while it is well inside its OS timeout, so the next
+    /// tick can try again. After that, or when the clock moved back, it is dropped and the next tick makes a new one.
+    public static func keepsOldAfterFailedRenew(heldSince: Date, now: Date) -> Bool {
+        let age = now.timeIntervalSince(heldSince)
+        return age >= 0 && age < assertionTimeout - 60
+    }
 }

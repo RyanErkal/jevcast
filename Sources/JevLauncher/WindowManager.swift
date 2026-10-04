@@ -366,6 +366,12 @@ public final class WindowManager {
         let frames = cascade ? cascadeFrames(count: records.count, in: destination.axVisibleFrame)
             : WindowLayout.gridFrames(count: records.count, in: destination.axVisibleFrame, gap: CGFloat(gap))
         var moved: [WindowUndoHistory<WindowKey, AXUIElement>.Move] = []
+        // Enhanced accessibility goes off once per app for the whole layout. Chrome rebuilds its accessibility
+        // tree each time it changes, so turning it off and on for every window makes a layout slow.
+        var seen = Set<pid_t>()
+        let enhanced = records.filter { seen.insert($0.pid).inserted && enhancedUserInterface(of: $0.application) }.map(\.application)
+        for application in enhanced { setEnhancedUserInterface(false, for: application) }
+        defer { for application in enhanced { restoreEnhancedUserInterface(for: application) } }
         do {
             for (record, targetFrame) in zip(records, frames) {
                 // Windows already in place are not written and get no undo entry.

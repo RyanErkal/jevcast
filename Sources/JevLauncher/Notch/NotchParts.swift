@@ -226,17 +226,20 @@ struct NotchStatus: View {
     let reduceMotion: Bool
     /// Off where the stack count already shows elsewhere.
     var showsBadge = true
-    /// The pill draws a finished run's outcome where its ring was. Cards show the outcome on the icon instead.
+    /// The pill draws a run's mark where its ring was. Cards show the state on the icon instead.
     var showsOutcome = false
     var ringSize: CGFloat = 14
 
-    /// The outcome mark: done, failed, or needs review.
-    static func outcome(_ phase: NotchPresentation.Phase) -> (symbol: String, label: String)? {
+    /// The mark in the pill: done, failed, or needs review, which leave by themselves, or a question or an approval,
+    /// which stay until clicked.
+    static func mark(_ phase: NotchPresentation.Phase) -> (symbol: String, label: String)? {
         switch phase {
         case .success: return ("checkmark.circle.fill", "Done")
         case .failure: return ("exclamationmark.circle.fill", "Failed")
         case .review: return ("eye.circle.fill", "Needs review")
-        case .running, .question, .approval, .info: return nil
+        case .question: return ("questionmark.circle.fill", "Has a question")
+        case .approval: return ("hand.raised.circle.fill", "Needs approval")
+        case .running, .info: return nil
         }
     }
 
@@ -262,7 +265,7 @@ struct NotchStatus: View {
                     }
                 }
                 .transition(.opacity)
-            } else if showsOutcome, p.minimized, let mark = Self.outcome(p.phase) {
+            } else if showsOutcome, p.minimized, let mark = Self.mark(p.phase) {
                 // The ring gives way to the mark: it grows in, in the outcome's colour, where the ring turned.
                 Image(systemName: mark.symbol)
                     .font(.system(size: ringSize + 2, weight: .semibold))

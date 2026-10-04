@@ -9,14 +9,16 @@ enum NotchTiming {
     /// A finished run's mark in the pill: long enough to notice, short enough not to distract.
     static let doneSeconds: TimeInterval = 4
 
-    /// `minimized`: a finished run's outcome in the pill. It always leaves by itself: done after `doneSeconds`, a
-    /// failure or a run that needs review after `failureSeconds`. The run stays in the Automations window.
+    /// `minimized`: a run's mark in the pill. A finished run's outcome leaves by itself: done after `doneSeconds`, a
+    /// failure or a run that needs review after `failureSeconds`; the run stays in the Automations window. A question
+    /// or an approval stays until handled, as its card would.
     static func seconds(for kind: NotchAlert.Kind, failureSeconds: TimeInterval, minimized: Bool = false) -> TimeInterval? {
         if minimized {
             switch kind {
             case .success: return doneSeconds
             case .failure, .review: return failureSeconds
-            case .running, .question, .approval, .info: break
+            case .question, .approval: return nil
+            case .running, .info: break
             }
         }
         switch kind {

@@ -87,6 +87,8 @@ enum NotchSnapshots {
             ("notch-pill-failed", finished(failure), .compact, notch, nil),
             ("notch-pill-review", finished(review), .compact, notch, nil),
             ("notch-pill-done-together", doneTogether, .compact, notch, nil),
+            ("notch-pill-question", finished(question), .compact, notch, nil),
+            ("notch-pill-approval", finished(approval), .compact, notch, nil),
             ("notch-plain-pill-failed", finished(failure), .compact, plain, nil),
             // One automation running: its icon and colour, one ring, no timer.
             ("notch-pill-running", report, .compact, notch, nil),

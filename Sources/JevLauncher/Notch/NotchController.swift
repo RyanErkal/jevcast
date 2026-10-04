@@ -1,13 +1,13 @@
 import AppKit
 import SwiftUI
 
-/// Shows notch alerts: one alert, a stack, or a pill, out of the MacBook notch. A run shows in the pill while it works;
-/// when it finishes, the pill's ring turns into its outcome mark for a few seconds and the pill leaves. Only alerts that
-/// need an answer or approval open as cards by themselves.
+/// Shows notch alerts: one alert, a stack, or a pill, out of the MacBook notch. Automation alerts never open by
+/// themselves. A run shows in the pill while it works; then the pill's ring turns into a mark. A finished run's outcome
+/// leaves after a few seconds; a question or an approval stays until clicked. A click opens the card.
 /// On a screen without a notch the shape drops from the top centre.
 /// The panel takes keyboard focus only after the user clicks Reply. It plays no sound.
-/// A press outside an open card, list, or reply closes it (`outsideClick`): running work returns to its pill, alerts that
-/// offer Later go as Later does, and alerts without Later stay.
+/// A press outside an open card, list, or reply closes it (`outsideClick`): anything that rests in the pill returns to
+/// it, alerts that offer Later go as Later does, and alerts without Later stay.
 /// It hides, without losing anything, while the session is locked or a menu is open under it.
 @MainActor
 final class NotchAlertController {

@@ -26,19 +26,33 @@ final class NotchOutcomeTests: XCTestCase {
         return AutomationCenter.runningAlert(r, automation: automation, hideNames: false)
     }
 
-    func testFinishedRunsRestInThePillAndOnlyAnswersOpenACard() {
+    func testEveryRunAlertRestsInThePillAndOpensOnlyOnAClick() {
         for (alert, kind) in [(outcome(.succeeded), NotchAlert.Kind.success), (outcome(.failed), .failure),
-                              (outcome(.interrupted), .failure), (outcome(.failed, needsReview: true), .review)] {
+                              (outcome(.interrupted), .failure), (outcome(.failed, needsReview: true), .review),
+                              (outcome(.needsInput), .question), (outcome(.needsApproval), .approval)] {
             XCTAssertEqual(alert.kind, kind)
             XCTAssertTrue(alert.minimized, "\(kind)")
             XCTAssertEqual(NotchAlertController.restingMode(for: alert), .pill, "\(kind) never opens by itself")
             XCTAssertEqual(NotchAlertController.openMode(for: alert), .card, "a click opens its card")
+            XCTAssertNotNil(NotchStatus.mark(alert.presentation.phase), "\(kind) has a mark in the pill")
         }
-        for state in [RunState.needsInput, .needsApproval] {
-            let alert = outcome(state)
-            XCTAssertFalse(alert.minimized)
-            XCTAssertEqual(NotchAlertController.restingMode(for: alert), .card, "\(state) needs the user")
-        }
+    }
+
+    func testQuestionsAndApprovalsStayUntilClicked() throws {
+        XCTAssertNil(NotchTiming.seconds(for: .question, failureSeconds: 8, minimized: true))
+        XCTAssertNil(NotchTiming.seconds(for: .approval, failureSeconds: 8, minimized: true))
+        XCTAssertEqual(NotchStatus.mark(.question)?.label, "Has a question")
+        XCTAssertEqual(NotchStatus.mark(.approval)?.label, "Needs approval")
+
+        var q = NotchQueue()
+        q.add(outcome(.needsInput))
+        let shown = try XCTUnwrap(q.presentation)
+        let drawn = NotchAlertController.presentedAlerts(shown, mode: .pill)
+        XCTAssertEqual(drawn.map(\.id), [shown.id], "the mark in the pill counts as shown")
+        q.startTimers(now: Date(), drawn: Set(drawn.map(\.id)))
+        XCTAssertNil(q.nextDeadline, "no countdown")
+        XCTAssertEqual(q.expire(now: Date().addingTimeInterval(3600)), [])
+        XCTAssertNotNil(q.presentation, "still waiting an hour later")
     }
 
     func testTheOutcomeNamesTheAutomation() {
@@ -78,10 +92,10 @@ final class NotchOutcomeTests: XCTestCase {
                        "the pill keeps its identity, so only the mark changes")
         XCTAssertEqual(NotchAlertController.nextMode(previous: ring, previousMode: .detail, next: done, replyTarget: nil), .card,
                        "a running card the user opened shows the outcome as a card")
-        XCTAssertEqual(NotchStatus.outcome(.success)?.label, "Done")
-        XCTAssertEqual(NotchStatus.outcome(.failure)?.label, "Failed")
-        XCTAssertEqual(NotchStatus.outcome(.review)?.label, "Needs review")
-        XCTAssertNil(NotchStatus.outcome(.running))
+        XCTAssertEqual(NotchStatus.mark(.success)?.label, "Done")
+        XCTAssertEqual(NotchStatus.mark(.failure)?.label, "Failed")
+        XCTAssertEqual(NotchStatus.mark(.review)?.label, "Needs review")
+        XCTAssertNil(NotchStatus.mark(.running))
     }
 
     func testThePillDrawingAnOutcomeCountsAsShown() {
@@ -102,8 +116,14 @@ final class NotchOutcomeTests: XCTestCase {
         XCTAssertEqual(Set(NotchAlertController.presentedAlerts(stack, mode: .pill).map(\.id)), [a.id, b.id])
         XCTAssertTrue(stack.presentation.isPillStack)
 
-        let mixed = NotchQueue.stack([outcome(.needsApproval, id: "r3"), a])
-        XCTAssertFalse(mixed.minimized)
-        XCTAssertEqual(NotchAlertController.restingMode(for: mixed), .card, "an approval still opens")
+        let waiting = NotchQueue.stack([outcome(.needsApproval, id: "r3"), a])
+        XCTAssertTrue(waiting.minimized)
+        XCTAssertEqual(NotchAlertController.restingMode(for: waiting), .pill)
+        XCTAssertEqual(waiting.presentation.phase, .approval, "the pill shows the mark that matters most")
+
+        let result = NotchAlert(id: "result:backup/r4", kind: .info, symbol: "arrow.uturn.backward", title: "Backup", message: "Undid 3")
+        let withCard = NotchQueue.stack([result, a])
+        XCTAssertFalse(withCard.minimized)
+        XCTAssertEqual(NotchAlertController.restingMode(for: withCard), .card, "a card the user asked for, such as Undo, stays a card")
     }
 }

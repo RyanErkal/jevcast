@@ -56,7 +56,7 @@ enum LauncherPages {
             let list = SourcePage(.calendar, source: snapshot ? nil : CalendarSource(), model: model, scope: "week", hasDetail: true,
                                   emptyText: "Nothing in the next seven days.",
                                   popOut: snapshot ? nil : { [weak model] in model?.onClose?(false); CalendarSource.openApp("com.apple.iCal") })
-            return CalendarPage(list: list, readsEvents: !snapshot)
+            return CalendarPage(list: list, readsEvents: !snapshot, hideLauncher: { [weak model] in model?.onClose?(false) })
         case .tasks:
             let center = model.scheduledBriefs
             let openRun = links.runWindow ?? { _ in }

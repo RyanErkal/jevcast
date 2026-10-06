@@ -71,12 +71,12 @@ public struct MailOAuthAuthorization: Sendable {
         data.base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
     }
 
-    public func url(client: MailOAuthClient, redirect: URL, email: String) throws -> URL {
+    public func url(client: MailOAuthClient, redirect: URL, email: String, scopes: [String]? = nil) throws -> URL {
         try Self.validateRedirect(redirect)
         var components = URLComponents(url: client.provider.authorizationURL, resolvingAgainstBaseURL: false)!
         components.queryItems = [
             .init(name: "client_id", value: client.clientID), .init(name: "redirect_uri", value: redirect.absoluteString),
-            .init(name: "response_type", value: "code"), .init(name: "scope", value: client.provider.scopes.joined(separator: " ")),
+            .init(name: "response_type", value: "code"), .init(name: "scope", value: (scopes ?? client.provider.scopes).joined(separator: " ")),
             .init(name: "state", value: state), .init(name: "code_challenge", value: challenge),
             .init(name: "code_challenge_method", value: "S256"), .init(name: "login_hint", value: email)
         ]

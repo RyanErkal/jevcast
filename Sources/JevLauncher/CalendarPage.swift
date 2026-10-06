@@ -1,13 +1,14 @@
 import AppKit
+import Combine
 import EventKit
+import LauncherCore
 import SwiftUI
 
-/// Calendar in the launcher panel: a month grid (the default), a week, and the event list.
-/// ← and → switch between them; ↑ and ↓ move to the previous or next month or week.
-/// The list is the source view the calendar used before, with its detail and verbs.
+/// Local Calendar and opt-in Google Calendar. Data is copied into values before drawing.
 @MainActor
 final class CalendarPage: ObservableObject, LauncherPage {
-    enum Mode: String, CaseIterable { case month = "Month", week = "Week", list = "List" }
+    enum Mode: String, CaseIterable { case month = "Month", week = "Week", day = "Day", list = "List" }
+    enum Source: String { case mac = "On This Mac", google = "Google" }
     struct Event: Identifiable, Equatable, Sendable {
         let id: String
         let title: String
@@ -15,13 +16,31 @@ final class CalendarPage: ObservableObject, LauncherPage {
         let end: Date
         let allDay: Bool
         let color: Color
+        var notes = ""
+        var location = ""
+        var calendarName = ""
+        var organizer = ""
+        var guests: [CalendarGuest] = []
+        var attachments: [CalendarAttachment] = []
+        var meetingURL: URL?
+        var webURL: URL?
+        var localID: String?
+        var timeZone: String?
     }
 
     let id = ViewID.calendar
     private let list: SourcePage
     /// False for snapshot runs, which never read real events.
     private let readsEvents: Bool
-    @Published private(set) var mode: Mode = .month
+    @Published private(set) var mode: Mode = .week
+    @Published private(set) var source: Source = .mac
+    @Published private(set) var selectedEvent: Event?
+    @Published private(set) var loading = false
+    @Published private(set) var errorMessage: String?
+    let google: GoogleCalendarAccount?
+    private let defaults: UserDefaults?
+    private let hideLauncher: () -> Void
+    private let openSignIn: @MainActor (GoogleCalendarAccount) -> Void
     /// Any day inside the month or week on screen.
     @Published private(set) var anchor = Date()
     /// The days on screen and each day's events, worked out once per change, not per redraw.
@@ -42,16 +61,57 @@ final class CalendarPage: ObservableObject, LauncherPage {
     private var listOpened = false
     private var calendar: Calendar { Calendar.current }
 
-    init(list: SourcePage, readsEvents: Bool) {
+    init(list: SourcePage, readsEvents: Bool, google: GoogleCalendarAccount? = nil, defaults: UserDefaults? = nil,
+         hideLauncher: @escaping () -> Void = {},
+         openSignIn: @escaping @MainActor (GoogleCalendarAccount) -> Void = { CalendarGoogleSignInWindow.shared.show(account: $0) }) {
         self.list = list; self.readsEvents = readsEvents
+        self.google = google ?? (readsEvents ? .shared : nil)
+        self.defaults = defaults ?? (readsEvents ? .standard : nil)
+        self.hideLauncher = hideLauncher; self.openSignIn = openSignIn
+        if self.google?.connected == true, self.defaults?.string(forKey: "calendarSource") == Source.google.rawValue { source = .google }
     }
 
-    var canPopOut: Bool { list.canPopOut }
-    func popOut() { list.popOut() }
+    var canPopOut: Bool { source == .google || list.canPopOut }
+    var openTitle: String { selectedEvent.map { $0.meetingURL == nil ? "Open in Calendar" : "Join Call" } ?? "Details" }
+    var footerChanges: AnyPublisher<Void, Never> { $selectedEvent.map { _ in () }.eraseToAnyPublisher() }
+    func popOut() {
+        guard readsEvents else { return }
+        if source == .google { Frontmost.open(URL(string: "https://calendar.google.com/")!) } else { list.popOut() }
+    }
+    func select(_ event: Event) { selectedEvent = event }
+    func signIn() {
+        guard let google else { return }
+        // Hide first, so app activation focuses the sign-in window instead of the launcher.
+        hideLauncher()
+        openSignIn(google)
+    }
+    func clearSelection() { selectedEvent = nil }
+    func use(_ next: Source) {
+        source = next; selectedEvent = nil
+        defaults?.set(next.rawValue, forKey: "calendarSource")
+        events = []; byDay = [:]; problem = nil; errorMessage = nil
+        if next == .mac, mode == .list, !listOpened { listOpened = true; list.opened() }
+        load()
+    }
+    func refresh() { Self.cache = []; load(refreshGoogle: true) }
+    func showDay(_ day: Date) { anchor = day; mode = .day; selectedEvent = nil; load() }
+    var displayedEvents: [Event] {
+        var seen = Set<String>()
+        return days.flatMap { events(on: $0) }.filter { seen.insert($0.id).inserted }
+    }
+
+    func open(_ url: URL) { if readsEvents { Frontmost.open(url) } }
+    func openInCalendar(_ event: Event) {
+        guard readsEvents else { return }
+        if let id = event.localID, let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+                let url = URL(string: "ical://ekevent/\(encoded)?method=show&options=more") { open(url) }
+        else if let web = event.webURL { open(web) }
+        else { CalendarSource.openApp("com.apple.iCal") }
+    }
 
     func opened() {
-        mode = .month; anchor = Date(); listOpened = false
-        Self.watchStore()
+        mode = .week; anchor = Date(); listOpened = false; selectedEvent = nil
+        if readsEvents { Self.watchStore() }
         load()
         // Changes made in Calendar show while the view is open. A burst of changes reloads once.
         changeObserver = NotificationCenter.default.addObserver(forName: .EKEventStoreChanged, object: nil, queue: .main) { [weak self] _ in
@@ -61,7 +121,7 @@ final class CalendarPage: ObservableObject, LauncherPage {
                 self.changeWork = Task { @MainActor [weak self] in
                     try? await Task.sleep(nanoseconds: 400_000_000)
                     guard !Task.isCancelled, let self else { return }
-                    Self.cache = []; self.load()
+                    Self.cache = []; if self.source == .mac { self.load() }
                 }
             }
         }
@@ -69,6 +129,7 @@ final class CalendarPage: ObservableObject, LauncherPage {
     func closed(handingOff: Bool) {
         if listOpened { list.closed(handingOff: handingOff) }
         work?.cancel(); fetchTask?.cancel(); changeWork?.cancel()
+        loading = false
         if let changeObserver { NotificationCenter.default.removeObserver(changeObserver) }
         changeObserver = nil
     }
@@ -77,27 +138,35 @@ final class CalendarPage: ObservableObject, LauncherPage {
         guard text != filterText else { return }
         filterText = text
         list.filter(text)
-        if mode != .list { group() }
+        if mode != .list || source == .google { group() }
     }
 
     func handle(_ key: PageKey) -> Bool {
         switch (mode, key) {
         case (_, .left): cycle(-1); return true
         case (_, .right): cycle(1); return true
-        case (.list, _): return list.handle(key)
+        case (.list, _) where source == .mac: return list.handle(key)
         case (_, .up): step(-1); return true
         case (_, .down): step(1); return true
-        case (_, .open): CalendarSource.openApp("com.apple.iCal"); return true
+        case (_, .open):
+            if let event = selectedEvent {
+                if let url = event.meetingURL { open(url) } else { openInCalendar(event) }
+            }
+            else if let event = events(on: calendar.startOfDay(for: anchor)).first ?? displayedEvents.first { select(event) }
+            return true
         case (_, .delete): return true
         }
     }
-    func back() -> Bool { mode == .list ? list.back() : false }
+    func back() -> Bool {
+        if selectedEvent != nil { selectedEvent = nil; return true }
+        return mode == .list && source == .mac ? list.back() : false
+    }
 
     func setMode(_ next: Mode) {
         guard next != mode else { return }
-        mode = next
+        mode = next; selectedEvent = nil
         // The list loads its rows the first time it shows, not while the grid is on screen.
-        if next == .list, !listOpened { listOpened = true; list.opened() }
+        if next == .list, source == .mac, !listOpened { listOpened = true; list.opened() }
         load()
     }
     func cycle(_ delta: Int) {
@@ -107,15 +176,17 @@ final class CalendarPage: ObservableObject, LauncherPage {
     }
     /// The previous or next month or week.
     func step(_ delta: Int) {
-        anchor = calendar.date(byAdding: mode == .week ? .weekOfYear : .month, value: delta, to: anchor) ?? anchor
+        selectedEvent = nil
+        anchor = calendar.date(byAdding: mode == .day ? .day : mode == .month ? .month : .weekOfYear, value: delta, to: anchor) ?? anchor
         load()
     }
-    func today() { anchor = Date(); load() }
+    func today() { anchor = Date(); selectedEvent = nil; load() }
 
     /// The days on screen: whole weeks covering the month, or the one week.
     private func computeDays() -> [Date] {
         let range: DateInterval?
-        if mode == .week {
+        if mode == .day { range = calendar.dateInterval(of: .day, for: anchor) }
+        else if mode == .week || mode == .list {
             range = calendar.dateInterval(of: .weekOfYear, for: anchor)
         } else if let month = calendar.dateInterval(of: .month, for: anchor),
                   let first = calendar.dateInterval(of: .weekOfYear, for: month.start),
@@ -132,7 +203,8 @@ final class CalendarPage: ObservableObject, LauncherPage {
         return result
     }
     var title: String {
-        if mode == .week, let first = days.first, let last = days.last {
+        if mode == .day { return anchor.formatted(.dateTime.weekday(.wide).day().month(.wide).year()) }
+        if mode == .week || mode == .list, let first = days.first, let last = days.last {
             return first.formatted(.dateTime.day().month(.abbreviated)) + " – " + last.formatted(.dateTime.day().month(.abbreviated).year())
         }
         return anchor.formatted(.dateTime.month(.wide).year())
@@ -156,12 +228,15 @@ final class CalendarPage: ObservableObject, LauncherPage {
         }
         byDay = result
     }
-    func inMonth(_ day: Date) -> Bool { mode == .week || calendar.isDate(day, equalTo: anchor, toGranularity: .month) }
+    func inMonth(_ day: Date) -> Bool { mode != .month || calendar.isDate(day, equalTo: anchor, toGranularity: .month) }
 
-    private func load() {
-        guard mode != .list else { work?.cancel(); fetchTask?.cancel(); return }
+    private func load(refreshGoogle: Bool = false) {
+        work?.cancel(); fetchTask?.cancel(); loading = false
+        errorMessage = nil; problem = nil
+        guard mode != .list || source == .google else { return }
         days = computeDays()
         guard readsEvents else { events = Self.demoEvents(around: anchor); group(); return }
+        if source == .google { loadGoogle(refreshCalendars: refreshGoogle); return }
         guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else {
             events = []; group()
             problem = SourceProblem(text: "Allow Calendar access to see your events.", access: .calendars)
@@ -229,7 +304,11 @@ final class CalendarPage: ObservableObject, LauncherPage {
             colours[key] = colour
             return Event(id: (event.eventIdentifier ?? UUID().uuidString) + ":\(event.startDate.timeIntervalSince1970)",
                          title: event.title ?? "Untitled event", start: event.startDate, end: event.endDate, allDay: event.isAllDay,
-                         color: colour)
+                         color: colour, notes: event.notes ?? "", location: event.location ?? "", calendarName: event.calendar?.title ?? "",
+                         organizer: event.organizer?.name ?? event.organizer?.url.absoluteString.replacingOccurrences(of: "mailto:", with: "") ?? "",
+                         guests: (event.attendees ?? []).map { CalendarGuest(name: $0.name ?? $0.url.absoluteString.replacingOccurrences(of: "mailto:", with: ""), response: Self.response($0.participantStatus)) },
+                         meetingURL: MeetingLink.find(in: [event.url?.absoluteString, event.location, event.notes]),
+                         webURL: CalendarLinks.web(event.url?.absoluteString), localID: event.eventIdentifier, timeZone: event.timeZone?.identifier)
         }
     }
     /// The calendar's own colour. `cgColor` keeps it in its colour space; a missing or
@@ -238,6 +317,14 @@ final class CalendarPage: ObservableObject, LauncherPage {
         guard let cg = calendar?.cgColor, let rgb = NSColor(cgColor: cg)?.usingColorSpace(.sRGB),
               rgb.redComponent + rgb.greenComponent + rgb.blueComponent > 0.15 else { return .accentColor }
         return Color(nsColor: rgb)
+    }
+    nonisolated private static func response(_ status: EKParticipantStatus) -> String {
+        switch status {
+        case .accepted: return "accepted"
+        case .declined: return "declined"
+        case .tentative: return "tentative"
+        default: return "needsAction"
+        }
     }
     func grant() { Task { await Permissions.request(.calendars); load() } }
 
@@ -255,152 +342,45 @@ final class CalendarPage: ObservableObject, LauncherPage {
             guard let day = cal.date(byAdding: .day, value: item.0, to: today),
                   let start = cal.date(byAdding: .minute, value: item.1 * 60, to: day) else { return nil }
             let end = item.5 ? cal.date(byAdding: .day, value: 1, to: day)! : start.addingTimeInterval(Double(item.2) * 60)
-            return Event(id: "demo\(index)", title: item.3, start: start, end: end, allDay: item.5, color: item.4)
+            return Event(id: "demo\(index)", title: item.3, start: start, end: end, allDay: item.5, color: item.4,
+                         notes: index == 0 ? "Review this week's priorities.\n\nMeeting notes\n• Confirm the launch checklist\n• Assign next steps and owners\n• Share the final designs" : "",
+                         location: index == 0 ? "Google Meet" : "", calendarName: "Work", organizer: index == 0 ? "Sam Taylor" : "",
+                         guests: index == 0 ? [CalendarGuest(name: "Alex Morgan", response: "accepted"), CalendarGuest(name: "Sam Taylor", response: "accepted")] : [],
+                         attachments: index == 0 ? [CalendarAttachment(title: "Meeting notes", url: URL(string: "https://docs.google.com/document/d/demo")!)] : [],
+                         meetingURL: index == 0 ? URL(string: "https://meet.google.com/abc-defg-hij") : nil,
+                         webURL: index == 0 ? URL(string: "https://calendar.google.com/") : nil)
         }
     }
 
     func content() -> AnyView { AnyView(CalendarPageView(page: self, list: list)) }
-}
 
-private struct CalendarPageView: View {
-    @ObservedObject var page: CalendarPage
-    let list: SourcePage
-
-    var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            if page.mode == .list { list.content() } else { grid(tall: page.mode == .week) }
+    private func loadGoogle(refreshCalendars: Bool) {
+        guard let google, google.connected else { events = []; group(); errorMessage = GoogleCalendarError.signInRequired.localizedDescription; return }
+        guard let start = days.first, let last = days.last, let end = calendar.date(byAdding: .day, value: 1, to: last) else { return }
+        let range = DateInterval(start: start, end: end)
+        events = []; group(); loading = true
+        work = Task { @MainActor [weak self] in
+            do {
+                let found = try await google.load(range, refreshCalendars: refreshCalendars)
+                guard !Task.isCancelled, let self else { return }
+                let calendars = Dictionary(uniqueKeysWithValues: google.calendars.map { ($0.id, $0) })
+                self.events = found.map { event in
+                    let info = calendars[event.calendarID]
+                    return Event(id: event.id, title: event.title, start: event.start, end: event.end, allDay: event.allDay,
+                        color: Self.googleColor(info?.backgroundColor), notes: event.notes, location: event.location, calendarName: info?.summary ?? "Google Calendar",
+                        organizer: event.organizer, guests: event.guests, attachments: event.attachments, meetingURL: event.meetingURL, webURL: event.webURL, timeZone: event.timeZone)
+                }
+                self.group(); self.loading = false
+            } catch {
+                guard !Task.isCancelled, let self else { return }
+                self.loading = false; self.errorMessage = error.localizedDescription
+            }
         }
     }
 
-    private var header: some View {
-        HStack(spacing: 10) {
-            if page.mode != .list {
-                Button { page.step(-1) } label: { Image(systemName: "chevron.left") }.buttonStyle(.borderless).help("Previous (↑)")
-                Button { page.step(1) } label: { Image(systemName: "chevron.right") }.buttonStyle(.borderless).help("Next (↓)")
-                Text(page.title).font(.system(size: 15, weight: .semibold))
-                Button("Today") { page.today() }.controlSize(.small)
-            } else {
-                Text("Upcoming").font(.system(size: 15, weight: .semibold))
-            }
-            Spacer()
-            Picker("", selection: Binding(get: { page.mode }, set: { page.setMode($0) })) {
-                ForEach(CalendarPage.Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented).labelsHidden().fixedSize()
-            .help("← and → switch views")
-        }
-        .padding(.horizontal, 14).padding(.vertical, 8)
-    }
-
-    @ViewBuilder private func grid(tall: Bool) -> some View {
-        if let problem = page.problem {
-            VStack(spacing: 10) {
-                Text(problem.text).foregroundStyle(.secondary)
-                Button("Allow Access") { page.grant() }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            let days = page.days
-            VStack(spacing: 0) {
-                HStack(spacing: 0) {
-                    ForEach(days.prefix(7), id: \.self) { day in
-                        Text(day.formatted(.dateTime.weekday(.abbreviated)).uppercased())
-                            .font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .padding(.vertical, 5)
-                Divider()
-                let weeks = stride(from: 0, to: days.count, by: 7).map { Array(days[$0..<min($0 + 7, days.count)]) }
-                VStack(spacing: 0) {
-                    ForEach(weeks, id: \.first) { week in
-                        HStack(spacing: 0) {
-                            ForEach(week, id: \.self) { day in
-                                DayCell(day: day, events: page.events(on: day), dimmed: !page.inMonth(day), limit: tall ? 14 : 3, tall: tall)
-                                if day != week.last { Divider() }
-                            }
-                        }
-                        .frame(maxHeight: .infinity)
-                        if week.first != weeks.last?.first { Divider() }
-                    }
-                }
-            }
-        }
-    }
-}
-
-private struct DayCell: View {
-    let day: Date
-    let events: [CalendarPage.Event]
-    let dimmed: Bool
-    let limit: Int
-    let tall: Bool
-    var body: some View {
-        let isToday = Calendar.current.isDateInToday(day)
-        return VStack(alignment: .leading, spacing: 2) {
-            HStack {
-                Spacer()
-                Text(day.formatted(.dateTime.day()))
-                    .font(.system(size: 12, weight: isToday ? .bold : .regular))
-                    .foregroundStyle(isToday ? Color.white : dimmed ? Color.secondary.opacity(0.5) : Color.primary)
-                    .frame(minWidth: 20, minHeight: 20)
-                    .background(Circle().fill(isToday ? Color.red : .clear))
-            }
-            ForEach(events.prefix(limit)) { event in EventChip(event: event, showsTime: tall) }
-            if events.count > limit {
-                Text("+\(events.count - limit) more").font(.system(size: 10)).foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(4)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(isToday ? Color.red.opacity(0.06) : .clear)
-        .opacity(dimmed ? 0.55 : 1)
-    }
-}
-
-/// One event, styled like Calendar: all-day events as a filled bar, timed events as a tinted
-/// chip with a bar in the calendar's colour on the left.
-private struct EventChip: View {
-    let event: CalendarPage.Event
-    let showsTime: Bool
-    private var time: String { event.start.formatted(date: .omitted, time: .shortened) }
-
-    var body: some View {
-        Group {
-            if event.allDay {
-                Text(event.title).fontWeight(.medium).lineLimit(1)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 5).padding(.vertical, 1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 4).fill(event.color.opacity(0.85)))
-            } else if showsTime {
-                HStack(spacing: 5) {
-                    RoundedRectangle(cornerRadius: 1.5).fill(event.color).frame(width: 3)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(event.title).fontWeight(.medium).lineLimit(2)
-                        Text(time).font(.system(size: 10)).foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding(.vertical, 3).padding(.trailing, 4)
-                // The colour bar would otherwise stretch the chip to the full day.
-                .fixedSize(horizontal: false, vertical: true)
-                .background(RoundedRectangle(cornerRadius: 4).fill(event.color.opacity(0.16)))
-            } else {
-                HStack(spacing: 4) {
-                    RoundedRectangle(cornerRadius: 1.5).fill(event.color).frame(width: 3, height: 12)
-                    // Month cells are narrow: the title gets the room, and the time shows on hover.
-                    Text(event.title).lineLimit(1)
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 3).padding(.vertical, 1)
-                .background(RoundedRectangle(cornerRadius: 3).fill(event.color.opacity(0.12)))
-            }
-        }
-        .font(.system(size: 11))
-        .help(event.title + " · " + (event.allDay ? "All day" : time))
+    static func googleColor(_ hex: String?) -> Color {
+        guard let hex, hex.range(of: #"^#[0-9a-fA-F]{6}$"#, options: .regularExpression) != nil,
+              let value = UInt32(hex.dropFirst(), radix: 16) else { return .blue }
+        return Color(red: Double((value >> 16) & 255) / 255, green: Double((value >> 8) & 255) / 255, blue: Double(value & 255) / 255)
     }
 }

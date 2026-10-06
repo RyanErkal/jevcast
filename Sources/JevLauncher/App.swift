@@ -236,6 +236,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             MailSnapshots.writeAll(to: directory)
             return
         }
+        if demo, CommandLine.arguments.contains("--calendar-only") {
+            CalendarSnapshots.writeAll(to: directory)
+            return
+        }
         let rig = LauncherSnapshotRig(catalogue: catalogue, demo: demo)
         rig.open()
         let model = rig.model

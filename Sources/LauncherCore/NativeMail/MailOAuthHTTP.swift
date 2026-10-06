@@ -17,18 +17,18 @@ public struct MailOAuthHTTP: Sendable {
     }
 
     public func exchange(code: String, authorization: MailOAuthAuthorization, redirect: URL,
-                         client: MailOAuthClient, secret: String? = nil) async throws -> MailOAuthToken {
+                         client: MailOAuthClient, secret: String? = nil, scopes: [String]? = nil) async throws -> MailOAuthToken {
         try MailOAuthAuthorization.validateRedirect(redirect)
         return try await token(client: client, secret: secret, values: ["grant_type": "authorization_code", "code": code,
-            "code_verifier": authorization.verifier, "redirect_uri": redirect.absoluteString], previous: nil)
+            "code_verifier": authorization.verifier, "redirect_uri": redirect.absoluteString], previous: nil, scopes: scopes)
     }
 
-    public func refresh(_ previous: MailOAuthToken, client: MailOAuthClient, secret: String? = nil) async throws -> MailOAuthToken {
+    public func refresh(_ previous: MailOAuthToken, client: MailOAuthClient, secret: String? = nil, scopes: [String]? = nil) async throws -> MailOAuthToken {
         guard previous.clientID == client.clientID else { throw MailOAuthError.signInRequired }
-        return try await token(client: client, secret: secret, values: ["grant_type": "refresh_token", "refresh_token": previous.refreshToken], previous: previous)
+        return try await token(client: client, secret: secret, values: ["grant_type": "refresh_token", "refresh_token": previous.refreshToken], previous: previous, scopes: scopes)
     }
 
-    private func token(client: MailOAuthClient, secret: String?, values: [String: String], previous: MailOAuthToken?) async throws -> MailOAuthToken {
+    private func token(client: MailOAuthClient, secret: String?, values: [String: String], previous: MailOAuthToken?, scopes: [String]?) async throws -> MailOAuthToken {
         var form = values; form["client_id"] = client.clientID
         if client.provider == .google, let secret, !secret.isEmpty { form["client_secret"] = secret }
         if client.provider == .microsoft { form["scope"] = client.provider.scopes.joined(separator: " ") }
@@ -49,7 +49,7 @@ public struct MailOAuthHTTP: Sendable {
               refresh.count < 32_768, refresh.unicodeScalars.allSatisfy({ $0.value > 32 && $0.value != 127 }) else { throw MailOAuthError.invalidToken }
         if let scope = payload.scope {
             let granted = Set(scope.split(separator: " ").map(String.init))
-            guard Set(client.provider.scopes.filter { $0 != "offline_access" }).isSubset(of: granted) else { throw MailOAuthError.invalidToken }
+            guard Set((scopes ?? client.provider.scopes).filter { $0 != "offline_access" }).isSubset(of: granted) else { throw MailOAuthError.invalidToken }
         }
         return .init(accessToken: payload.access_token, refreshToken: refresh,
                      expiresAt: Date().addingTimeInterval(TimeInterval(payload.expires_in)), clientID: client.clientID)

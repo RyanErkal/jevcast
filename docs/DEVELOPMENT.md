@@ -93,6 +93,42 @@ Repair Sent Copy uses IMAP only and never sends the message again. Interrupted
 sends never resume at startup. Received attachments load only on an explicit
 Preview, Open, Save, or Forward action.
 
+## Calendar
+
+Calendar opens in Week with a scrollable hourly grid. Day uses the same grid;
+Month and List remain available. Click an event to read its description, meeting
+notes, location, organizer, guests, and attachments. Join Google Meet opens the
+event's meeting link in the system browser. Notes come from the event description.
+Linked documents open in the browser. Jevcast does not record meetings or generate notes.
+
+Connect Google in the Calendar header starts a separate read-only Google sign-in.
+The sign-in window stays open while the system browser is active. Once connected,
+reopen Calendar to see Google events. Closing the sign-in window cancels the request.
+Use a Google OAuth client with type Desktop app, enable the Google Calendar API,
+and add `https://www.googleapis.com/auth/calendar.readonly` to the consent screen.
+While the Google app is in Testing, add the signing-in address as a test user.
+The Desktop client configured for Mail can be reused. Calendar keeps its client
+ID and token separately; it never uses the Mail access token. Tokens and desktop
+client secrets stay in the Keychain. In Google's Testing mode, refresh tokens
+for this scope can expire after seven days; sign in again when requested.
+
+The source menu switches between Google and On This Mac. Google needs no macOS
+Calendar permission. Calendars chooses which Google calendars to show. Refresh
+reloads the calendar list and current date range. Disconnect removes only the
+local Calendar token and selection, then returns to On This Mac. It does not
+delete Google events or revoke access for Mail.
+
+Google calls are GET requests to the fixed Calendar API. OAuth uses the shared
+PKCE and loopback callback code. API and token requests refuse redirects. Event
+descriptions render as text, and attachments open only when clicked. API checks
+inject fake HTTP responses and account checks inject in-memory credentials.
+`JEVCAST_CALENDAR_OFFLINE=1` blocks live Calendar traffic and sign-in.
+`JEVCAST_MAIL_OFFLINE=1` and snapshot mode also block it.
+
+`--snapshot-ui <dir> --demo --calendar-only` renders Week, Day, Month, event
+details, a compact Week, and the Google sign-in form with invented events and
+fresh preferences. It does not read EventKit or Keychain credentials.
+
 ## Rename the app
 
 Change `AppIdentity.swift` and the `APP_NAME` and `BUNDLE_ID` lines in `scripts/build.sh`. `AppIdentityTests` fails if the two disagree. Then search for the old name in `Sources`, `site`, and the documents. A new bundle ID starts with empty preferences and a new Keychain item.

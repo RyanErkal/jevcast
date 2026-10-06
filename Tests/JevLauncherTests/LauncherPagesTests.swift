@@ -159,13 +159,15 @@ final class LauncherPagesTests: XCTestCase {
             XCTAssertNotNil(NSImage(systemSymbolName: view.symbol, accessibilityDescription: nil), "\(view) uses missing symbol \(view.symbol)")
         }
     }
-    @MainActor func testCalendarStartsOnMonthAndArrowsSwitchViews() {
+    @MainActor func testCalendarStartsOnWeekAndArrowsSwitchViews() {
         let page = SpyPage()
         let (model, done) = makeModel(page); defer { done() }
         let list = SourcePage(.calendar, source: nil, model: model, hasDetail: true, emptyText: "")
         let calendar = CalendarPage(list: list, readsEvents: false)
         calendar.opened(); defer { calendar.closed(handingOff: false) }
-        XCTAssertEqual(calendar.mode, CalendarPage.Mode.month)
+        XCTAssertEqual(calendar.mode, CalendarPage.Mode.week)
+        XCTAssertEqual(calendar.days.count, 7)
+        calendar.setMode(.month)
         XCTAssertEqual(calendar.days.count % 7, 0, "The month shows whole weeks.")
         XCTAssertTrue(calendar.days.count >= 28)
         // Demo events: four today, and an all-day event tomorrow that ends at midnight and stays on its own day.
@@ -180,6 +182,8 @@ final class LauncherPagesTests: XCTestCase {
         calendar.filter("")
         XCTAssertTrue(calendar.handle(.right)); XCTAssertEqual(calendar.mode, CalendarPage.Mode.week)
         XCTAssertEqual(calendar.days.count, 7)
+        XCTAssertTrue(calendar.handle(.right)); XCTAssertEqual(calendar.mode, CalendarPage.Mode.day)
+        XCTAssertEqual(calendar.days.count, 1)
         XCTAssertTrue(calendar.handle(.right)); XCTAssertEqual(calendar.mode, CalendarPage.Mode.list)
         XCTAssertTrue(calendar.handle(.right)); XCTAssertEqual(calendar.mode, CalendarPage.Mode.month)
         XCTAssertTrue(calendar.handle(.left)); XCTAssertEqual(calendar.mode, CalendarPage.Mode.list)

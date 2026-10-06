@@ -107,7 +107,7 @@ public struct SMTPClient: Sendable {
     }
 
     /// Only plain addresses: no brackets, spaces, or line breaks that could change the command.
-    static func isSafeAddress(_ address: String) -> Bool {
+    public static func isSafeAddress(_ address: String) -> Bool {
         let parts = address.split(separator: "@", omittingEmptySubsequences: false)
         return parts.count == 2 && !parts[0].isEmpty && !parts[1].isEmpty
             && address.unicodeScalars.allSatisfy { $0.isASCII && $0.value > 0x20 && $0 != "<" && $0 != ">" && $0 != "\u{7F}" }

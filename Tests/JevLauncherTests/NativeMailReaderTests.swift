@@ -48,6 +48,7 @@ final class NativeMailReaderTests: XCTestCase {
         XCTAssertEqual(inbox.unread, 2)
         XCTAssertEqual(MailMailbox.archive(for: "acct-1", in: boxes)?.name, "Old Mail")
         XCTAssertTrue(MailStore.hasMailboxDateIndex(root: path))
+        XCTAssertTrue(try MailStore.supportsIndexedSearch(root: path))
 
         let list = try MailStore.page(root: path, MailModel.query(.inbox, "", boxes)).messages
         XCTAssertEqual(list.map(\.subject), ["Trip photos", "Lunch on Friday", "Invoice for September"])

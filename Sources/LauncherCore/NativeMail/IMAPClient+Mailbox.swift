@@ -113,6 +113,37 @@ extension IMAPClient {
         }
     }
 
+    /// Searches one bounded UID range with server-side text/flag criteria. The range is supplied
+    /// by the caller so a MESSAGELIMIT server never receives an unbounded SEARCH. `text` is sent
+    /// as an IMAP string/literal, not interpolated into command text.
+    public func search(uids range: ClosedRange<UInt32>, text: String? = nil, unreadOnly: Bool = false,
+                       flaggedOnly: Bool = false, in mailbox: String, validity: UInt32?) async throws -> IMAPSequenceSet {
+        guard !range.isEmpty else { return IMAPSequenceSet([]) }
+        return try await exclusive {
+            try await ensureSelected(mailbox, validity: validity)
+            var command = IMAPCommand("UID SEARCH")
+            if has("ESEARCH") { command = command.raw("RETURN (ALL)") }
+            command = command.raw("UID \(range.lowerBound):\(range.upperBound)")
+            if let text, !text.isEmpty { command = command.raw("TEXT").string(text) }
+            if unreadOnly { command = command.raw("UNSEEN") }
+            if flaggedOnly { command = command.raw("FLAGGED") }
+            let reply = try await execute(command)
+            if has("ESEARCH") {
+                for case .esearch(let result) in reply.untagged { return result.all ?? IMAPSequenceSet([]) }
+                return IMAPSequenceSet([])
+            }
+            var numbers: [UInt32] = []
+            for data in reply.untagged {
+                switch data {
+                case .search(let found, _): numbers += found
+                case .esearch(let result): numbers += result.all?.numbers ?? []
+                default: break
+                }
+            }
+            return IMAPSequenceSet(numbers)
+        }
+    }
+
     /// Adds or removes flags, such as `\Seen`, without asking the server to echo them.
     public func store(uids set: IMAPSequenceSet, add: Bool, flags: [String], in mailbox: String, validity: UInt32?) async throws {
         for chunk in set.chunked() {

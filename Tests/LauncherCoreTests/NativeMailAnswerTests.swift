@@ -161,6 +161,28 @@ final class NativeMailAnswerTests: XCTestCase {
         await engine.stopAll()
     }
 
+    func testForwardKeepsCapturedAttachmentBytesAfterOriginalRemoval() async throws {
+        var original = OutgoingMessage(from: .init(address: "sam@example.com"), to: [.init(address: account.email)], subject: "Saved forward", body: "Original text")
+        let bytes = Data([0, 255, 13, 10, 42])
+        original.attachments = [.init(filename: "saved.bin", mimeType: "application/octet-stream", data: bytes)]
+        let raw = MailComposer.render(original)
+        server.deliverRaw(to: "INBOX", String(decoding: raw, as: UTF8.self))
+        let engine = try await started()
+        try await waitUntil("the forward source") { try self.subjects("INBOX") == ["Saved forward"] }
+        let sourceRow = try row("Saved forward")
+        let saved = try XCTUnwrap(MIMEMessage.parse(raw))
+        try await engine.move(sourceRow, to: try mailboxRow("Archive"))
+        let removed = try await store.location(of: sourceRow)
+        XCTAssertNil(removed)
+        try await engine.forward(sourceRow, text: "FYI", to: ["ann@example.com"], from: account.id,
+                                 expectedMessageID: saved.header("Message-ID"), saved: saved,
+                                 savedDate: Date(timeIntervalSince1970: 1_790_000_000), savedAttachments: original.attachments)
+        let delivery = try XCTUnwrap(smtp.delivered.last)
+        XCTAssertEqual(MIMEMessage.files(delivery.data).first?.data, bytes)
+        XCTAssertEqual(MIMEMessage.files(delivery.data).first?.name, "saved.bin")
+        await engine.stopAll()
+    }
+
     // MARK: Trash and Junk
 
     func testDeleteInTrashRemovesOnlyThatMessageAndOnlyWhenAsked() async throws {

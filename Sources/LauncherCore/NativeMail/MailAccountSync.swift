@@ -32,6 +32,12 @@ public actor MailAccountSync {
     var mailboxes: [NativeMailStore.Mailbox] = []
     private var listedAt: Date?
     private var countedAt: Date?
+    /// Non-CONDSTORE servers are checked in rotating bounded batches. A server with CONDSTORE
+    /// can return only changed flags, so it still scans all cached ranges without downloading
+    /// unchanged rows.
+    /// Last UID checked in a rotating large-folder pass. Keeping a UID rather than an array index
+    /// means expunges do not force a full mailbox allocation or invalidate the next page.
+    private var flagCursor: [Int64: UInt32] = [:]
     public private(set) var state: State = .starting
 
     public init(account: NativeMailAccount, store: NativeMailStore, policy: MailSyncPolicy = MailSyncPolicy(),
@@ -128,7 +134,8 @@ public actor MailAccountSync {
             }
             for box in targets {
                 try Task.checkCancellation()
-                let full = box.role == .inbox || box.lastFullCheck.map { now.timeIntervalSince($0) > policy.fullCheck } ?? true
+                let interval = box.role == .inbox ? policy.inboxFullCheck : policy.fullCheck
+                let full = box.lastFullCheck.map { now.timeIntervalSince($0) >= interval } ?? true
                 try await sync(box, full: full)
                 await announce()
             }
@@ -210,51 +217,79 @@ public actor MailAccountSync {
         box.uidValidity = info.uidValidity
         let validity = info.uidValidity
         let items = await items(syncClient)
-        let before = try await store.extent(box.rowID)
-        var firstSync = false
+        // Search-only hits can leave rows in the store before normal history is seeded. The
+        // persisted UIDNEXT and history floor are the normal-sync watermarks; never infer either
+        // from the highest or lowest cached row.
+        let firstSync = box.uidNext == nil || box.historyFloorUID == nil
+        let priorUIDNext = box.uidNext
 
-        if let maxUID = before.maxUID {
+        if firstSync {
+            if info.exists > 0 {
+                let count = box.role == .inbox ? policy.firstInbox : policy.firstOther
+                let newest = try await newestUIDs(count, below: info.uidNext ?? .max, above: 0, in: box.name, validity: validity, client: syncClient)
+                try await fetchHeaders(newest.uids, into: box, validity: validity, items: items, client: syncClient)
+                box.complete = newest.reachedFloor && !newest.limited
+                if let floor = newest.uids.min() { box.historyFloorUID = floor }
+                else if newest.reachedFloor { box.historyFloorUID = 1 }
+            } else {
+                box.complete = true
+                box.historyFloorUID = 1
+            }
+        } else if let priorUIDNext {
             if let next = info.uidNext {
-                // All new mail, so what this Mac has stays one unbroken run of the newest.
-                if next > maxUID + 1 {
-                    let fresh = try await newestUIDs(.max, below: next, above: maxUID, in: box.name, validity: validity, client: syncClient)
+                // New mail starts at the previous normal-sync UIDNEXT. A search hit may have a
+                // larger UID, so MAX(remote_uid) is not a safe watermark.
+                if next > priorUIDNext {
+                    let floor = priorUIDNext > 0 ? priorUIDNext - 1 : 0
+                    let fresh = try await newestUIDs(.max, below: next, above: floor, in: box.name, validity: validity, client: syncClient)
                     try await fetchHeaders(fresh.uids, into: box, validity: validity, items: items, client: syncClient)
                 }
-            } else if maxUID < UInt32.max {
-                let fetched = try await syncClient.fetch(from: maxUID + 1, items: items, in: box.name, validity: validity)
+            } else if priorUIDNext > 0 {
+                let fetched = try await syncClient.fetch(from: priorUIDNext, items: items, in: box.name, validity: validity)
                 try await store.upsert(fetched.compactMap(SyncedMessage.init(fetch:)), into: box.rowID)
             }
-        } else if info.exists > 0 {
-            firstSync = true
-            let count = box.role == .inbox ? policy.firstInbox : policy.firstOther
-            let newest = try await newestUIDs(count, below: info.uidNext ?? .max, above: 0, in: box.name, validity: validity, client: syncClient)
-            try await fetchHeaders(newest.uids, into: box, validity: validity, items: items, client: syncClient)
-            box.complete = newest.reachedFloor
-        } else {
-            box.complete = true
         }
 
         if !firstSync {
             // CHANGEDSINCE needs CONDSTORE. Yahoo reports a mod-sequence without offering it.
             let known = await syncClient.has("CONDSTORE") ? box.highestModSeq : nil
             // Runs of stored messages, so no reply can pass the server's MESSAGELIMIT.
-            let size = min(policy.checkBatch, await syncClient.messageLimit ?? .max)
-            for run in Self.runs(try await store.uids(box.rowID), size: size) {
-                guard let low = run.first, let high = run.last else { continue }
-                let range = IMAPSequenceSet(ranges: [low...high])
-                if let known, let current = info.highestModSeq {
-                    if current > known {
-                        let changes = try await syncClient.fetch(uids: range, items: "(UID FLAGS)", changedSince: known, in: box.name, validity: validity)
-                        try await store.updateFlags(changes.compactMap { data in data.uid.map { ($0, data.flags ?? []) } }, in: box.rowID)
-                    }
-                } else if full {
-                    let flags = try await syncClient.fetch(uids: range, items: "(UID FLAGS)", in: box.name, validity: validity)
-                    try await store.updateFlags(flags.compactMap { data in data.uid.map { ($0, data.flags ?? []) } }, in: box.rowID)
+            let configuredSize = max(policy.checkBatch, 1)
+            let advertisedSize = max(await syncClient.messageLimit ?? configuredSize, 1)
+            let size = max(1, min(configuredSize, advertisedSize))
+            let storedCount = try await store.uidCount(box.rowID)
+            let modSeqChanged: Bool
+            if let known, let current = info.highestModSeq { modSeqChanged = current > known } else { modSeqChanged = false }
+            // CONDSTORE tells us an expunge/flag event happened, so check cached presence at once.
+            // Small folders also stay timely on servers without CONDSTORE. Large folders defer
+            // this more expensive walk to the periodic full check.
+            let checkRemovals = full || modSeqChanged || (known == nil && storedCount <= size * 4)
+            // Keep small folders fully flag-current so a changed message is visible on the next
+            // pass. Very large non-CONDSTORE folders rotate bounded batches instead of issuing a
+            // full UID allocation every time. Each SQLite page is released before the next one.
+            let walkAll = known != nil || full || storedCount <= size * 4
+            if walkAll {
+                var after: UInt32?
+                while true {
+                    try Task.checkCancellation()
+                    let page = try await store.uidPage(box.rowID, after: after, limit: size)
+                    guard !page.isEmpty else { break }
+                    try await inspectStoredUIDs(page, box: box, validity: validity, known: known,
+                                                current: info.highestModSeq, checkRemovals: checkRemovals)
+                    guard page.count == size, let last = page.last else { break }
+                    after = last
                 }
-                if full {
-                    let present = try await syncClient.search("UID \(low):\(high)", in: box.name, validity: validity)
-                    try await store.remove(uids: Self.missing(run, from: present), from: box.rowID)
+            } else {
+                // Large non-CONDSTORE folders get one rotating page. If the cursor reached the
+                // current high-water mark, wrap to the first page so every UID is checked over
+                // successive passes without retaining all rows in memory.
+                var page = try await store.uidPage(box.rowID, after: flagCursor[box.rowID], limit: size)
+                if page.isEmpty, flagCursor[box.rowID] != nil {
+                    page = try await store.uidPage(box.rowID, limit: size)
                 }
+                if let last = page.last { flagCursor[box.rowID] = last }
+                try await inspectStoredUIDs(page, box: box, validity: validity, known: known,
+                                            current: info.highestModSeq, checkRemovals: checkRemovals)
             }
         }
         if full { box.lastFullCheck = Date() }
@@ -264,16 +299,64 @@ public actor MailAccountSync {
         replace(box)
     }
 
+    /// Checks one bounded run of stored UIDs. The run comes from `uidPage`, so a large mailbox
+    /// never needs an in-memory catalogue just to refresh flags or detect removals.
+    private func inspectStoredUIDs(_ run: [UInt32], box: NativeMailStore.Mailbox, validity: UInt32,
+                                   known: UInt64?, current: UInt64?, checkRemovals: Bool) async throws {
+        guard !run.isEmpty else { return }
+        // A UID page can be sparse. Naming low:high would include every gap and can exceed a
+        // server's MESSAGELIMIT even though the SQLite page itself is bounded.
+        let range = IMAPSequenceSet(run)
+        if let known, let current {
+            if current > known {
+                let changes = try await syncClient.fetch(uids: range, items: "(UID FLAGS)", changedSince: known,
+                                                         in: box.name, validity: validity)
+                try await store.updateFlags(changes.compactMap { data in data.uid.map { ($0, data.flags ?? []) } }, in: box.rowID)
+            }
+        } else {
+            let flags = try await syncClient.fetch(uids: range, items: "(UID FLAGS)", in: box.name, validity: validity)
+            try await store.updateFlags(flags.compactMap { data in data.uid.map { ($0, data.flags ?? []) } }, in: box.rowID)
+        }
+        let serverUsesUIDOnly = await syncClient.uidOnly
+        let advertisedMessageLimit = await syncClient.messageLimit
+        let limitedView = !serverUsesUIDOnly && advertisedMessageLimit != nil
+        if checkRemovals, !limitedView {
+            let present = try await syncClient.search("UID \(range.description)", in: box.name, validity: validity)
+            try await store.remove(uids: Self.missing(run, from: present), from: box.rowID)
+        }
+    }
+
     /// One older batch of a mailbox, read when its list reaches the end of what this Mac has.
     /// Returns whether the server holds older mail still, or nil when the mailbox is not this account's.
     public func loadOlder(_ rowID: Int64) async throws -> Bool? {
-        guard let box = mailboxes.first(where: { $0.rowID == rowID }) else { return nil }
-        guard !box.complete, let validity = box.uidValidity else { return false }
-        let low = try await store.extent(rowID).minUID ?? box.uidNext ?? 1
-        guard low > 1 else { try await markComplete(rowID); return false }
+        guard var box = mailboxes.first(where: { $0.rowID == rowID }) else { return nil }
+        guard !box.complete, box.uidValidity != nil else { return false }
+        if box.uidNext == nil || box.historyFloorUID == nil {
+            try await sync(box, full: false)
+            guard let refreshed = mailboxes.first(where: { $0.rowID == rowID }) else { return false }
+            box = refreshed
+        }
+        guard !box.complete, let validity = box.uidValidity, let historyFloor = box.historyFloorUID else { return false }
+        let low = historyFloor
+        guard low > 1 else {
+            let info = try await actionClient.select(box.name)
+            guard info.uidValidity == validity else { throw MailError.uidValidityChanged(mailbox: box.name) }
+            let serverUsesUIDOnly = await actionClient.uidOnly
+            let advertisedMessageLimit = await actionClient.messageLimit
+            let limitedView = !serverUsesUIDOnly && advertisedMessageLimit != nil
+            if limitedView { throw limitedHistoryError(box.name) }
+            try await markComplete(rowID)
+            return false
+        }
         let older = try await newestUIDs(policy.olderBatch, below: low, above: 0, in: box.name, validity: validity, client: actionClient)
         try await fetchHeaders(older.uids, into: box, validity: validity, items: await items(actionClient), client: actionClient)
-        if older.reachedFloor { try await markComplete(rowID) }
+        var updated = box
+        if let floor = older.uids.min() { updated.historyFloorUID = floor }
+        else if older.reachedFloor { updated.historyFloorUID = 1 }
+        if older.reachedFloor, !older.limited { updated.complete = true }
+        try await store.saveSyncState(updated)
+        replace(updated)
+        if older.reachedFloor, older.limited { throw limitedHistoryError(box.name) }
         return !older.reachedFloor
     }
 
@@ -287,10 +370,12 @@ public actor MailAccountSync {
     /// MESSAGELIMIT; a refused range is halved. `reachedFloor` is true when nothing below the
     /// lowest UID returned is left unread.
     func newestUIDs(_ count: Int, below ceiling: UInt32, above floor: UInt32, in mailbox: String,
-                    validity: UInt32, client: IMAPClient) async throws -> (uids: [UInt32], reachedFloor: Bool) {
-        guard floor < UInt32.max - 1, ceiling > floor + 1 else { return ([], true) }
-        let limit = await client.messageLimit
-        let first = count >= Int(UInt32.max / 2) ? Int(UInt32.max) : max(count, 1) * 2
+                    validity: UInt32, client: IMAPClient) async throws -> (uids: [UInt32], reachedFloor: Bool, limited: Bool) {
+        let wanted = max(count, 1)
+        let limit = await client.messageLimit.map { max($0, 1) }
+        let limited = !(await client.uidOnly) && limit != nil
+        guard floor < UInt32.max - 1, ceiling > floor + 1 else { return ([], true, limited) }
+        let first = wanted >= Int(UInt32.max / 2) ? Int(UInt32.max) : wanted * 2
         var span = UInt32(clamping: min(limit ?? first, first))
         var found: [UInt32] = []
         var top = ceiling - 1
@@ -308,8 +393,12 @@ public actor MailAccountSync {
             let hits = set.numbers.filter { $0 >= low && $0 <= top }
             found += hits.reversed()
             let reachedFloor = low == floor + 1
-            if found.count >= count || reachedFloor {
-                return (Array(found.prefix(count).reversed()), reachedFloor && found.count <= count)
+            if found.count >= wanted || reachedFloor {
+                // Reaching the floor proves completeness only when the bounded request
+                // contained every hit in that range. If more than `wanted` UIDs were found,
+                // the returned page is still only the newest slice and loadOlder must continue.
+                let complete = reachedFloor && found.count <= wanted
+                return (Array(found.prefix(wanted).reversed()), complete, limited)
             }
             let searched = Double(top - low + 1)
             top = low - 1
@@ -324,10 +413,14 @@ public actor MailAccountSync {
         }
     }
 
+    private func limitedHistoryError(_ mailbox: String) -> MailError {
+        .notFound("The server exposes only a limited recent view of \(mailbox). Older history is not proven complete; enable UIDONLY or use the server's full-history view before loading older mail.")
+    }
+
     /// Headers of `uids`, newest first, so the top of the list fills in before the rest. A server
     /// cuts a FETCH short past its MESSAGELIMIT, so no batch is larger.
     func fetchHeaders(_ uids: [UInt32], into box: NativeMailStore.Mailbox, validity: UInt32, items: String, client: IMAPClient) async throws {
-        let size = min(policy.headerBatch, await client.messageLimit ?? .max)
+        let size = max(1, min(max(policy.headerBatch, 1), await client.messageLimit.map { max($0, 1) } ?? .max))
         for chunk in IMAPSequenceSet(uids).chunked(maxCount: size).reversed() {
             try Task.checkCancellation()
             let fetched = try await client.fetch(uids: chunk, items: items, in: box.name, validity: validity)

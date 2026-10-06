@@ -74,6 +74,12 @@ public struct MailSyncPolicy: Sendable {
     public var headerBatch = 250
     /// Stored messages per flag and removal check, well inside a server's MESSAGELIMIT.
     public var checkBatch = 500
+    /// Maximum UID range searched for one remote search step. It is reduced to the server's
+    /// advertised MESSAGELIMIT and halved after a refusal.
+    public var searchBatch = 200
+    /// Inbox removal checks are less frequent than flag checks. IDLE and CONDSTORE still surface
+    /// new mail and changed flags promptly between these passes.
+    public var inboxFullCheck: TimeInterval = 30
     /// Inbox bodies read ahead so new mail opens at once, and the largest read ahead.
     /// Other bodies are read when opened.
     public var prefetchInbox = 30

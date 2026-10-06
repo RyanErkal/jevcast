@@ -95,11 +95,14 @@ enum MailStore {
         let role = columns.contains("role") ? "role" : "NULL"
         let serverTotal = columns.contains("server_total") ? "server_total" : "NULL"
         let serverUnread = columns.contains("server_unread") ? "server_unread" : "NULL"
-        let boxes: [MailMailbox] = try db.rows("SELECT ROWID, url, \(unread), \(total), \(role), \(serverTotal), \(serverUnread) FROM mailboxes").compactMap { row in
-            guard row.count == 7, let id = row[0].int, let url = row[1].text else { return nil }
+        let complete = columns.contains("complete") ? "complete" : "NULL"
+        let initialized = columns.contains("uid_validity") ? "uid_validity IS NOT NULL" : "NULL"
+        let boxes: [MailMailbox] = try db.rows("SELECT ROWID, url, \(unread), \(total), \(role), \(serverTotal), \(serverUnread), \(complete), \(initialized) FROM mailboxes").compactMap { row in
+            guard row.count == 9, let id = row[0].int, let url = row[1].text else { return nil }
             return MailMailbox(rowID: id, url: url, unread: Int(row[2].int ?? 0), total: Int(row[3].int ?? 0),
                                serverRole: row[4].text.flatMap(MailMailbox.Role.init(rawValue:)),
-                               serverTotal: row[5].int.map(Int.init), serverUnread: row[6].int.map(Int.init))
+                               serverTotal: row[5].int.map(Int.init), serverUnread: row[6].int.map(Int.init),
+                               syncComplete: row[7].int.map { $0 != 0 }, initialized: row[8].int.map { $0 != 0 })
         }
         // A Gmail inbox holds no rows of its own: its messages sit in All Mail with an Inbox label.
         // Its unread count is read through the labels, so it matches the list.
@@ -112,7 +115,8 @@ enum MailStore {
             let (sql, arguments) = membershipCount(cols, [box.rowID], filter: "\(c.read) = 0", distinct: false)
             let count = Int(try db.rows(sql, arguments).first?.first?.int ?? 0)
             return MailMailbox(rowID: box.rowID, url: box.url, unread: count, total: box.total, serverRole: box.serverRole,
-                               serverTotal: box.serverTotal, serverUnread: box.serverUnread)
+                               serverTotal: box.serverTotal, serverUnread: box.serverUnread,
+                               syncComplete: box.syncComplete, initialized: box.initialized)
         }
     }
 
@@ -139,10 +143,19 @@ enum MailStore {
         !name.isEmpty && name.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_") }
     }
 
-    /// The `messages` columns, plus two marker entries naming the `labels` columns when the table exists.
+    /// The `messages` columns, plus marker entries for optional tables. The native FTS marker is
+    /// deliberately gated by Jevcast-only columns as well as the FTS shape, so an Apple Mail
+    /// index is never treated as writable/native just because it happens to expose a similarly
+    /// named table.
     static func schemaColumns(_ db: SQLiteReader) -> Set<String> {
         var columns = db.columns("messages")
         if let labels = labelTable(db) { columns.insert("@labels.message:" + labels.message); columns.insert("@labels.mailbox:" + labels.mailbox) }
+        let fts = db.columns("messages_fts")
+        let nativeColumns = db.columns("mailboxes")
+        if ["row_id", "mailbox", "subject", "sender", "body"].allSatisfy(fts.contains),
+           columns.contains("remote_uid"), nativeColumns.contains("uid_validity") {
+            columns.insert("@native:messages_fts")
+        }
         return columns
     }
 
@@ -274,10 +287,12 @@ enum MailStore {
         let prefix: String
         let summary: Bool
         let labels: LabelTable?
+        let fts: Bool
         init(_ cols: Set<String>) {
             let message = cols.first { $0.hasPrefix("@labels.message:") }?.dropFirst(16)
             let mailbox = cols.first { $0.hasPrefix("@labels.mailbox:") }?.dropFirst(16)
             labels = message.flatMap { m in mailbox.map { LabelTable(message: String(m), mailbox: String($0)) } }
+            fts = cols.contains("@native:messages_fts")
             read = cols.contains("read") ? "m.read" : "(m.flags & 1)"
             flagged = cols.contains("flagged") ? "m.flagged" : "((m.flags >> 4) & 1)"
             deleted = cols.contains("deleted") ? "m.deleted" : "((m.flags >> 1) & 1)"
@@ -306,11 +321,18 @@ enum MailStore {
         var arguments: [SQLiteReader.Value] = []
         let searchWords = words(query.text)
         var ctes: [String] = []
-        for (index, word) in searchWords.enumerated() {
-            arguments.append(.text(SQLiteReader.likePattern(word)))
-            let n = "?\(arguments.count)"
-            ctes.append("w\(index)s AS MATERIALIZED (SELECT ROWID FROM subjects WHERE subject LIKE \(n) ESCAPE '\\')")
-            ctes.append("w\(index)a AS MATERIALIZED (SELECT ROWID FROM addresses WHERE address LIKE \(n) ESCAPE '\\' OR comment LIKE \(n) ESCAPE '\\')")
+        if c.fts, let ftsQuery = ftsQuery(searchWords) {
+            // One FTS lookup covers header and downloaded-body text. The CTE is shared by all
+            // mailbox arms, so a combined scope does not repeat the full-text match per folder.
+            arguments.append(.text(ftsQuery))
+            ctes.append("fts_matches AS MATERIALIZED (SELECT rowid AS id FROM messages_fts WHERE messages_fts MATCH ?1)")
+        } else {
+            for (index, _) in searchWords.enumerated() {
+                arguments.append(.text(SQLiteReader.likePattern(searchWords[index])))
+                let n = "?\(arguments.count)"
+                ctes.append("w\(index)s AS MATERIALIZED (SELECT ROWID FROM subjects WHERE subject LIKE \(n) ESCAPE '\\')")
+                ctes.append("w\(index)a AS MATERIALIZED (SELECT ROWID FROM addresses WHERE address LIKE \(n) ESCAPE '\\' OR comment LIKE \(n) ESCAPE '\\')")
+            }
         }
         func arm(_ scope: String, _ scopeArguments: [SQLiteReader.Value]) -> String {
             var sql = "SELECT m.ROWID AS id, m.date_received AS d FROM messages m WHERE \(scope) AND \(c.deleted) = 0"
@@ -325,7 +347,13 @@ enum MailStore {
                 sql += " AND m.date_received >= ? AND (m.date_received > ? OR m.ROWID > ?)"
                 arguments += [.double(after.date), .double(after.date), .int(after.rowID)]
             }
-            if match { for index in searchWords.indices { sql += " AND (m.subject IN w\(index)s OR m.sender IN w\(index)a)" } }
+            if match {
+                if c.fts, !searchWords.isEmpty {
+                    sql += " AND m.ROWID IN (SELECT id FROM fts_matches)"
+                } else {
+                    for index in searchWords.indices { sql += " AND (m.subject IN w\(index)s OR m.sender IN w\(index)a)" }
+                }
+            }
             return "SELECT * FROM (" + sql + " ORDER BY m.date_received DESC, m.ROWID DESC LIMIT \(limit))"
         }
         var arms: [String] = []
@@ -447,6 +475,14 @@ enum MailStore {
         Array(text.split(whereSeparator: \.isWhitespace).map(String.init).prefix(6))
     }
 
+    /// Quotes each word as data, not FTS syntax. A prefix wildcard preserves the existing
+    /// incremental-search behavior while requiring every typed word to be present in subject,
+    /// sender, or the downloaded body text.
+    static func ftsQuery(_ words: [String]) -> String? {
+        guard !words.isEmpty else { return nil }
+        return words.map { "\"" + $0.replacingOccurrences(of: "\"", with: "\"\"") + "\"*" }.joined(separator: " AND ")
+    }
+
     static func summaries(_ rows: [[SQLiteReader.Value]]) -> [MailSummary] {
         var messages: [MailSummary] = []
         for row in rows {
@@ -507,6 +543,13 @@ enum MailStore {
                 return columns.prefix(2) == ["mailbox", "date_received"]
             }
         }) ?? false
+    }
+
+    /// Whether this index owns Jevcast's native full-text search table. Apple Mail's
+    /// read-only index may expose similarly named tables, but `withIndex` has already
+    /// applied the native schema marker before `Columns` inspects it.
+    static func supportsIndexedSearch(root: String) throws -> Bool {
+        try withIndex(root) { _, cols in Columns(cols).fts }
     }
 
     /// A number that changes whenever Mail adds, removes, or marks messages, for cheap polling.

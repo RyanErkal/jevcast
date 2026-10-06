@@ -220,7 +220,7 @@ final class MIMEHostileTests: XCTestCase {
         for (url, role) in roles {
             let box = MailMailbox(rowID: 1, url: url, unread: 0, total: 0)
             XCTAssertEqual(box.role, role, url)
-            XCTAssertFalse(box.inAllMail, url)
+            XCTAssertEqual(box.inAllMail, ![.trash, .junk].contains(role), url)
         }
         XCTAssertTrue(MailMailbox(rowID: 1, url: "imap://A/%5BGmail%5D/All%20Mail", unread: 0, total: 0).inAllMail)
         XCTAssertTrue(MailMailbox(rowID: 1, url: "imap://A/Projects", unread: 0, total: 0).inAllMail)

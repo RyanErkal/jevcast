@@ -129,7 +129,7 @@ enum MailActions {
     /// Apple Mail gets the text without leading white space, so Mail's copy starts with `checkText`.
     static func reply(_ message: MailSummary, in mailbox: MailMailbox, text: String, all: Bool, accountID: String, address: String,
                       attachments: [OutgoingMessage.Attachment] = [], expectedMessageID: String? = nil) async throws {
-        if let engine = try native(mailbox) { return try await engine.reply(to: message.rowID, text: text, all: all, from: accountID, attachments: attachments, expectedMessageID: expectedMessageID) }
+        if let engine = try native(mailbox) { _ = try await engine.reply(to: message.rowID, text: text, all: all, from: accountID, attachments: attachments, expectedMessageID: expectedMessageID); return }
         let text = MailScripts.sendingText(text)
         let stage = try MailAttachmentStaging(attachments)
         try await runSending(MailScripts.reply, target(message, mailbox, expectedMessageID: expectedMessageID)
@@ -138,7 +138,7 @@ enum MailActions {
     }
     static func forward(_ message: MailSummary, in mailbox: MailMailbox, text: String, to recipients: [String], accountID: String, address: String,
                         attachments: [OutgoingMessage.Attachment] = [], expectedMessageID: String? = nil) async throws {
-        if let engine = try native(mailbox) { return try await engine.forward(message.rowID, text: text, to: recipients, from: accountID, attachments: attachments, expectedMessageID: expectedMessageID) }
+        if let engine = try native(mailbox) { _ = try await engine.forward(message.rowID, text: text, to: recipients, from: accountID, attachments: attachments, expectedMessageID: expectedMessageID); return }
         let text = MailScripts.sendingText(text)
         let stage = try MailAttachmentStaging(attachments)
         try await runSending(MailScripts.forward, target(message, mailbox, expectedMessageID: expectedMessageID)
@@ -148,7 +148,7 @@ enum MailActions {
     static func send(to: [String], cc: [String], subject: String, body: String, accountID: String, address: String,
                      attachments: [OutgoingMessage.Attachment] = []) async throws {
         guard !to.isEmpty else { throw LauncherError("Add at least one recipient.") }
-        if let engine = try native() { return try await engine.send(from: accountID, to: to, cc: cc, subject: subject, body: body, attachments: attachments) }
+        if let engine = try native() { _ = try await engine.send(from: accountID, to: to, cc: cc, subject: subject, body: body, attachments: attachments); return }
         let body = MailScripts.sendingText(body)
         let stage = try MailAttachmentStaging(attachments)
         try await runSending(MailScripts.send, [to.joined(separator: "\n"), cc.joined(separator: "\n"), subject, body, MailScripts.checkText(body), accountID, address, stage.paths.joined(separator: "\n")])

@@ -4,8 +4,8 @@ import LauncherCore
 extension MailModel {
     /// A reply, forward, or new message being written. Each draft has its own `id`, so a view, a
     /// late AI writing result, or a failed send can tell one draft from the next.
-    struct Draft: Codable, Equatable, Identifiable {
-        enum Mode: Codable, Equatable { case new, reply(all: Bool), forward }
+    struct Draft: Codable, Equatable, Identifiable, Sendable {
+        enum Mode: Codable, Equatable, Sendable { case new, reply(all: Bool), forward }
         var id = UUID()
         var backend = MailBackend.current.rawValue
         var messageID = "<\(UUID().uuidString.lowercased())@jevcast.local>"
@@ -16,6 +16,21 @@ extension MailModel {
         var richText: Data?
         var attachments: [OutgoingMessage.Attachment] = []
         var uncertainSend = false
+        /// The exact server Drafts message owned by this local draft, when one exists.
+        /// Optional so older composition snapshots still decode.
+        var serverDraftReference: MailServerDraftReference?
+        /// When a replacement appended successfully but could not remove the previous UID, both
+        /// references remain here for explicit recovery. Never retry this automatically.
+        var previousServerDraftReference: MailServerDraftReference?
+        /// A local checkpoint or server acknowledgement problem that blocks another mutation.
+        var serverDraftBlockedReason: String?
+        /// True when APPEND or removal could not be acknowledged safely.
+        var serverDraftAcknowledgementUncertain: Bool?
+        /// Threading and raw HTML retained while editing a cross-device server draft.
+        var serverDraftInReplyTo: String?
+        var serverDraftReferences: [String]?
+        var serverDraftHTML: String?
+        var serverDraftHTMLBody: String?
         var mode: Mode = .new
         var to = ""
         var cc = ""
@@ -54,19 +69,104 @@ extension MailModel {
             return String(messageID.dropLast("@jevcast.local>".count)) + "@" + domain + ">"
         }
 
-        struct Source: Codable, Equatable {
+        struct Source: Codable, Equatable, Sendable {
             let rowID: Int64
             let message: MIMEMessage
             let html: String?
+            /// Immutable attachments captured from the original message for a forward. A nil
+            /// value means the source was captured by an older build or without raw bytes.
+            let forwardAttachments: [OutgoingMessage.Attachment]?
             /// One row is one message, so the row decides, not a compare of the whole text.
             static func == (a: Source, b: Source) -> Bool { a.rowID == b.rowID }
+
+            init(rowID: Int64, message: MIMEMessage, html: String?,
+                 forwardAttachments: [OutgoingMessage.Attachment]? = nil) {
+                self.rowID = rowID
+                self.message = message
+                self.html = html
+                self.forwardAttachments = forwardAttachments
+            }
         }
 
-        /// The fields you type in, to see when the draft changed.
-        var fields: [String] {
-            [to, cc, bcc, subject, body, instruction, fromAccountID ?? "", richText?.base64EncodedString() ?? "", includesQuote ? "" : "no quote"]
-                + attachments.map { $0.filename + String($0.data.count) + ($0.contentID ?? "") }
+        /// The render-affecting fields used by server-draft autosave ordering.
+        ///
+        /// Keep the values typed by the user as values. In particular, do not turn RTF or
+        /// attachment bytes into a string on every MainActor edit. Equality on `Data` and the
+        /// attachment value compares the bytes, so replacing a same-sized file still admits a
+        /// server save.
+        struct Fields: Equatable, Sendable {
+            struct Source: Equatable, Sendable {
+                let rowID: Int64
+                let message: MIMEMessage
+                let html: String?
+                let forwardAttachments: [OutgoingMessage.Attachment]?
+
+                static func == (lhs: Source, rhs: Source) -> Bool {
+                    lhs.rowID == rhs.rowID
+                        && lhs.message == rhs.message
+                        && lhs.message.inlineImages == rhs.message.inlineImages
+                        && lhs.html == rhs.html
+                        && lhs.forwardAttachments == rhs.forwardAttachments
+                }
+            }
+
+            let backend: String
+            let messageID: String
+            let fromAccountID: String?
+            let fromAddress: String?
+            let senderWasChosen: Bool
+            let mode: Mode
+            let to: String
+            let cc: String
+            let bcc: String
+            let subject: String
+            let body: String
+            let instruction: String
+            let richText: Data?
+            let attachments: [OutgoingMessage.Attachment]
+            let includesQuote: Bool
+            let originalDate: Date?
+            let originalSenderName: String?
+            let originalSenderAddress: String?
+            let source: Source?
+            let serverDraftInReplyTo: String?
+            let serverDraftReferences: [String]?
+            let serverDraftHTML: String?
+            let serverDraftHTMLBody: String?
+
+            init(_ draft: Draft) {
+                backend = draft.backend
+                messageID = draft.messageID
+                fromAccountID = draft.fromAccountID
+                fromAddress = draft.fromAddress
+                senderWasChosen = draft.senderWasChosen
+                mode = draft.mode
+                to = draft.to
+                cc = draft.cc
+                bcc = draft.bcc
+                subject = draft.subject
+                body = draft.body
+                instruction = draft.instruction
+                richText = draft.richText
+                attachments = draft.attachments
+                includesQuote = draft.includesQuote
+                originalDate = draft.original?.date
+                originalSenderName = draft.original?.senderName
+                originalSenderAddress = draft.original?.senderAddress
+                if let source = draft.source {
+                    self.source = Source(rowID: source.rowID, message: source.message, html: source.html,
+                                        forwardAttachments: source.forwardAttachments)
+                } else {
+                    source = nil
+                }
+                serverDraftInReplyTo = draft.serverDraftInReplyTo
+                serverDraftReferences = draft.serverDraftReferences
+                serverDraftHTML = draft.serverDraftHTML
+                serverDraftHTMLBody = draft.serverDraftHTMLBody
+            }
         }
+
+        var fields: Fields { Fields(self) }
 
         /// True when you typed something. A reply's To and the Re: or Fwd: subject are filled in
         /// for you, so they do not count. A draft with content is never replaced or discarded at once.
@@ -77,7 +177,8 @@ extension MailModel {
             case .forward: typed = [to, cc, bcc, body, instruction]
             case .reply: typed = [body, instruction]
             }
-            return !attachments.isEmpty || typed.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            return serverDraftReference != nil || previousServerDraftReference != nil
+                || !attachments.isEmpty || typed.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         }
 
         /// "reply" or "message", for notes such as "Finish or discard your open reply first."
@@ -92,6 +193,12 @@ extension MailModel {
             let checksTo = mode != .reply(all: false) && mode != .reply(all: true) || backend == MailBackend.jevcast.rawValue
             if checksTo, let problem = Self.addressProblem(to, required: true) ?? Self.addressProblem(cc, required: false) ?? Self.addressProblem(bcc, required: false) {
                 return problem
+            }
+            if backend == MailBackend.jevcast.rawValue {
+                let addresses = (try? MailActions.addresses(to + "," + cc + "," + bcc)) ?? []
+                if addresses.contains(where: { !SMTPClient.isSafeAddress($0) }) {
+                    return "Use standard email addresses. This mail server does not support non-ASCII addresses."
+                }
             }
             switch mode {
             case .reply: return text.isEmpty ? "Write your reply first." : nil
@@ -117,7 +224,7 @@ extension MailModel {
 
     /// A draft that did not go: a send failed or was undone while another draft was open.
     /// The banner offers Show until you take it back.
-    struct Unsent: Codable, Identifiable, Equatable {
+    struct Unsent: Codable, Identifiable, Equatable, Sendable {
         let draft: Draft
         let reason: String
         var id: UUID { draft.id }

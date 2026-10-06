@@ -120,7 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         model.onClose = { [weak self] restore in self?.hide(restoreFocus: restore) }
         model.openAIWritingSettings = { [weak self] in self?.showSettings(tab: .ai, aiPart: .writing) }
         // Keys moved out of Settings › Windows, which now has one part.
-        UserDefaults.standard.removeObject(forKey: "settingsWindowsPart")
+        if UISnapshots.directory == nil { UserDefaults.standard.removeObject(forKey: "settingsWindowsPart") }
         model.openSettingsTab = { [weak self] name in
             if name == "dictation" { self?.showSettings(tab: .voice, voicePart: .dictation); return }
             if let tab = SettingsWindow.Tab(rawValue: name) { self?.showSettings(tab: tab) }
@@ -135,7 +135,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             return LauncherPages.make(id, model: self.model, links: self.pageLinks, snapshot: false)
         }
         viewSizeWatch = model.$page.map { $0?.id }.removeDuplicates().sink { [weak self] view in self?.panel.setViewSize(view) }
-        UNUserNotificationCenter.current().delegate = self
+        if !diagnostic { UNUserNotificationCenter.current().delegate = self }
         configureAutomations()
         // Snapshot runs never run tasks.
         if UISnapshots.directory == nil { model.scheduledBriefs.start() }
@@ -167,9 +167,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
                 MainActor.assumeIsolated { self?.show() }
             }
         }
-        Task { await JevKeyCache.shared.load() }
-        observeAppSwitches()
-        catalogue.refresh(extra: preferences.appFolders)
+        if !diagnostic {
+            Task { await JevKeyCache.shared.load() }
+            observeAppSwitches()
+            catalogue.refresh(extra: preferences.appFolders)
+        }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, self.wasVisible, event.window === self.panel else { return event }
             // An input method composing text owns Return, arrows, and Escape until it commits.
@@ -230,6 +232,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     /// take key focus, activate the app, block clicks, or show windows on screen.
     private func runSnapshots(to directory: String) {
         let demo = DemoData.isEnabled
+        if demo, CommandLine.arguments.contains("--mail-only") {
+            MailSnapshots.writeAll(to: directory)
+            return
+        }
         let rig = LauncherSnapshotRig(catalogue: catalogue, demo: demo)
         rig.open()
         let model = rig.model
@@ -305,12 +311,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             let shots: [(String, AnyView, NSSize)] = AutomationsWindow.snapshotWindows() + [
                 ("automations-approval", AnyView(AutomationsWindow.snapshotApproval()), NSSize(width: 760, height: 640)),
                 ("automations-editor", AnyView(AutomationsWindow.snapshotEditor(.dataRefresh).frame(width: 720, height: 820)), NSSize(width: 720, height: 820)),
-                ("automations-appearance", AnyView(AutomationsWindow.snapshotAppearance()), NSSize(width: 640, height: 420)),
-                ("mail-compose", AnyView(MailSnapshots.composer()), NSSize(width: 640, height: 520)),
-                ("mail-reply", AnyView(MailSnapshots.reply()), NSSize(width: 820, height: 760)),
-                ("mail-outbox", AnyView(MailSnapshots.outbox()), NSSize(width: 540, height: 310)),
-                ("mail-add-account", AnyView(AddMailAccountSheet(demo: true)), NSSize(width: 520, height: 640))
-            ]
+                ("automations-appearance", AnyView(AutomationsWindow.snapshotAppearance()), NSSize(width: 640, height: 420))
+            ] + MailSnapshots.windows
             for (name, view, size) in shots {
                 steps.append((name, 1.2, { [weak self] in self?.automationSnapshotWindow?.contentView }, { [weak self] in
                     guard let self else { return }
@@ -683,7 +685,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         if UISnapshots.directory != nil { return .terminateNow }
         // Save pending clipboard work, but never let a stalled save block quitting. While AppKit waits for
         // the reply it runs the loop in modal mode, so the reply is scheduled in that mode too; 2 s at most.
-        // A message in its undo time goes to Mail now, and quitting waits for it: 40 s at most, longer
+        // A message in its undo time goes to Mail now, and quitting waits for it: 90 s at most, longer
         // than the 30 s limit of one Mail script.
         let sends = madeMailModel.flatMap { $0.sending ? $0 : nil }
         quitting = true
@@ -700,7 +702,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             await sends?.finishSends()
             RunLoop.main.perform(inModes: modes) { MainActor.assumeIsolated { reply() } }
         }
-        let timer = Timer(timeInterval: sends == nil ? 2 : 40, repeats: false) { _ in MainActor.assumeIsolated { reply() } }
+        let timer = Timer(timeInterval: sends == nil ? 2 : 90, repeats: false) { _ in MainActor.assumeIsolated { reply() } }
         for mode in modes { RunLoop.main.add(timer, forMode: mode) }
         return .terminateLater
     }

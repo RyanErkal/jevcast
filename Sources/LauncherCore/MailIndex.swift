@@ -12,9 +12,13 @@ public struct MailMailbox: Equatable, Sendable, Identifiable, Hashable {
     /// The server's own counts, including mail not on this Mac. Only Jevcast's own store has them.
     public let serverTotal: Int?
     public let serverUnread: Int?
-    public init(rowID: Int64, url: String, unread: Int, total: Int, serverRole: Role? = nil, serverTotal: Int? = nil, serverUnread: Int? = nil) {
+    public let syncComplete: Bool?
+    public let initialized: Bool?
+    public init(rowID: Int64, url: String, unread: Int, total: Int, serverRole: Role? = nil, serverTotal: Int? = nil, serverUnread: Int? = nil,
+                syncComplete: Bool? = nil, initialized: Bool? = nil) {
         self.rowID = rowID; self.url = url; self.unread = unread; self.total = total; self.serverRole = serverRole
         self.serverTotal = serverTotal; self.serverUnread = serverUnread
+        self.syncComplete = syncComplete; self.initialized = initialized
     }
     public var id: Int64 { rowID }
 
@@ -23,12 +27,15 @@ public struct MailMailbox: Equatable, Sendable, Identifiable, Hashable {
     /// The path Mail's AppleScript uses for the mailbox, such as "INBOX" or "[Gmail]/All Mail".
     /// A URL with an empty host, such as `local:///Inbox`, still has its path.
     public var path: String {
+        pathComponents.joined(separator: "/")
+    }
+    public var encodedPathComponents: [String] {
         let raw = url.components(separatedBy: "://").dropFirst().joined(separator: "://")
         let afterHost = raw.firstIndex(of: "/").map { String(raw[raw.index(after: $0)...]) } ?? ""
-        let trimmed = afterHost.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        return trimmed.removingPercentEncoding ?? trimmed
+        return afterHost.split(separator: "/").map(String.init)
     }
-    public var name: String { path.split(separator: "/").last.map(String.init) ?? path }
+    public var pathComponents: [String] { encodedPathComponents.map { $0.removingPercentEncoding ?? $0 } }
+    public var name: String { pathComponents.last ?? path }
 
     public enum Role: String, Codable, Sendable { case inbox, sent, drafts, archive, trash, junk, other }
     public var role: Role {
@@ -44,12 +51,14 @@ public struct MailMailbox: Equatable, Sendable, Identifiable, Hashable {
         if ["junk", "spam", "junk e-mail", "junk email", "bulk mail"].contains(lower) { return .junk }
         return .other
     }
-    /// True for mailboxes the All Mail list shows: everything but Trash, Junk, Sent, and Drafts.
-    public var inAllMail: Bool { ![.trash, .junk, .sent, .drafts].contains(role) }
+    /// All Mail includes incoming and outgoing mail. Trash and Junk have their own views.
+    public var inAllMail: Bool { ![.trash, .junk].contains(role) }
 
     /// The folder that holds this mailbox's messages: each path part gains ".mbox".
     public func folder(in mailRoot: String) -> String {
-        let parts = path.split(separator: "/").map { String($0) + ".mbox" }
+        let parts = pathComponents.map {
+            $0.replacingOccurrences(of: "%", with: "%25").replacingOccurrences(of: "/", with: "%2F") + ".mbox"
+        }
         return ([mailRoot, accountID] + parts).joined(separator: "/")
     }
 

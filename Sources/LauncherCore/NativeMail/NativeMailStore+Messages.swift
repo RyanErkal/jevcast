@@ -19,6 +19,28 @@ extension NativeMailStore {
         try db.rows("SELECT remote_uid FROM messages WHERE mailbox = ? ORDER BY remote_uid", [.int(mailbox)]).compactMap { $0.first?.int.flatMap(UInt32.init(exactly:)) }
     }
 
+    /// Counts stored UIDs without materializing the mailbox. Sync uses this to choose between a
+    /// complete bounded walk and one rotating page for large non-CONDSTORE folders.
+    public func uidCount(_ mailbox: Int64) throws -> Int {
+        Int(try db.rows("SELECT COUNT(*) FROM messages WHERE mailbox = ?", [.int(mailbox)]).first?.first?.int ?? 0)
+    }
+
+    /// Reads one bounded UID page in ascending order. `after` is exclusive, so a caller can keep
+    /// a durable rotation cursor without loading the whole mailbox into memory.
+    public func uidPage(_ mailbox: Int64, after: UInt32? = nil, limit: Int = 500) throws -> [UInt32] {
+        let bounded = max(1, min(limit, 10_000))
+        let sql: String
+        let arguments: [MailDatabase.Value]
+        if let after {
+            sql = "SELECT remote_uid FROM messages WHERE mailbox = ? AND remote_uid > ? ORDER BY remote_uid LIMIT ?"
+            arguments = [.int(mailbox), .int(Int64(after)), .int(Int64(bounded))]
+        } else {
+            sql = "SELECT remote_uid FROM messages WHERE mailbox = ? ORDER BY remote_uid LIMIT ?"
+            arguments = [.int(mailbox), .int(Int64(bounded))]
+        }
+        return try db.rows(sql, arguments).compactMap { $0.first?.int.flatMap(UInt32.init(exactly:)) }
+    }
+
     /// Adds new messages, or updates the flags of ones already stored, in one transaction.
     public func upsert(_ messages: [SyncedMessage], into mailbox: Int64) throws {
         guard !messages.isEmpty else { return }
@@ -41,6 +63,9 @@ extension NativeMailStore {
                           .int(message.read ? 1 : 0), .int(message.flagged ? 1 : 0), .int(message.deleted ? 1 : 0), .int(message.size),
                           message.conversation != 0 ? .int(message.conversation) : .null, .int(Int64(message.uid)),
                           .int(message.answered ? 1 : 0), message.messageID.map { .text($0) } ?? .null, .int(message.bulk ? 1 : 0)])
+                if let rowID = try db.rows("SELECT ROWID FROM messages WHERE mailbox = ? AND remote_uid = ?", [.int(mailbox), .int(Int64(message.uid))]).first?.first?.int {
+                    try updateSearchIndex(rowID)
+                }
             }
             try refreshCounts(mailbox)
         }
@@ -178,6 +203,7 @@ extension NativeMailStore {
             if let old { try db.run("DELETE FROM summaries WHERE ROWID = ?", [.int(old)]) }
             try db.run("INSERT INTO summaries (summary) VALUES (?)", [.text(text)])
             try db.run("UPDATE messages SET summary = ?, has_body = 1 WHERE ROWID = ?", [.int(db.lastInsertID), .int(rowID)])
+            try updateSearchIndex(rowID)
         }
         touched()
     }

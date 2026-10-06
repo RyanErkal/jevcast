@@ -33,6 +33,10 @@ struct ComposeView: View {
                 .background(Color.primary.opacity(0.05))
                 Divider()
                 composeTools(current)
+                if let reason = current.serverDraftBlockedReason {
+                    Label(reason, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                        .padding(.horizontal, 14).padding(.vertical, 6)
+                }
                 if !current.attachments.isEmpty { attachments(current) }
                 Divider()
                 content(current, binding)
@@ -97,11 +101,11 @@ struct ComposeView: View {
                     if !model.senders.contains(where: { $0.accountID == draft.fromAccountID && $0.address == draft.fromAddress }) {
                         Text("Select an account").tag("")
                     }
-                    ForEach(model.senders) { Text($0.title).tag($0.id) }
-                }.labelsHidden().pickerStyle(.menu).fixedSize()
-                Spacer(minLength: 12)
+                    ForEach(model.senders) { Text($0.title).lineLimit(1).tag($0.id) }
+                }.labelsHidden().pickerStyle(.menu).frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 if native(draft) {
                     Button("Insert Signature") { model.insertSignature() }.buttonStyle(.borderless).font(.system(size: 12))
+                        .fixedSize()
                         .help("Adds this account's signature at the end of your text. Set it in Settings › Mail.")
                 }
             }

@@ -63,6 +63,27 @@ final class MailPersistenceTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: file), bytes)
     }
 
+    func testHistoryLimitPreservesPendingServerDraftCleanupAcrossRestart() async throws {
+        let model = MailModel(aiWriting: { _ in throw CancellationError() }, aiWritingAllowed: { false },
+                              statusProvider: { .noMail }, draftStore: nil)
+        let accepted = MailModel.Draft(backend: MailBackend.jevcast.rawValue, to: "sam@example.com", subject: "Needs cleanup")
+        let reference = MailServerDraftReference(accountID: "fixture", mailboxID: 1, uidValidity: 7, uid: 8,
+                                                messageID: accepted.sendingMessageID, digest: String(repeating: "a", count: 64))
+        model.recordDelivery(accepted, state: .sent)
+        model.deliveries[0].serverDraftCleanupReferences = [reference]
+        for number in 0..<35 {
+            model.recordDelivery(.init(to: "sam@example.com", subject: "Sent \(number)"), state: .sent)
+        }
+
+        let store = MailDraftStore(directory: directory)
+        try await model.saveCompositionAsync(to: store)
+        let recovered = try XCTUnwrap(store.load().deliveries.first { $0.id == accepted.id })
+        XCTAssertEqual(recovered.state, .sent)
+        XCTAssertNil(recovered.draft, "An accepted message must not become resendable")
+        XCTAssertEqual(recovered.serverDraftCleanupReferences, [reference])
+        XCTAssertEqual(model.deliveries.filter { $0.id != accepted.id }.count, 30)
+    }
+
     func testStoreRefusesSymlink() throws {
         let elsewhere = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: elsewhere) }
@@ -70,6 +91,86 @@ final class MailPersistenceTests: XCTestCase {
         try FileManager.default.createSymbolicLink(at: directory, withDestinationURL: elsewhere)
         XCTAssertThrowsError(try MailDraftStore(directory: directory).save(.init()))
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: elsewhere.path).isEmpty)
+    }
+
+    func testStoreRefusesDanglingSymlink() throws {
+        let missing = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createSymbolicLink(at: directory, withDestinationURL: missing)
+        XCTAssertThrowsError(try MailDraftStore(directory: directory).load())
+        XCTAssertThrowsError(try MailDraftStore(directory: directory).save(.init()))
+    }
+
+    func testCorruptSnapshotIsNeverOverwritten() throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        let file = directory.appendingPathComponent("composition.json")
+        let corrupt = Data("{not-json".utf8)
+        try corrupt.write(to: file, options: .atomic)
+        XCTAssertThrowsError(try MailDraftStore(directory: directory).save(.init()))
+        XCTAssertEqual(try Data(contentsOf: file), corrupt)
+    }
+
+    func testAtomicSaveLeavesLastGoodSnapshotDuringCrashRecovery() throws {
+        let store = MailDraftStore(directory: directory)
+        let draft = MailModel.Draft(to: "sam@example.com", subject: "Last good", body: "Keep me")
+        try store.save(.init(active: draft))
+        let abandoned = directory.appendingPathComponent(".composition-crash-left-behind")
+        try Data("incomplete".utf8).write(to: abandoned)
+
+        let loaded = try store.load()
+        XCTAssertEqual(loaded.active, draft)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: abandoned.path))
+    }
+
+    func testAsyncCanceledLargeAutosaveCannotOvertakeForcedSendingState() async throws {
+        let store = MailDraftStore(directory: directory)
+        var slow = MailModel.Draft(to: "sam@example.com", body: "old autosave")
+        slow.attachments = [.init(filename: "large.bin", mimeType: "application/octet-stream",
+                                   data: Data(repeating: 0x5a, count: 12 * 1024 * 1024))]
+        let forced = MailModel.Draft(to: "sam@example.com", body: "forced sending")
+        let sending = MailDelivery(id: forced.id, draft: forced, subject: forced.subject,
+                                   recipient: forced.to, date: Date(), state: .sending)
+
+        let autosave = Task { try await store.saveAsync(.init(active: slow)) }
+        await Task.yield()
+        autosave.cancel()
+        try await store.saveAsync(.init(active: nil, deliveries: [sending]))
+        _ = try? await autosave.value
+
+        let raw = try Data(contentsOf: directory.appendingPathComponent("composition.json"))
+        let final = try JSONDecoder().decode(MailDraftStore.Snapshot.self, from: raw)
+        XCTAssertEqual(final.deliveries.first?.state, .sending)
+        XCTAssertEqual(final.deliveries.first?.draft?.body, "forced sending")
+    }
+
+    func testAsyncSaveKeepsMainActorResponsiveForLargeSnapshot() async throws {
+        let store = MailDraftStore(directory: directory)
+        var draft = MailModel.Draft(to: "sam@example.com", body: "large")
+        draft.attachments = [.init(filename: "large.bin", mimeType: "application/octet-stream",
+                                   data: Data(repeating: 0x42, count: 16 * 1024 * 1024))]
+        let marker = expectation(description: "main actor marker")
+        let save = Task { try await store.saveAsync(.init(active: draft)) }
+        await Task.yield()
+        Task { @MainActor in marker.fulfill() }
+        await fulfillment(of: [marker], timeout: 1)
+        try await save.value
+    }
+
+    func testModelAsyncCompositionSaveCapturesCurrentSnapshot() async throws {
+        let store = MailDraftStore(directory: directory)
+        let model = MailModel(aiWriting: { _ in throw CancellationError() }, aiWritingAllowed: { false }, draftStore: nil)
+        model.draft = MailModel.Draft(to: "sam@example.com", subject: "Async", body: "Captured")
+        try await model.saveCompositionAsync(to: store)
+        XCTAssertEqual(try store.load().active?.body, "Captured")
+    }
+
+    func testCompositionDirectoryIsOwnerOnly() throws {
+        let store = MailDraftStore(directory: directory)
+        try store.save(.init())
+        let directoryAttributes = try FileManager.default.attributesOfItem(atPath: directory.path)
+        let fileAttributes = try FileManager.default.attributesOfItem(atPath: directory.appendingPathComponent("composition.json").path)
+        XCTAssertEqual((directoryAttributes[.posixPermissions] as? NSNumber)?.intValue, 0o700)
+        XCTAssertEqual((fileAttributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
     }
 
     func testAttachmentsAreReadOnceAndOnlyChosenBytesAreStaged() throws {

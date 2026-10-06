@@ -47,7 +47,8 @@ public actor NativeMailStore {
             uid_next INTEGER,
             highest_modseq INTEGER,
             complete INTEGER NOT NULL DEFAULT 0,
-            last_full_check REAL);
+            last_full_check REAL,
+            history_floor_uid INTEGER);
         CREATE TABLE IF NOT EXISTS subjects (ROWID INTEGER PRIMARY KEY, subject TEXT NOT NULL UNIQUE);
         CREATE TABLE IF NOT EXISTS addresses (ROWID INTEGER PRIMARY KEY, address TEXT NOT NULL, comment TEXT NOT NULL, UNIQUE(address, comment));
         CREATE TABLE IF NOT EXISTS summaries (ROWID INTEGER PRIMARY KEY, summary TEXT);
@@ -79,12 +80,39 @@ public actor NativeMailStore {
         CREATE INDEX IF NOT EXISTS messages_message_id_index ON messages(message_id);
         CREATE TRIGGER IF NOT EXISTS messages_summary_cleanup AFTER DELETE ON messages
             BEGIN DELETE FROM summaries WHERE ROWID = old.summary; END;
-        PRAGMA user_version=1;
+        CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+            row_id UNINDEXED,
+            mailbox UNINDEXED,
+            subject,
+            sender,
+            body,
+            tokenize = 'unicode61 remove_diacritics 2');
+        CREATE TRIGGER IF NOT EXISTS messages_fts_cleanup AFTER DELETE ON messages
+            BEGIN DELETE FROM messages_fts WHERE rowid = old.ROWID; END;
+        PRAGMA user_version=3;
         """)
+        // Stores made before the FTS table existed are populated once. The indexed copy is
+        // Jevcast-owned data only; Apple Mail's Envelope Index is never opened for writing here.
+        let indexedRows = try db.rows("SELECT 1 FROM messages_fts LIMIT 1")
+        if indexedRows.isEmpty {
+            try db.exec("""
+                INSERT INTO messages_fts (rowid, row_id, mailbox, subject, sender, body)
+                SELECT m.ROWID, m.ROWID, m.mailbox, COALESCE(s.subject, ''),
+                       TRIM(COALESCE(a.comment, '') || ' ' || COALESCE(a.address, '')),
+                       COALESCE(b.summary, '')
+                FROM messages m
+                LEFT JOIN subjects s ON s.ROWID = m.subject
+                LEFT JOIN addresses a ON a.ROWID = m.sender
+                LEFT JOIN summaries b ON b.ROWID = m.summary
+                """)
+        }
         // The server's own counts, which cover mail that is not on this Mac. Added to older stores.
         let columns = Set(try db.rows("PRAGMA table_info(mailboxes)").compactMap { $0.count > 1 ? $0[1].text : nil })
         if !columns.contains("server_total") {
             try db.exec("ALTER TABLE mailboxes ADD COLUMN server_total INTEGER; ALTER TABLE mailboxes ADD COLUMN server_unread INTEGER;")
+        }
+        if !columns.contains("history_floor_uid") {
+            try db.exec("ALTER TABLE mailboxes ADD COLUMN history_floor_uid INTEGER;")
         }
     }
 
@@ -114,9 +142,16 @@ public actor NativeMailStore {
         public var uidValidity: UInt32?
         public var uidNext: UInt32?
         public var highestModSeq: UInt64?
+        /// Lowest UID included by the normal history walk. Search-only rows never change this.
+        public var historyFloorUID: UInt32?
         /// True once every older message has been read.
         public var complete: Bool
         public var lastFullCheck: Date?
+        /// Number of non-deleted message headers downloaded to this Mac.
+        public var downloadedCount: Int
+        /// Counts reported by the server, when the last status check succeeded.
+        public var serverTotal: Int?
+        public var serverUnread: Int?
     }
 
     /// Records the server's mailboxes for `account` and removes the ones it no longer has, with
@@ -143,16 +178,12 @@ public actor NativeMailStore {
         return try mailboxes(account: account)
     }
 
-    /// Mailboxes worth syncing. Virtual views that repeat other mailboxes are left out: Starred and
-    /// Important, and All Mail when the account also has an Archive.
+    /// Every selectable mailbox is retained. Gmail's Starred, Important, and All Mail are part of
+    /// the catalogue even when they repeat another mailbox. Unified lists apply their own
+    /// message-key deduplication, so dropping these rows here would make a folder impossible to
+    /// open or search.
     static func syncedEntries(_ entries: [IMAPListEntry]) -> [IMAPListEntry] {
-        let selectable = entries.filter(\.selectable)
-        let hasArchive = selectable.contains { $0.has("\\Archive") }
-        return selectable.filter { entry in
-            if entry.has("\\Flagged") || entry.has("\\Important") { return false }
-            if entry.has("\\All") && hasArchive { return false }
-            return true
-        }
+        entries.filter(\.selectable)
     }
 
     static func role(of entry: IMAPListEntry) -> MailMailbox.Role? {
@@ -174,7 +205,8 @@ public actor NativeMailStore {
 
     public func mailboxes(account: String) throws -> [Mailbox] {
         try db.rows("""
-            SELECT ROWID, account, name, delimiter, role, uid_validity, uid_next, highest_modseq, complete, last_full_check, url
+            SELECT ROWID, account, name, delimiter, role, uid_validity, uid_next, highest_modseq, complete, last_full_check, url,
+                   history_floor_uid, total_count, server_total, server_unread
             FROM mailboxes WHERE account = ? ORDER BY CASE role WHEN 'inbox' THEN 0 WHEN 'sent' THEN 1 WHEN 'archive' THEN 2
             WHEN 'drafts' THEN 3 WHEN 'trash' THEN 5 WHEN 'junk' THEN 6 ELSE 4 END, name
             """, [.text(account)]).compactMap(Self.mailbox)
@@ -182,26 +214,37 @@ public actor NativeMailStore {
 
     public func mailbox(_ rowID: Int64) throws -> Mailbox? {
         try db.rows("""
-            SELECT ROWID, account, name, delimiter, role, uid_validity, uid_next, highest_modseq, complete, last_full_check, url
+            SELECT ROWID, account, name, delimiter, role, uid_validity, uid_next, highest_modseq, complete, last_full_check, url,
+                   history_floor_uid, total_count, server_total, server_unread
             FROM mailboxes WHERE ROWID = ?
             """, [.int(rowID)]).first.flatMap(Self.mailbox)
     }
 
     static func mailbox(_ row: [MailDatabase.Value]) -> Mailbox? {
-        guard row.count == 11, let id = row[0].int, let account = row[1].text, let name = row[2].text, let url = row[10].text else { return nil }
+        guard row.count == 15, let id = row[0].int, let account = row[1].text, let name = row[2].text, let url = row[10].text else { return nil }
         return Mailbox(rowID: id, account: account, name: name, delimiter: row[3].text, role: row[4].text.flatMap(MailMailbox.Role.init(rawValue:)), url: url,
                        uidValidity: row[5].int.flatMap(UInt32.init(exactly:)), uidNext: row[6].int.flatMap(UInt32.init(exactly:)),
-                       highestModSeq: row[7].int.map { UInt64(bitPattern: $0) }, complete: (row[8].int ?? 0) != 0,
-                       lastFullCheck: row[9].double.map(Date.init(timeIntervalSince1970:)))
+                       highestModSeq: row[7].int.map { UInt64(bitPattern: $0) },
+                       historyFloorUID: row[11].int.flatMap(UInt32.init(exactly:)), complete: (row[8].int ?? 0) != 0,
+                       lastFullCheck: row[9].double.map(Date.init(timeIntervalSince1970:)),
+                       downloadedCount: Int(row[12].int ?? 0),
+                       serverTotal: row[13].int.map(Int.init), serverUnread: row[14].int.map(Int.init))
     }
 
     /// Saves what the last sync learned about a mailbox.
     public func saveSyncState(_ mailbox: Mailbox) throws {
         try db.run("""
-            UPDATE mailboxes SET uid_validity = ?, uid_next = ?, highest_modseq = ?, complete = ?, last_full_check = ? WHERE ROWID = ?
+            UPDATE mailboxes SET uid_validity = ?, uid_next = ?, highest_modseq = ?, complete = ?, last_full_check = ?, history_floor_uid = ? WHERE ROWID = ?
             """, [mailbox.uidValidity.map { .int(Int64($0)) } ?? .null, mailbox.uidNext.map { .int(Int64($0)) } ?? .null,
                   mailbox.highestModSeq.map { .int(Int64(bitPattern: $0)) } ?? .null, .int(mailbox.complete ? 1 : 0),
-                  mailbox.lastFullCheck.map { .double($0.timeIntervalSince1970) } ?? .null, .int(mailbox.rowID)])
+                  mailbox.lastFullCheck.map { .double($0.timeIntervalSince1970) } ?? .null,
+                  mailbox.historyFloorUID.map { .int(Int64($0)) } ?? .null, .int(mailbox.rowID)])
+    }
+
+    /// Stores the SELECT identity for a search-only hit without claiming normal history coverage.
+    public func setUIDValidity(_ rowID: Int64, _ uidValidity: UInt32) throws {
+        try db.run("UPDATE mailboxes SET uid_validity = ? WHERE ROWID = ?", [.int(Int64(uidValidity)), .int(rowID)])
+        if db.changes > 0 { touched() }
     }
 
     /// Notes that every older message of a mailbox is on this Mac.
@@ -215,7 +258,7 @@ public actor NativeMailStore {
         removeBodies(mailboxRowID: mailbox.rowID, url: mailbox.url)
         touched()
         var fresh = mailbox
-        fresh.uidValidity = uidValidity; fresh.uidNext = nil; fresh.highestModSeq = nil; fresh.complete = false; fresh.lastFullCheck = nil
+        fresh.uidValidity = uidValidity; fresh.uidNext = nil; fresh.highestModSeq = nil; fresh.complete = false; fresh.lastFullCheck = nil; fresh.historyFloorUID = nil
         try saveSyncState(fresh)
         try refreshCounts(mailbox.rowID)
         return fresh

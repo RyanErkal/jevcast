@@ -7,9 +7,14 @@ import LauncherCore
 @MainActor
 final class MailModel: ObservableObject {
     enum Place: Hashable {
-        case inbox, allMail, unread, flagged
+        case inbox, allMail, unread, flagged, sent, drafts, outbox
         case mailbox(Int64)
     }
+    enum SearchScope: String, CaseIterable { case mailbox = "This mailbox", allAccounts = "All accounts" }
+    @Published var searchScope = SearchScope.mailbox { didSet { if oldValue != searchScope { reload() } } }
+    @Published var favoriteMailboxKeys: Set<String> = []
+    @Published var collapsedMailboxKeys: Set<String> = []
+    let mailDefaults: UserDefaults?
     @Published private(set) var status: MailStore.Status = .noMail
     @Published private(set) var mailboxes: [MailMailbox] = []
     @Published var place: Place = .inbox { didSet { if oldValue != place { selectedID = nil; reload(); syncPlace() } } }
@@ -42,7 +47,7 @@ final class MailModel: ObservableObject {
     @Published private(set) var preparingEmpty = false
 
     /// True while a Jevcast account's server may hold older mail than this Mac has for the list.
-    @Published private(set) var olderOnServer = false
+    @Published var olderOnServer = false
     private var loadingOlder = false
     /// False when Apple Mail is not running, so new mail is not reaching its index.
     @Published private(set) var mailRunning = true
@@ -82,6 +87,7 @@ final class MailModel: ObservableObject {
     @Published var draft: Draft? {
         didSet {
             persistComposition()
+            serverDrafts.changed(draft)
             guard oldValue?.id != draft?.id || oldValue?.fields != draft?.fields else { return }
             discardArmed = false
             if composeNote != nil { composeNote = nil }
@@ -105,8 +111,10 @@ final class MailModel: ObservableObject {
     @Published var unsent: [Unsent] = [] { didSet { persistComposition() } }
     @Published var deliveries: [MailDelivery] = [] { didSet { persistComposition() } }
     @Published var showsOutbox = false
+    @Published var repairingSentCopies: Set<UUID> = []
     @Published var senders: [MailSendingIdentity] = []
     let draftStore: MailDraftStore?
+    lazy var serverDrafts = MailServerDraftCoordinator(model: self)
     @Published var persistenceProblem: String?
     var persistenceWork: Task<Void, Never>?
     /// Tickets of waiting sends that Undo took back.
@@ -116,6 +124,7 @@ final class MailModel: ObservableObject {
     /// The undo time of the waiting send. Cancelling it sends at once.
     var undoTimer: Task<Void, Never>?
     let sendDraft: (Draft, MailMailbox?) async throws -> Void
+    let submitDraft: (Draft, MailMailbox?) async throws -> MailSubmission
     /// Seconds a sent message waits, so Undo can stop it.
     let undoDelay: TimeInterval
     /// Called when a send fails, with a note for the user. The app shows it when no mail view is on screen.
@@ -124,16 +133,23 @@ final class MailModel: ObservableObject {
 
     let aiWriting: (AIWritingRequest) async throws -> AIWritingReply
     private let aiWritingAllowed: () -> Bool
-    private var root: String? { if case .ready(let root) = status { return root }; return nil }
+    var root: String? { if case .ready(let root) = status { return root }; return nil }
+    enum ServerSearch: Equatable { case available, running, more, complete, limited(String), failed(String) }
+    @Published var serverSearch = ServerSearch.available
+    var serverSearchWork: Task<Void, Never>?
+    var serverSearchCursors: [Int64: UInt32] = [:]
+    var serverSearchValidities: [Int64: UInt32] = [:]
+    var serverSearchRows: [MailSummary] = []
     private var fingerprint = ""
     private var poll: Task<Void, Never>?
+    private var isDemo = false
     private var searchWork: Task<Void, Never>?
     private var loadWork: Task<Void, Never>?
     /// The newest and oldest cursors for the current list.
     private var top: MailStore.Cursor?
     @Published private(set) var bottom: MailStore.Cursor?
     private var loadingMore = false
-    var isLoading: Bool { reloading || loadingMore || refreshing || bodySearch == .running }
+    var isLoading: Bool { reloading || loadingMore || refreshing || bodySearch == .running || serverSearch == .running }
     /// The body phase of a search: off without a search, `more` when rows remain unread.
     enum BodySearch: Equatable { case off, running, more, done }
     @Published private(set) var bodySearch = BodySearch.off
@@ -144,8 +160,9 @@ final class MailModel: ObservableObject {
     private let statusProvider: @Sendable () -> MailStore.Status
     private var statusWork: Task<Void, Never>?
     private var indexIdentity: MailStore.FileIdentity?
+    var mailIndexIdentity: MailStore.FileIdentity? { indexIdentity }
     /// Changes with every full reload, so late results for an older list are dropped.
-    private var generation = 0
+    var generation = 0
     /// Stops the SQL of a list that a newer reload replaced.
     private var listStop = StopFlag()
     /// The selected HTML body with its inline images already in place, prepared off the main thread.
@@ -164,12 +181,21 @@ final class MailModel: ObservableObject {
 
     init(aiWriting: @escaping (AIWritingRequest) async throws -> AIWritingReply, aiWritingAllowed: @escaping () -> Bool, statusProvider: @escaping @Sendable () -> MailStore.Status = { MailStore.status() },
          setRead: @escaping (Bool, MailSummary, MailMailbox, MailMailbox?) async throws -> Void = { try await MailActions.setRead($0, $1, in: $2, fallback: $3) },
-         sendDraft: @escaping (Draft, MailMailbox?) async throws -> Void = { try await MailModel.deliver($0, $1) }, undoDelay: TimeInterval = 5,
-         draftStore: MailDraftStore? = MailDraftStore.standard) {
+         sendDraft: ((Draft, MailMailbox?) async throws -> Void)? = nil,
+         submitDraft: ((Draft, MailMailbox?) async throws -> MailSubmission)? = nil, undoDelay: TimeInterval = 5,
+         draftStore: MailDraftStore? = MailDraftStore.standard,
+         mailDefaults: UserDefaults? = MailIOPolicy.isOffline ? nil : .standard) {
+        self.mailDefaults = mailDefaults
+        favoriteMailboxKeys = Set(mailDefaults?.stringArray(forKey: "mailFavoriteMailboxes") ?? [])
+        collapsedMailboxKeys = Set(mailDefaults?.stringArray(forKey: "mailCollapsedMailboxes") ?? [])
         self.draftStore = draftStore
         self.statusProvider = statusProvider
         self.setReadAction = setRead
-        self.sendDraft = sendDraft
+        self.sendDraft = sendDraft ?? { _ = try await MailModel.deliver($0, $1) }
+        if let submitDraft { self.submitDraft = submitDraft }
+        else if let sendDraft {
+            self.submitDraft = { draft, box in try await sendDraft(draft, box); return .serverAccepted(nil) }
+        } else { self.submitDraft = MailModel.deliver }
         self.undoDelay = undoDelay
         self.aiWriting = aiWriting; self.aiWritingAllowed = aiWritingAllowed
         if let draftStore {
@@ -211,6 +237,9 @@ final class MailModel: ObservableObject {
         case .allMail: return "All Mail"
         case .unread: return "Unread"
         case .flagged: return "Flagged"
+        case .sent: return "Sent"
+        case .drafts: return "Drafts"
+        case .outbox: return "Outbox"
         case .mailbox(let id): return mailbox(id)?.name ?? "Mailbox"
         }
     }
@@ -221,7 +250,7 @@ final class MailModel: ObservableObject {
     func accountTitle(_ account: String) -> String {
         senders.first { $0.accountID == account }?.address ?? account
     }
-    var unreadInInbox: Int { inboxes.map(\.unread).reduce(0, +) }
+    var unreadInInbox: Int { inboxes.map { $0.serverUnread ?? $0.unread }.reduce(0, +) }
     var canUseAIWriting: Bool { aiWritingAllowed() }
 
     // MARK: Loading
@@ -261,7 +290,7 @@ final class MailModel: ObservableObject {
             await pending?.value
             if !accounts.isEmpty { try? await MailActions.synchronize(accounts: accounts) }
         }
-        do { try saveComposition() } catch { banner = error.localizedDescription }
+        Task { do { try await saveCompositionAsync() } catch { banner = error.localizedDescription } }
     }
 
     /// Starts Apple Mail hidden, if needed, and asks it to fetch new mail. New mail reaches the
@@ -332,7 +361,9 @@ final class MailModel: ObservableObject {
     }
 
     private func reloadSoon() {
+        guard !isDemo else { return }
         searchWork?.cancel()
+        resetServerSearch()
         // A newer search stops the older one's query at once, then waits for typing to pause.
         listStop.stop()
         generation += 1
@@ -347,8 +378,10 @@ final class MailModel: ObservableObject {
 
     /// Reads the first page of the list again. The selection stays when its message is still listed.
     func reload(keepSelection: Bool = false) {
+        guard !isDemo else { return }
         guard let root else { return }
-        let place = self.place, search = self.search
+        if !keepSelection { resetServerSearch() }
+        let place = self.queryPlace, search = self.search
         let keptIDs = keepSelection ? messages.map(\.rowID) : []
         loadWork?.cancel()
         listStop.stop()
@@ -382,7 +415,9 @@ final class MailModel: ObservableObject {
             self.indexIdentity = identity
             // Removals older than two minutes are Mail's business again.
             self.removing = self.removing.filter { Date().timeIntervalSince($0.value) < 120 }
+            let scopeChanged = Self.query(place, search, self.mailboxes).mailboxes != Self.query(place, search, boxes).mailboxes
             self.mailboxes = boxes
+            if scopeChanged { self.syncPlace() }
             self.confirmReads(page.messages.map { ($0.rowID, $0.read) } + states.map { ($0.key, $0.value.read) })
             let messages = page.messages.filter { self.removing[$0.rowID] == nil }
             self.top = page.first; self.bottom = page.last; self.hasMore = page.hasMore
@@ -394,8 +429,9 @@ final class MailModel: ObservableObject {
                Self.isNewer(kept, than: last) == false, page.hasMore {
                 merged.append(kept)
             }
-            self.install(Self.merge([], merged, query: Self.query(place, search, boxes)))
-            // Subject and sender matches show now; body matches follow in a short, bounded step.
+            self.install(Self.merge(merged, self.serverSearchRows, query: Self.query(place, search, boxes)))
+            self.updateServerHistory()
+            // Native FTS includes bodies in the page. Apple Mail's body matches follow separately.
             if !search.isEmpty { self.searchBodies(budget: 0.15) }
             if let pending = self.pending {
                 self.pending = nil
@@ -421,7 +457,7 @@ final class MailModel: ObservableObject {
     func loadNextPage() {
         guard let root, hasMore, !loadingMore, !reloading, !listStop.isStopped, let bottom else { return }
         loadingMore = true
-        var query = Self.query(place, search, mailboxes)
+        var query = Self.query(queryPlace, search, mailboxes)
         query.before = bottom
         let stop = listStop, generation = self.generation
         Task { @MainActor [weak self] in
@@ -449,8 +485,11 @@ final class MailModel: ObservableObject {
 
     /// A Jevcast account reads a folder when it opens; until then the folder costs nothing.
     private func syncPlace() {
-        guard case .mailbox(let id) = place, let engine = NativeMailCenter.activeEngine else { return }
-        Task { await engine.sync(MailSyncRequest(mailboxes: [id])) }
+        guard !isDemo else { return }
+        guard let engine = NativeMailCenter.activeEngine else { return }
+        let ids = Self.query(queryPlace, search, mailboxes).mailboxes
+        guard !ids.isEmpty else { return }
+        Task { await engine.sync(MailSyncRequest(mailboxes: Set(ids))) }
     }
 
     /// Reads older mail from a Jevcast account's server once the list shows all this Mac has.
@@ -458,7 +497,7 @@ final class MailModel: ObservableObject {
         guard olderOnServer, !loadingOlder, !hasMore, search.isEmpty, let engine = NativeMailCenter.activeEngine else { return }
         loadingOlder = true
         defer { loadingOlder = false }
-        let ids = Self.query(place, search, mailboxes).mailboxes, generation = self.generation
+        let ids = Self.query(queryPlace, search, mailboxes).mailboxes, generation = self.generation
         var more = false
         do {
             for id in ids { more = try await engine.loadOlder(id) || more }
@@ -476,11 +515,16 @@ final class MailModel: ObservableObject {
     /// Reads older rows for body matches, for about `budget` seconds or 200 matches.
     func searchBodies(budget: TimeInterval = 2) {
         guard let root, !search.isEmpty, !refreshing, bodySearch != .running, bodySearch != .done, !listStop.isStopped else { return }
-        let query = Self.query(place, search, mailboxes), cursor = bodyCursor, stop = listStop, generation = self.generation
+        let query = Self.query(queryPlace, search, mailboxes), cursor = bodyCursor, stop = listStop, generation = self.generation
         bodySearch = .running
         Task { @MainActor [weak self] in
-            let result = await Task.detached(priority: .userInitiated) {
-                try? MailStore.searchBodies(root: root, query, from: cursor, budget: budget, stop: stop.check)
+            let result = await Task.detached(priority: .userInitiated) { () -> MailStore.BodyResult? in
+                do {
+                    if try MailStore.supportsIndexedSearch(root: root) {
+                        return .init(messages: [], cursor: cursor, done: true)
+                    }
+                    return try MailStore.searchBodies(root: root, query, from: cursor, budget: budget, stop: stop.check)
+                } catch { return nil }
             }.value
             guard let self, !stop.isStopped, self.generation == generation else { return }
             guard let result else { self.bodySearch = .more; return }
@@ -494,10 +538,10 @@ final class MailModel: ObservableObject {
     /// Rechecks the loaded date range, including older rows that gained a mailbox label.
     @discardableResult
     func refresh() -> Bool {
-        guard !reloading, !refreshing, bodySearch != .running, !listStop.isStopped else { return false }
+        guard !reloading, !refreshing, bodySearch != .running, serverSearch != .running, !listStop.isStopped else { return false }
         guard let root, let top, !messages.isEmpty else { reload(keepSelection: true); return true }
         refreshing = true
-        let place = self.place, search = self.search, generation = self.generation
+        let place = self.queryPlace, search = self.search, generation = self.generation
         let ids = messages.map(\.rowID), stop = listStop
         let identity = indexIdentity
         // Labels can change without changing date_received. Include the bottom date's ties;
@@ -577,7 +621,7 @@ final class MailModel: ObservableObject {
         return sorted
     }
 
-    private func install(_ fresh: [MailSummary]) {
+    func install(_ fresh: [MailSummary]) {
         let old = selected
         let rows = withReadChanges(fresh)
         if messages != rows { messages = rows }
@@ -614,8 +658,11 @@ final class MailModel: ObservableObject {
         switch place {
         case .inbox: return .init(mailboxes: inboxes, text: search)
         case .allMail: return .init(mailboxes: all, text: search, dedupe: true, preferred: Set(inboxes))
-        case .unread: return .init(mailboxes: inboxes, text: search, unreadOnly: true)
+        case .unread: return .init(mailboxes: all, text: search, unreadOnly: true, dedupe: true, preferred: Set(inboxes))
         case .flagged: return .init(mailboxes: all, text: search, flaggedOnly: true, dedupe: true, preferred: Set(inboxes))
+        case .sent: return .init(mailboxes: boxes.filter { $0.role == .sent }.map(\.rowID), text: search, dedupe: true)
+        case .drafts: return .init(mailboxes: boxes.filter { $0.role == .drafts }.map(\.rowID), text: search, dedupe: true)
+        case .outbox: return .init(mailboxes: [], rowIDs: [-1])
         case .mailbox(let id): return .init(mailboxes: [id], text: search)
         }
     }
@@ -692,6 +739,12 @@ final class MailModel: ObservableObject {
         }
     }
 
+    func retrySelectedBody() {
+        if let selectedID { bodies.removeValue(forKey: selectedID); bodyOrder.removeAll { $0 == selectedID } }
+        detailMissing = false
+        loadSelected()
+    }
+
     /// The message on screen, in the window you are using, counts as read after the time set in
     /// Settings › Mail. With a delay, moving past it quickly with ↓ leaves it unread.
     /// `searchPick`: the model picked the first match of a search, which changes as you type.
@@ -723,6 +776,18 @@ final class MailModel: ObservableObject {
         return Body(message: message, html: message.html.map { MailHTMLView.inlining($0, images: message.inlineImages) })
     }
 
+
+    /// Invented data for offline --snapshot-ui --demo renders. This does not start a mail source.
+    func installDemo(mailboxes: [MailMailbox], messages: [MailSummary], detail: MIMEMessage? = nil) {
+        isDemo = true
+        status = .ready(root: "/tmp/jevcast-demo-mail")
+        self.mailboxes = mailboxes; self.messages = messages
+        if let first = messages.first, let detail {
+            bodies[first.rowID] = Body(message: detail, html: detail.html)
+            selectedID = first.rowID
+        }
+    }
+
     private func remember(_ body: Body, for rowID: Int64) {
         bodyOrder.removeAll { $0 == rowID }
         bodyOrder.append(rowID)
@@ -732,6 +797,7 @@ final class MailModel: ObservableObject {
 
     /// Reads the messages above and below in the background, so the next one opens at once.
     private func prefetchNeighbours(of rowID: Int64, root: String) {
+        guard !isDemo else { return }
         guard let index = messages.firstIndex(where: { $0.rowID == rowID }) else { return }
         let wanted = [index + 1, index + 2, index - 1].filter(messages.indices.contains).map { messages[$0] }
             .filter { bodies[$0.rowID] == nil }

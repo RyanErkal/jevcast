@@ -18,7 +18,7 @@ extension MailModel {
     func forward() {
         guard let message = selected else { return }
         let subject = message.subject.lowercased().hasPrefix("fwd:") ? message.subject : "Fwd: " + message.subject
-        startDraft(Draft(mode: .forward, subject: subject, original: message, source: loadedSource(message)))
+        if startDraft(Draft(mode: .forward, subject: subject, original: message, source: loadedSource(message))) { captureForwardAttachments() }
     }
 
     /// Opens `new` in the composer. An open draft with text stays: a view that hid it shows it
@@ -35,6 +35,7 @@ extension MailModel {
         if chosen.fromAccountID == nil { selectInitialSender(&chosen) }
         chosen.fillRecipients()
         draft = chosen
+        if place == .outbox { place = .drafts }
         return true
     }
 
@@ -53,6 +54,7 @@ extension MailModel {
         if !ready.senderWasChosen { selectInitialSender(&ready) }
         ready.fillRecipients()
         self.draft = ready
+        if ready.mode == .forward { captureForwardAttachments() }
     }
 
     /// Escape or Discard. A draft with text needs a second press, and the footer says so.
@@ -66,7 +68,8 @@ extension MailModel {
             return false
         }
         self.draft = nil
-        do { try saveComposition() } catch { banner = error.localizedDescription }
+        serverDrafts.discard(draft)
+        Task { do { try await saveCompositionAsync() } catch { banner = error.localizedDescription } }
         return true
     }
 
@@ -90,8 +93,6 @@ extension MailModel {
         // A message still in its undo time goes first.
         sendPendingNow()
         recordDelivery(draft, state: .queued)
-        do { try saveComposition() }
-        catch { composeNote = "Nothing was sent. " + error.localizedDescription; return composeNote }
         unsent.removeAll { $0.id == draft.id }
         queue(draft, box: draft.original.flatMap(actionBox))
         self.draft = nil
@@ -103,6 +104,10 @@ extension MailModel {
         if aiWritingBusy { return "Wait until AI writing finishes." }
         if let problem = draft.sendProblem { return problem }
         if let persistenceProblem { return "Nothing was sent. " + persistenceProblem }
+        if draft.backend == MailBackend.jevcast.rawValue, draft.mode == .forward,
+           let source = draft.source, !source.message.attachments.isEmpty, source.forwardAttachments == nil {
+            return "Wait until the original attachments have loaded."
+        }
         if draft.backend != MailBackend.current.rawValue { return "This draft uses another mail source. Select its source in Settings › Mail before sending." }
         guard senders.contains(where: { $0.accountID == draft.fromAccountID && $0.address == draft.fromAddress }) else { return "Select an available sending account." }
         // Jevcast's own accounts answer from the copy kept with the draft, so a message archived
@@ -115,7 +120,7 @@ extension MailModel {
 
     /// Waits for the undo time, then for any earlier send, then sends. Undo takes it back while it waits.
     private func queue(_ draft: Draft, box: MailMailbox?) {
-        let ticket = UUID(), delay = undoDelay, action = sendDraft
+        let ticket = UUID(), delay = undoDelay, action = submitDraft
         pendingSend = draft; pendingTicket = ticket
         sendsAt = Date().addingTimeInterval(delay)
         sendsInFlight += 1
@@ -123,23 +128,33 @@ extension MailModel {
         undoTimer = timer
         let previous = sendTask
         sendTask = Task { @MainActor [weak self] in
-            await timer.value
             guard let self else { return }
+            var checkpointError: Error?
+            do { try await self.saveCompositionAsync() }
+            catch { checkpointError = error; timer.cancel() }
+            await timer.value
             if self.pendingTicket == ticket { self.pendingSend = nil; self.pendingTicket = nil; self.sendsAt = nil; self.undoTimer = nil }
             // Undone. It still waits for earlier sends, so waiting for the last send waits for all.
             if self.undoneSends.remove(ticket) != nil { await previous?.value; return }
             await previous?.value
+            var ready = draft
+            var accepted = false
             do {
+                if let checkpointError { throw checkpointError }
                 guard draft.backend == MailBackend.current.rawValue else { throw LauncherError("The mail source changed. Nothing was sent.") }
-                self.recordDelivery(draft, state: .sending)
-                try self.saveComposition()
-                try await action(draft, box)
-                self.recordDelivery(draft, state: .sent)
-                self.banner = "Sent."
+                ready = try await self.serverDrafts.prepareForSend(draft)
+                self.recordDelivery(ready, state: .sending)
+                try await self.saveCompositionAsync()
+                let submitted = try await action(ready, box)
+                self.recordSubmission(ready, submitted)
+                accepted = true
             } catch {
-                self.sendFailed(draft, error)
+                self.sendFailed(ready, error)
             }
-            do { try self.saveComposition() } catch { self.banner = "The send result could not be saved. Check Outbox before resending. " + error.localizedDescription }
+            do {
+                try await self.saveCompositionAsync()
+                if accepted { await self.serverDrafts.completedSend(ready) }
+            } catch { self.banner = "The send result could not be saved. Check Outbox before resending. " + error.localizedDescription }
             self.sendsInFlight -= 1
         }
     }
@@ -158,7 +173,7 @@ extension MailModel {
     func finishSends() async {
         sendPendingNow()
         await sendTask?.value
-        do { try saveComposition() } catch { banner = error.localizedDescription }
+        do { try await saveCompositionAsync() } catch { banner = error.localizedDescription }
     }
 
     /// Stops a send during its undo time. The draft comes back, or waits in `unsent` while
@@ -172,7 +187,7 @@ extension MailModel {
         recordDelivery(pending, state: .undone)
         if restore(pending) { banner = "Not sent. Your message is back." }
         else { unsent.append(Unsent(draft: pending, reason: "Not sent. Your message is kept.")) }
-        do { try saveComposition() } catch { banner = error.localizedDescription }
+        Task { do { try await saveCompositionAsync() } catch { banner = error.localizedDescription } }
     }
 
     /// Nothing typed is lost: the draft comes back with the reason, or waits in `unsent`. When Mail
@@ -188,14 +203,16 @@ extension MailModel {
     }
 
     /// Sends a draft through Apple Mail, or through Jevcast's own accounts when they are the mail source.
-    nonisolated static func deliver(_ draft: Draft, _ box: MailMailbox?) async throws {
+    nonisolated static func deliver(_ draft: Draft, _ box: MailMailbox?) async throws -> MailSubmission {
         try MailIOPolicy.requireOnline()
         guard draft.backend == MailBackend.current.rawValue else { throw LauncherError("The mail source changed. Nothing was sent.") }
         guard let accountID = draft.fromAccountID, let address = draft.fromAddress else { throw LauncherError("Select a sending account.") }
         guard draft.body.utf8.count <= 1024 * 1024, draft.attachments.reduce(0, { $0 + $1.data.count }) <= MailComposeAttachments.byteLimit else {
             throw LauncherError("This message is too large. Reduce its text or attachments.")
         }
-        var html = MailRichText.html(draft.richText, plain: draft.body)
+        var html = draft.richText == nil && draft.serverDraftHTMLBody == draft.body
+            ? draft.serverDraftHTML.map(MailHTML.clean) ?? MailRichText.html(nil, plain: draft.body)
+            : MailRichText.html(draft.richText, plain: draft.body)
         for image in draft.attachments where image.contentID != nil {
             html += "<p><img style=\"max-width:100%\" src=\"cid:" + MailHTML.escape(image.contentID ?? "") + "\" alt=\"" + MailHTML.escape(image.filename) + "\"></p>"
         }
@@ -207,23 +224,26 @@ extension MailModel {
             // The fields as you left them, with names, go out; nothing is worked out again at send time.
             let recipients = NativeMailEngine.Recipients(to: try MailActions.contacts(draft.to), cc: try MailActions.contacts(draft.cc),
                                                          bcc: try MailActions.contacts(draft.bcc))
+            let receipt: MailSendReceipt
             switch draft.mode {
             case .new:
-                try await engine.send(from: accountID, to: [], cc: [], subject: draft.subject, body: draft.body, html: html,
-                                      attachments: draft.attachments, messageID: draft.sendingMessageID, recipients: recipients)
+                receipt = try await engine.send(from: accountID, to: [], cc: [], subject: draft.subject, body: draft.body, html: html,
+                                      attachments: draft.attachments, messageID: draft.sendingMessageID, recipients: recipients,
+                                      inReplyTo: draft.serverDraftInReplyTo, references: draft.serverDraftReferences ?? [])
             case .reply(let all):
                 guard let original = draft.original, let source = draft.source else { throw LauncherError("Wait until the original message has loaded.") }
-                try await engine.reply(to: original.rowID, text: draft.body, all: all, from: accountID, html: html, attachments: draft.attachments,
+                receipt = try await engine.reply(to: original.rowID, text: draft.body, all: all, from: accountID, html: html, attachments: draft.attachments,
                                        messageID: draft.sendingMessageID, expectedMessageID: source.message.header("Message-ID"),
                                        recipients: recipients, subject: draft.subject, quote: draft.includesQuote,
                                        saved: source.message, savedDate: original.date)
             case .forward:
                 guard let original = draft.original, let source = draft.source else { throw LauncherError("Wait until the original message has loaded.") }
-                try await engine.forward(original.rowID, text: draft.body, to: [], from: accountID, html: html, attachments: draft.attachments,
+                receipt = try await engine.forward(original.rowID, text: draft.body, to: [], from: accountID, html: html, attachments: draft.attachments,
                                          messageID: draft.sendingMessageID, expectedMessageID: source.message.header("Message-ID"),
-                                         recipients: recipients, subject: draft.subject, saved: source.message, savedDate: original.date)
+                                         recipients: recipients, subject: draft.subject, saved: source.message, savedDate: original.date,
+                                         savedAttachments: source.forwardAttachments)
             }
-            return
+            return .serverAccepted(receipt)
         }
         switch draft.mode {
         case .new:
@@ -238,6 +258,7 @@ extension MailModel {
             try await MailActions.forward(original, in: box, text: draft.body, to: MailActions.addresses(draft.to), accountID: accountID, address: address,
                                           attachments: draft.attachments, expectedMessageID: draft.source?.message.header("Message-ID"))
         }
+        return .appleMailQueued
     }
 
     /// Puts a draft back in the composer when no draft with text is open.

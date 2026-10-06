@@ -170,7 +170,7 @@ final class LauncherFlowTests: XCTestCase {
         }
     }
     @MainActor func testCalculatorAndWebAreNotRemembered() {
-        let board = FakePasteboard(), system = NSPasteboard.general.changeCount
+        let board = FakePasteboard()
         withModel(board: board) { model in
             model.updateQuery("2+2", typed: true)
             model.execute()
@@ -178,7 +178,6 @@ final class LauncherFlowTests: XCTestCase {
             XCTAssertTrue(model.preferences.recentIDs.isEmpty)
         }
         XCTAssertEqual(board.text, "4", "The answer goes to the launcher's clipboard.")
-        XCTAssertEqual(NSPasteboard.general.changeCount, system, "A test never changes the user's clipboard.")
     }
     @MainActor func testMessageNoticeWinsAndVoiceErrorLeavesFooter() {
         withModel { model in

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MailDeliveryView: View {
     @ObservedObject var model: MailModel
+    var inline = false
     @Environment(\.dismiss) private var dismiss
     @State private var resend: MailDelivery?
 
@@ -10,10 +11,11 @@ struct MailDeliveryView: View {
             HStack {
                 Text("Outbox").font(.title3.weight(.semibold))
                 Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+                if !inline { Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }
             }
             Text("Messages recovered after restart stay here until you send them. A message marked Uncertain may already be sent.")
                 .font(.caption).foregroundStyle(.secondary)
+            MailServerDraftCleanupView(model: model)
             if model.deliveries.isEmpty { Text("No send history").foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 100) }
             else {
                 ScrollView {
@@ -27,7 +29,10 @@ struct MailDeliveryView: View {
                                     if let note = item.note { Text(note).font(.caption).foregroundStyle(.orange) }
                                 }
                                 Spacer()
-                                if item.state == .uncertain {
+                                if item.state == .sentCopyPending {
+                                    Button(model.repairingSentCopies.contains(item.id) ? "Saving…" : "Save Sent Copy") { model.repairSentCopy(item) }
+                                        .controlSize(.small).disabled(model.repairingSentCopies.contains(item.id))
+                                } else if item.state == .uncertain {
                                     Button("Allow Resend…") { resend = item }.controlSize(.small)
                                 } else if item.draft != nil && item.state == .failed {
                                     Button("Open Draft") { model.restoreDelivery(item) }.controlSize(.small)
@@ -38,9 +43,9 @@ struct MailDeliveryView: View {
                             Divider()
                         }
                     }
-                }.frame(maxHeight: 330)
+                }.frame(maxHeight: inline ? .infinity : 330)
             }
-        }.padding(20).frame(width: 540)
+        }.padding(20).frame(width: inline ? nil : 540).frame(maxWidth: inline ? .infinity : nil)
         .confirmationDialog("This message may already be sent", isPresented: Binding(get: { resend != nil }, set: { if !$0 { resend = nil } })) {
             if let resend { Button("I Checked Sent. It Was Not Sent") { model.restoreDelivery(resend, allowResend: true); self.resend = nil } }
             Button("Cancel", role: .cancel) { resend = nil }
@@ -51,6 +56,8 @@ struct MailDeliveryView: View {
         case .queued: return "Waiting for Undo"
         case .sending: return "Sending"
         case .sent: return "Sent"
+        case .sentCopyPending: return "Sent · Copy pending"
+        case .appleMailQueued: return "Queued in Apple Mail"
         case .failed: return "Not sent"
         case .uncertain: return "Uncertain"
         case .undone: return "Undone"

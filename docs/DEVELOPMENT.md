@@ -68,9 +68,30 @@ Delete moves to a unique Trash folder. There is no purge action. Moves never use
 mailbox-wide EXPUNGE. A refused sign-in stops background sync until the user
 updates the sign-in. A queued action refuses a changed mail source.
 
-Demo snapshots include `mail-compose`, `mail-outbox`, and `mail-add-account`, and the Automations window at its normal size, at 980 points wide, and at its minimum size (`automations-*`).
+Demo snapshots include `mail-workspace`, `mail-workspace-compact`, `mail-workspace-drafts`, `mail-workspace-search`, `mail-compose`, `mail-outbox`, and `mail-add-account`, and the Automations window at its normal size, at 980 points wide, and at its minimum size (`automations-*`).
 They contain invented addresses and content, without account or credential reads.
 AppleScript compilation and these renders are separate from live Mail proof.
+Add `--mail-only` to `--snapshot-ui <dir> --demo` to render only the eight Mail
+fixtures. This path does not start a launcher session or read desktop context.
+
+The Mail window has an account and folder sidebar, favourites, and unified Inbox,
+All Mail, Unread, Flagged, Drafts, Sent, and Outbox views. All Mail and Unread cover
+non-Trash/non-Junk folders and remove duplicate message copies. Native accounts
+retain every selectable server folder. Opening a folder syncs its newest headers;
+older headers load in bounded batches as the list reaches the end.
+
+Native local search uses an FTS index of downloaded headers and body text. Search
+scope can cover the current view or all accounts. Search Server is explicit and
+uses bounded UID ranges. Servers that hide older history report incomplete
+results. Server search hits do not advance normal history coverage.
+
+Server drafts need a unique Drafts mapping and UIDPLUS. Each owned copy records
+its exact account, folder, UIDVALIDITY, UID, Message-ID, and content digest.
+Autosave replaces a copy only after verifying its identity. Ambiguous changes
+require review. SMTP acceptance and Sent filing have separate durable states.
+Repair Sent Copy uses IMAP only and never sends the message again. Interrupted
+sends never resume at startup. Received attachments load only on an explicit
+Preview, Open, Save, or Forward action.
 
 ## Rename the app
 

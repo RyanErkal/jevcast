@@ -59,7 +59,7 @@ final class MailPagingTests: XCTestCase {
     func testAllMailShowsOneCopyAndPrefersTheInbox() throws {
         let query = MailStore.Query(mailboxes: allMail, dedupe: true, preferred: Set(inboxes))
         let page = try MailStore.page(root: root, query)
-        XCTAssertFalse(allMail.contains(3), "Sent is not in All Mail.")
+        XCTAssertTrue(allMail.contains(3), "Sent is included in All Mail.")
         XCTAssertFalse(allMail.contains(4), "Trash is not in All Mail.")
         XCTAssertEqual(Set(page.messages.map(\.messageKey)).count, page.messages.count, "One email shows once.")
         let gmail = page.messages.filter { $0.mailbox == 1 || $0.mailbox == 2 }
@@ -69,7 +69,7 @@ final class MailPagingTests: XCTestCase {
         for message in gmail where inboxKeys.contains(message.messageKey) { XCTAssertEqual(message.mailbox, 1) }
         let expected = MailFixture.Layout()
         XCTAssertEqual(try MailStore.count(root: root, mailboxes: allMail, distinct: true),
-                       expected.gmailInbox + expected.allMailOnly + expected.exchangeInbox + expected.projects + expected.perFolder * MailFixture.folders.count)
+                       expected.gmailInbox + expected.allMailOnly + expected.sent + expected.exchangeInbox + expected.projects + expected.perFolder * MailFixture.folders.count)
     }
 
     func testSearchMatchesBodyText() throws {
@@ -183,7 +183,7 @@ final class MailPlaceTests: XCTestCase {
         let boxes = MailFixture.mailboxes.map { MailMailbox(rowID: $0.0, url: $0.1, unread: 0, total: 0) }
         XCTAssertEqual(MailModel.query(.inbox, "", boxes).mailboxes, [1, 5])
         let all = MailModel.query(.allMail, "x", boxes)
-        XCTAssertEqual(all.mailboxes, [1, 2, 5, 6] + MailFixture.folders.map(\.0), "All Mail leaves out Sent and Trash.")
+        XCTAssertEqual(all.mailboxes, [1, 2, 3, 5, 6] + MailFixture.folders.map(\.0), "All Mail leaves out Trash and Junk.")
         XCTAssertTrue(all.dedupe)
         XCTAssertEqual(all.preferred, [1, 5])
         XCTAssertEqual(all.text, "x")

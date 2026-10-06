@@ -292,9 +292,22 @@ final class FakeIMAPTransport: MailTransport, @unchecked Sendable {
         }
         switch name {
         case "UID SEARCH":
-            var found = visible(box).map(\.uid)
+            var candidates = visible(box)
+            if args.contains(where: { $0.text?.uppercased() == "UNSEEN" }) {
+                candidates.removeAll { $0.flags.contains("\\Seen") }
+            }
+            if args.contains(where: { $0.text?.uppercased() == "FLAGGED" }) {
+                candidates.removeAll { !$0.flags.contains("\\Flagged") }
+            }
+            if let textIndex = args.firstIndex(where: { $0.text?.uppercased() == "TEXT" }), textIndex + 1 < args.count,
+               let text = args[textIndex + 1].text, !text.isEmpty {
+                let needle = text.lowercased()
+                candidates.removeAll { !String(decoding: $0.raw, as: UTF8.self).lowercased().contains(needle) }
+            }
+            var found = candidates.map(\.uid)
             if let index = args.firstIndex(where: { $0.text?.uppercased() == "UID" }), index + 1 < args.count, let set = args[index + 1].text {
-                found = uids(set, in: box)
+                let requested = Set(uids(set, in: box))
+                found.removeAll { !requested.contains($0) }
             }
             let refused = server.messageLimit.map { found.count > $0 } ?? false
             server.recordSearch(args.compactMap(\.text).joined(separator: " "), refused: refused)

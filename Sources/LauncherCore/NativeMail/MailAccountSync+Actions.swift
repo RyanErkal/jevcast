@@ -49,20 +49,63 @@ extension MailAccountSync {
 
     /// Sends through SMTP, then files a copy in Sent when the server does not do that itself. A
     /// copy that cannot be filed does not undo the send; it is reported as a notice.
-    public func send(_ message: OutgoingMessage) async throws {
+    @discardableResult
+    public func send(_ message: OutgoingMessage) async throws -> MailSendReceipt {
         let data = MailComposer.render(message)
         try await smtp.send(from: account.email, recipients: message.recipients, message: data)
-        guard account.savesSentCopy else { return }
-        let candidates = mailboxes.filter { $0.role == .sent }
+        func pending(_ note: String, sent: NativeMailStore.Mailbox? = nil,
+                     info: IMAPClient.MailboxInfo? = nil, attempted: Bool) -> MailSendReceipt {
+            .init(accountID: account.id, messageID: message.messageID, sentCopy: .pending, note: note, message: data,
+                  date: message.date,
+                  sentMailbox: sent?.name, sentUIDValidity: info?.uidValidity, sentUIDNext: info?.uidNext,
+                  filingAttempted: attempted)
+        }
+        guard account.savesSentCopy else {
+            let sentIDs = Set(mailboxes.filter { $0.role == .sent }.map(\.rowID))
+            if !sentIDs.isEmpty { await signal.post(MailSyncRequest(mailboxes: sentIDs)) }
+            return .init(accountID: account.id, messageID: message.messageID, sentCopy: .serverManaged, date: message.date)
+        }
+        let candidates: [NativeMailStore.Mailbox]
+        do {
+            candidates = try await currentSentMailboxes()
+        } catch {
+            let note = "Sent, but the copy could not be started: " + error.localizedDescription
+            notice(account.id, note)
+            return pending(note, attempted: false)
+        }
         guard candidates.count == 1, let sent = candidates.first else {
-            notice(account.id, "Sent, but no copy was saved. Select one Sent folder in Settings › Mail.")
-            return
+            let note = "Sent, but no copy was saved. Select one Sent folder in Settings › Mail."
+            notice(account.id, note)
+            return pending(note, attempted: false)
+        }
+        let baseline: IMAPClient.MailboxInfo
+        do {
+            let info = try await actionClient.select(sent.name)
+            guard info.uidValidity > 0 else { throw MailError.notFound("The Sent folder has no valid UIDVALIDITY.") }
+            guard !info.readOnly else { throw MailError.notFound("The Sent folder is read only.") }
+            if let known = sent.uidValidity, known != info.uidValidity { throw MailError.uidValidityChanged(mailbox: sent.name) }
+            baseline = info
+        } catch {
+            let note = "Sent, but the copy could not be started: " + error.localizedDescription
+            notice(account.id, note)
+            return pending(note, sent: sent, attempted: false)
         }
         do {
-            try await actionClient.append(data, to: sent.name, flags: ["\\Seen"], date: message.date)
+            // APPEND without APPENDUID is not proof that the server did not save the copy. Keep
+            // the accepted message and its raw bytes pending; never turn an ambiguous result into
+            // a second APPEND or a resend.
+            guard try await actionClient.append(data, to: sent.name, flags: ["\\Seen"], date: message.date) != nil else {
+                throw MailError.deliveryUncertain
+            }
             await signal.post(MailSyncRequest(mailboxes: [sent.rowID]))
+            return .init(accountID: account.id, messageID: message.messageID, sentCopy: .saved,
+                         date: message.date,
+                         sentMailbox: sent.name, sentUIDValidity: baseline.uidValidity,
+                         sentUIDNext: baseline.uidNext, filingAttempted: true)
         } catch {
-            notice(account.id, "Sent, but the copy in Sent could not be saved: " + error.localizedDescription)
+            let note = "Sent, but the copy in Sent could not be saved: " + error.localizedDescription
+            notice(account.id, note)
+            return pending(note, sent: sent, info: baseline, attempted: true)
         }
     }
 

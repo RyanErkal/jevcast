@@ -29,6 +29,11 @@ struct MailMessageList: View {
                         .task(id: model.bottom) { await model.loadOlder() }
                         .selectionDisabled()
                 }
+                if model.olderOnServer, model.messages.isEmpty, !model.canSearchServer {
+                    Button("Load older mail") { Task { await model.loadOlder() } }
+                        .buttonStyle(.link).selectionDisabled()
+                }
+                if model.canSearchServer || model.serverSearch != .available { MailServerSearchFooter(model: model).selectionDisabled() }
                 switch model.bodySearch {
                 case .more:
                     Button("Search more message text") { model.searchBodies() }
@@ -45,8 +50,8 @@ struct MailMessageList: View {
             }
             .listStyle(.inset)
             .overlay {
-                if model.messages.isEmpty && model.bodySearch != .more {
-                    Text(model.search.isEmpty ? "\(model.placeTitle) is empty" : model.bodySearch == .running ? "Searching…" : "No matches")
+                if model.messages.isEmpty && model.bodySearch != .more && !model.olderOnServer && !model.canSearchServer {
+                    Text(emptyText)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -57,6 +62,36 @@ struct MailMessageList: View {
                 DispatchQueue.main.async { proxy.scrollTo(id) }
             }
         }
+    }
+
+    private var emptyText: String {
+        if !model.search.isEmpty { return model.bodySearch == .running ? "Searching…" : "No matches" }
+        if model.place == .drafts, !model.savedDrafts.isEmpty { return "No other drafts" }
+        return "\(model.placeTitle) is empty"
+    }
+}
+
+private struct MailServerSearchFooter: View {
+    @ObservedObject var model: MailModel
+    var body: some View {
+        VStack(spacing: 6) {
+            switch model.serverSearch {
+            case .available:
+                Text("Showing mail downloaded to this Mac.").foregroundStyle(.secondary)
+                Button(model.search.isEmpty ? "Find \(model.placeTitle.lowercased()) on server" : "Search server mail") { model.searchServer() }
+                    .buttonStyle(.link)
+            case .running: ProgressView("Searching server…").controlSize(.small)
+            case .more:
+                Button("Search more server mail") { model.searchServer() }.buttonStyle(.link)
+            case .complete:
+                Text("Server search complete").foregroundStyle(.secondary)
+                Button("Search again") { model.resetServerSearch(); model.searchServer() }.buttonStyle(.link)
+            case .limited(let reason): Text(reason).foregroundStyle(.secondary)
+            case .failed(let reason):
+                Text(reason).foregroundStyle(.orange)
+                Button("Retry server search") { model.searchServer() }.buttonStyle(.link)
+            }
+        }.font(.caption).frame(maxWidth: .infinity).padding(.vertical, 8)
     }
 }
 
@@ -71,6 +106,9 @@ struct MailPlacePicker: View {
             Button("All Mail") { model.place = .allMail }
             Button("Unread") { model.place = .unread }
             Button("Flagged") { model.place = .flagged }
+            Button("Drafts") { model.place = .drafts }
+            Button("Sent") { model.place = .sent }
+            Button("Outbox") { model.showsOutbox = true }
             ForEach(model.accounts, id: \.self) { account in
                 Divider()
                 Section(model.accountTitle(account)) {

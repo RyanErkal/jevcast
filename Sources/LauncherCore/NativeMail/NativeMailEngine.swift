@@ -221,26 +221,30 @@ public actor NativeMailEngine {
 
     /// A new message from the explicitly selected account. `recipients`, when given, replaces `to`
     /// and `cc` and adds Bcc.
+    @discardableResult
     public func send(from accountID: String, to: [String], cc: [String], subject: String, body: String,
                      html: String? = nil, attachments: [OutgoingMessage.Attachment] = [], messageID: String? = nil,
-                     recipients: Recipients? = nil) async throws {
+                     recipients: Recipients? = nil, inReplyTo: String? = nil,
+                     references: [String] = []) async throws -> MailSendReceipt {
         let sync = try sendingSync(accountID)
         let account = sync.account
         let chosen = recipients ?? Recipients(to: to.map { MailContact(address: $0) }, cc: cc.map { MailContact(address: $0) })
         var message = OutgoingMessage(from: account.sender, to: chosen.to, subject: subject, body: body)
         message.cc = chosen.cc; message.bcc = chosen.bcc
         message.html = html; message.attachments = attachments
+        message.inReplyTo = inReplyTo; message.references = references
         if let messageID { message.messageID = messageID }
-        try await sync.send(message)
+        return try await sync.send(message)
     }
 
     /// A reply. The composer's `recipients` and `subject` win over the ones worked out from the
     /// original. Without `quote`, only your text goes. `saved` is the original as the draft kept it:
     /// it answers a message moved or deleted during the undo time.
+    @discardableResult
     public func reply(to rowID: Int64, text: String, all: Bool, from accountID: String, html: String? = nil,
                       attachments: [OutgoingMessage.Attachment] = [], messageID: String? = nil, expectedMessageID: String? = nil,
                       recipients: Recipients? = nil, subject: String? = nil, quote: Bool = true,
-                      saved: MIMEMessage? = nil, savedDate: Date? = nil) async throws {
+                      saved: MIMEMessage? = nil, savedDate: Date? = nil) async throws -> MailSendReceipt {
         let sending = try sendingSync(accountID)
         let answered = try await answered(rowID, expectedMessageID: expectedMessageID, saved: saved, savedDate: savedDate, verb: "replying")
         let original = answered.message
@@ -258,20 +262,24 @@ public actor NativeMailEngine {
             + (quote ? MailHTML.quoted(original, attribution: MailReplies.replyAttribution(date: answered.date, sender: sender)) : "")
         message.attachments = attachments + (quote ? Self.inlineAttachments(original) : [])
         if let messageID { message.messageID = messageID }
-        try await sending.send(message)
+        let receipt = try await sending.send(message)
         if let location = answered.location, let sync = answered.sync { try? await sync.setFlag("\\Answered", true, at: location) }
+        return receipt
     }
 
     /// A forward: your text, the original's headers and HTML, and its attachments one by one.
+    @discardableResult
     public func forward(_ rowID: Int64, text: String, to: [String], from accountID: String, html: String? = nil,
                         attachments: [OutgoingMessage.Attachment] = [], messageID: String? = nil, expectedMessageID: String? = nil,
-                        recipients: Recipients? = nil, subject: String? = nil, saved: MIMEMessage? = nil, savedDate: Date? = nil) async throws {
+                        recipients: Recipients? = nil, subject: String? = nil, saved: MIMEMessage? = nil, savedDate: Date? = nil,
+                        savedAttachments: [OutgoingMessage.Attachment]? = nil) async throws -> MailSendReceipt {
         let sending = try sendingSync(accountID)
         let answered = try await answered(rowID, expectedMessageID: expectedMessageID, saved: saved, savedDate: savedDate, verb: "forwarding")
         let original = answered.message
         let chosen = recipients ?? Recipients(to: to.map { MailContact(address: $0) })
         guard !chosen.to.isEmpty else { throw MailError.notFound("Add at least one recipient.") }
-        let files = answered.raw.map(MIMEMessage.files) ?? []
+        let files = answered.raw.map(MIMEMessage.files)?.map { OutgoingMessage.Attachment(filename: $0.name, mimeType: $0.mimeType, data: $0.data) }
+            ?? savedAttachments ?? []
         // A file the forward cannot carry must not vanish without a word.
         guard files.count >= original.attachments.count else {
             throw MailError.notFound("The original message moved before it could be forwarded with its attachments. Open it again and forward it.")
@@ -281,9 +289,9 @@ public actor NativeMailEngine {
         message.cc = chosen.cc; message.bcc = chosen.bcc
         message.html = (html ?? MailHTML.plain(text)) + MailHTML.forwarded(original, date: MailReplies.attribution(answered.date))
         message.attachments = attachments + Self.inlineAttachments(original)
-            + files.map { OutgoingMessage.Attachment(filename: $0.name, mimeType: $0.mimeType, data: $0.data) }
+            + files
         if let messageID { message.messageID = messageID }
-        try await sending.send(message)
+        return try await sending.send(message)
     }
 
     /// The message being answered: from this Mac and its server, or, once it left this Mac, the copy
@@ -306,6 +314,8 @@ public actor NativeMailEngine {
         }
         return sync
     }
+
+    func accountSync(_ id: String) throws -> MailAccountSync { try sendingSync(id) }
 
     private static func inlineAttachments(_ message: MIMEMessage) -> [OutgoingMessage.Attachment] {
         message.inlineImages.sorted { $0.key < $1.key }.map { id, image in

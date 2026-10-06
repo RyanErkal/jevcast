@@ -250,7 +250,9 @@ final class MailLabelTests: XCTestCase {
         XCTAssertEqual(boxes.first { $0.rowID == 5 }?.unread, 0, "Other accounts keep Mail's own count.")
         let unread = try walk(root, MailModel.query(.unread, "", boxes))
         let yahooUnread = (0..<l.yahooInbox).filter { MailLabelFixture.unread(l.gmail + 1 + $0) }.count
-        XCTAssertEqual(unread.count, expected + yahooUnread)
+        let allGmailUnread = MailLabelFixture.gmailRows(l).filter(MailLabelFixture.unread).count
+        let yahooArchiveUnread = (0..<l.yahooArchive).filter { MailLabelFixture.unread(l.gmail + l.yahooInbox + 1 + $0) }.count
+        XCTAssertEqual(unread.count, allGmailUnread + yahooUnread + yahooArchiveUnread)
         XCTAssertTrue(unread.allSatisfy { !$0.read })
         let flagged = try walk(root, MailModel.query(.flagged, "", boxes))
         XCTAssertEqual(Set(flagged.map(\.rowID)).count, flagged.count)

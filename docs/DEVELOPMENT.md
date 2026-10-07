@@ -102,9 +102,12 @@ Preview, Open, Save, or Forward action.
 
 ## Calendar
 
-Calendar opens in Week with a scrollable hourly grid. Day uses the same grid;
-Month and List remain available. Click an event to read its description, meeting
-notes, location, organizer, guests, and attachments. Join Google Meet opens the
+Calendar opens in 3 Days: today and the next two days in a scrollable hourly grid.
+Day and Week use the same grid; Month and List remain available. ← and → switch
+views. The arrows beside the month, or ↑ and ↓, move back and forward by the days
+on screen, and Today returns to today. Click an event to show its
+time, description, meeting notes, location, organizer, guests, and attachments
+beside the calendar; × or Escape closes it. Join Google Meet opens the
 event's meeting link in the system browser. Notes come from the event description.
 Linked documents open in the browser. Jevcast does not record meetings or generate notes.
 
@@ -132,9 +135,9 @@ inject fake HTTP responses and account checks inject in-memory credentials.
 `JEVCAST_CALENDAR_OFFLINE=1` blocks live Calendar traffic and sign-in.
 `JEVCAST_MAIL_OFFLINE=1` and snapshot mode also block it.
 
-`--snapshot-ui <dir> --demo --calendar-only` renders Week, Day, Month, event
-details, a compact Week, and the Google sign-in form with invented events and
-fresh preferences. It does not read EventKit or Keychain credentials.
+`--snapshot-ui <dir> --demo --calendar-only` renders 3 Days (also with event
+details, in light appearance, and with details at 860 points), Week, Day, Month,
+and the Google sign-in form with invented events and fresh preferences. It does not read EventKit or Keychain credentials.
 
 ## Rename the app
 

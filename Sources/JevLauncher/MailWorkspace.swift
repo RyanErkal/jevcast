@@ -4,7 +4,7 @@ import LauncherCore
 /// Widths of the mail columns in the panel. The reader or composer takes the rest, so the panel
 /// fits from its smallest view width (860) to its largest (1320).
 enum MailPanelLayout {
-    static func sidebarWidth(_ total: CGFloat) -> CGFloat { min(220, max(190, (total * 0.17).rounded())) }
+    static func sidebarWidth(_ total: CGFloat) -> CGFloat { min(205, max(190, (total * 0.155).rounded())) }
     static func listWidth(_ total: CGFloat, sidebar: CGFloat, split: MailReading.Split) -> CGFloat {
         min(380, max(240, ((total - sidebar) * split.listFraction).rounded()))
     }

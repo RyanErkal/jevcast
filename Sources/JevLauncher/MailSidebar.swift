@@ -19,10 +19,12 @@ struct MailSidebar: View {
                     row("Sent", "paperplane", .sent)
                     row("Outbox", "tray.and.arrow.up", .outbox, count: model.pendingDeliveryCount)
                 }
+                .listSectionSeparator(.hidden)
                 if !model.favoriteMailboxes.isEmpty {
                     Section("Favourites") {
                         ForEach(model.favoriteMailboxes) { box in mailbox(box, title: box.name) }
                     }
+                    .listSectionSeparator(.hidden)
                 }
                 ForEach(model.accounts, id: \.self) { account in
                     Section {
@@ -31,15 +33,18 @@ struct MailSidebar: View {
                                 MailFolderNode(node: node, model: model)
                             }
                         } label: {
-                            VStack(alignment: .leading, spacing: 3) {
+                            VStack(alignment: .leading, spacing: 2) {
                                 Text(model.accountTitle(account)).font(.system(size: 12, weight: .semibold)).lineLimit(1)
                                 if let state = center.states[account] { Text(status(state)).font(.caption2).foregroundStyle(.secondary) }
                             }
                         }
+                        .listRowSeparator(.hidden)
                     }
+                    .listSectionSeparator(.hidden)
                 }
             }
-            .listStyle(.sidebar).scrollContentBackground(.hidden)
+            .listStyle(.inset).scrollContentBackground(.hidden)
+            .environment(\.defaultMinListRowHeight, 24)
             if model.persistenceProblem != nil {
                 Label("Drafts need attention", systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(.orange).padding(12)
@@ -83,6 +88,7 @@ private struct MailFolderNode: View {
                 if let box = node.mailbox { MailSidebarMailbox(box: box, title: node.title, model: model) }
                 else { Label(node.title, systemImage: "folder").font(.system(size: 12)).lineLimit(1) }
             }
+            .listRowSeparator(.hidden)
         }
     }
 }
@@ -126,16 +132,17 @@ private struct MailSidebarRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 Image(systemName: symbol).frame(width: 16).foregroundStyle(selected ? Color.accentColor : Color.secondary)
                 Text(title).lineLimit(1)
                 Spacer(minLength: 4)
                 if partial { Image(systemName: "icloud.and.arrow.down").font(.caption2).foregroundStyle(.tertiary) }
                 if count > 0 { Text(count.formatted()).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).monospacedDigit() }
             }
-            .font(.system(size: 12)).padding(.vertical, 5).padding(.horizontal, 6)
+            .font(.system(size: 12)).padding(.vertical, 3).padding(.horizontal, 6)
             .background(selected ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 5))
             .contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityAddTraits(selected ? [.isSelected] : [])
+            .listRowSeparator(.hidden)
     }
 }

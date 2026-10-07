@@ -41,12 +41,15 @@ extension MailModel {
     func updateServerDraftState(for id: UUID, reference: MailServerDraftReference?,
                                 previous: MailServerDraftReference? = nil,
                                 blockedReason: String? = nil,
+                                blockKind: Draft.ServerDraftBlockKind? = nil,
                                 acknowledgementUncertain: Bool = false) -> Bool {
+        let blockKind = blockedReason == nil ? nil : blockKind
         var found = false
         if var active = draft, active.id == id {
             active.serverDraftReference = reference
             active.previousServerDraftReference = previous
             active.serverDraftBlockedReason = blockedReason
+            active.serverDraftBlockKind = blockKind
             active.serverDraftAcknowledgementUncertain = acknowledgementUncertain ? true : nil
             draft = active
             found = true
@@ -55,6 +58,7 @@ extension MailModel {
             pending.serverDraftReference = reference
             pending.previousServerDraftReference = previous
             pending.serverDraftBlockedReason = blockedReason
+            pending.serverDraftBlockKind = blockKind
             pending.serverDraftAcknowledgementUncertain = acknowledgementUncertain ? true : nil
             pendingSend = pending
             found = true
@@ -64,6 +68,7 @@ extension MailModel {
             changed.serverDraftReference = reference
             changed.previousServerDraftReference = previous
             changed.serverDraftBlockedReason = blockedReason
+            changed.serverDraftBlockKind = blockKind
             changed.serverDraftAcknowledgementUncertain = acknowledgementUncertain ? true : nil
             item = Unsent(draft: changed, reason: item.reason)
             unsent[index] = item
@@ -74,6 +79,7 @@ extension MailModel {
             deliveryDraft.serverDraftReference = reference
             deliveryDraft.previousServerDraftReference = previous
             deliveryDraft.serverDraftBlockedReason = blockedReason
+            deliveryDraft.serverDraftBlockKind = blockKind
             deliveryDraft.serverDraftAcknowledgementUncertain = acknowledgementUncertain ? true : nil
             deliveries[index].draft = deliveryDraft
             found = true

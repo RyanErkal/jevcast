@@ -34,8 +34,7 @@ struct ComposeView: View {
                 Divider()
                 composeTools(current)
                 if let reason = current.serverDraftBlockedReason {
-                    Label(reason, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
-                        .padding(.horizontal, 14).padding(.vertical, 6)
+                    MailServerDraftStatusRow(coordinator: model.serverDrafts, draft: current, reason: reason)
                 }
                 if !current.attachments.isEmpty { attachments(current) }
                 Divider()

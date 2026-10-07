@@ -8,6 +8,8 @@ enum MailSnapshots {
     static var windows: [(String, AnyView, NSSize)] {
         [
             ("mail-compose", AnyView(composer()), NSSize(width: 640, height: 520)),
+            ("mail-draft-signin-blocked", AnyView(blockedDraft(signInRefused: true)), NSSize(width: 640, height: 620)),
+            ("mail-draft-review-blocked", AnyView(blockedDraft(signInRefused: false)), NSSize(width: 640, height: 620)),
             ("mail-reply", AnyView(reply()), NSSize(width: 820, height: 760)),
             ("mail-outbox", AnyView(outbox()), NSSize(width: 540, height: 310)),
             ("mail-workspace", AnyView(workspace()), NSSize(width: 1140, height: 700)),
@@ -121,6 +123,21 @@ enum MailSnapshots {
             model.serverSearch = .more
         }
         return MailRootView(model: model, showsSidebar: !compact)
+    }
+
+    static func blockedDraft(signInRefused: Bool) -> some View {
+        let model = fixture()
+        model.serverDrafts = MailServerDraftCoordinator(model: model, save: { _, _, _, _ in throw CancellationError() },
+                                                       remove: { _ in throw CancellationError() })
+        var draft = MailModel.Draft(backend: MailBackend.jevcast.rawValue, fromAccountID: "demo", fromAddress: "alex@example.com",
+                                    to: "sam@example.com", subject: "Friday's Plan", body: "Hi Sam,\n\nFriday at 10 works for me.\n\nAlex")
+        draft.serverDraftBlockedReason = signInRefused
+            ? "The mail server refused this account's sign-in. Fix the account in Settings › Mail."
+            : "The server may have saved this draft, but its acknowledgement was lost. Review Drafts before trying again."
+        draft.serverDraftBlockKind = signInRefused ? .signInRefused : nil
+        draft.serverDraftAcknowledgementUncertain = signInRefused ? nil : true
+        model.draft = draft
+        return ComposeView(model: model)
     }
 
     private static func fixture() -> MailModel {

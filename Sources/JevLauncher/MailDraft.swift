@@ -6,6 +6,11 @@ extension MailModel {
     /// late AI writing result, or a failed send can tell one draft from the next.
     struct Draft: Codable, Equatable, Identifiable, Sendable {
         enum Mode: Codable, Equatable, Sendable { case new, reply(all: Bool), forward }
+        /// A server-draft block that the user can clear with an explicit retry.
+        enum ServerDraftBlockKind: String, Codable, Equatable, Sendable {
+            /// The account refused sign-in before any server change. No APPEND or removal ran.
+            case signInRefused
+        }
         var id = UUID()
         var backend = MailBackend.current.rawValue
         var messageID = "<\(UUID().uuidString.lowercased())@jevcast.local>"
@@ -24,6 +29,9 @@ extension MailModel {
         var previousServerDraftReference: MailServerDraftReference?
         /// A local checkpoint or server acknowledgement problem that blocks another mutation.
         var serverDraftBlockedReason: String?
+        /// Why the block was set, when that cause allows an explicit retry. Nil for every block
+        /// that must stay until the draft is discarded, including blocks saved before this key.
+        var serverDraftBlockKind: ServerDraftBlockKind?
         /// True when APPEND or removal could not be acknowledged safely.
         var serverDraftAcknowledgementUncertain: Bool?
         /// Threading and raw HTML retained while editing a cross-device server draft.

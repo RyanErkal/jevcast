@@ -71,8 +71,12 @@ updates the sign-in. A queued action refuses a changed mail source.
 Demo snapshots include `mail-workspace`, `mail-workspace-compact`, `mail-workspace-drafts`, `mail-workspace-search`, `mail-compose`, `mail-outbox`, and `mail-add-account`, and the Automations window at its normal size, at 980 points wide, and at its minimum size (`automations-*`).
 They contain invented addresses and content, without account or credential reads.
 AppleScript compilation and these renders are separate from live Mail proof.
-Add `--mail-only` to `--snapshot-ui <dir> --demo` to render only the eight Mail
+Add `--mail-only` to `--snapshot-ui <dir> --demo` to render only the ten Mail
 fixtures. This path does not start a launcher session or read desktop context.
+`mail-draft-signin-blocked` and `mail-draft-review-blocked` show the draft recovery
+row with invented failures. After fixing a refused sign-in, choose Save to Drafts
+Again to retry that draft's server save. This action does not send. Uncertain or
+unclassified server changes stay blocked and require review.
 
 The Mail window has an account and folder sidebar, favourites, and unified Inbox,
 All Mail, Unread, Flagged, Drafts, Sent, and Outbox views. All Mail and Unread cover

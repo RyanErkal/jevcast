@@ -132,7 +132,7 @@ public actor NativeMailEngine {
             throw MailError.notFound("Messages move only within one account.")
         }
         if destination.rowID == location.mailbox.rowID { return }
-        try await hide(location) { try await sync.move(location, to: destination) }
+        try await hide(location, movingTo: destination) { try await sync.move(location, to: destination) }
     }
 
     /// Delete moves a message to its account's one Trash. A message already in Trash is removed for
@@ -148,7 +148,7 @@ public actor NativeMailEngine {
             try await hide(location) { try await sync.deletePermanently(location) }
             return
         }
-        try await hide(location) { try await sync.move(location, to: trash) }
+        try await hide(location, movingTo: trash) { try await sync.move(location, to: trash) }
     }
 
     /// What Empty would remove from a Trash or Junk mailbox now, for the confirmation's count.
@@ -161,7 +161,7 @@ public actor NativeMailEngine {
     public func empty(_ mailboxRowID: Int64, uids: [UInt32], validity: UInt32) async throws {
         let (box, sync) = try await emptiable(mailboxRowID)
         try await sync.empty(box, uids: uids, validity: validity)
-        try await store.remove(uids: uids, from: box.rowID)
+        try await store.remove(uids: uids, from: box.rowID, removedHere: true)
         changed()
         await sync.request(MailSyncRequest(mailboxes: [box.rowID]))
     }
@@ -175,11 +175,14 @@ public actor NativeMailEngine {
     }
 
     /// Hides the row at once and drops it after the server's change; shows it again on failure.
-    private func hide(_ location: NativeMailStore.Location, _ change: () async throws -> Void) async throws {
+    /// A move counts the message into its destination's server counts.
+    private func hide(_ location: NativeMailStore.Location, movingTo destination: NativeMailStore.Mailbox? = nil,
+                      _ change: () async throws -> Void) async throws {
         try await store.setHidden(location.rowID, true)
         changed()
         do {
             try await change()
+            if let destination { try? await store.adjustServerCounts(destination.rowID, total: 1, unread: location.read ? 0 : 1) }
             try await store.remove(uids: [location.uid], from: location.mailbox.rowID)
             changed()
         } catch {

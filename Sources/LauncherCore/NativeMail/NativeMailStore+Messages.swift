@@ -102,19 +102,24 @@ extension NativeMailStore {
         touched()
     }
 
-    /// Drops messages the server no longer has, with their bodies.
-    public func remove(uids: [UInt32], from mailbox: Int64) throws {
+    /// Drops messages the server no longer has, with their bodies. `removedHere` means Jevcast just
+    /// removed them on the server, such as by Empty, so the server's counts drop by the same. Rows
+    /// a change in progress hid already dropped their count when they were hidden.
+    public func remove(uids: [UInt32], from mailbox: Int64, removedHere: Bool = false) throws {
         guard !uids.isEmpty, let box = try self.mailbox(mailbox) else { return }
         try db.transaction {
+            var hidden = 0, unread = 0
             for start in stride(from: 0, to: uids.count, by: 500) {
                 let chunk = uids[start..<min(start + 500, uids.count)]
                 let list = chunk.map { _ in "?" }.joined(separator: ",")
                 let arguments: [MailDatabase.Value] = [.int(mailbox)] + chunk.map { .int(Int64($0)) }
-                for row in try db.rows("SELECT ROWID FROM messages WHERE mailbox = ? AND remote_uid IN (\(list))", arguments) {
-                    if let id = row.first?.int { removeBody(id, mailboxRowID: mailbox, url: box.url) }
+                for row in try db.rows("SELECT ROWID, pending_hide, read FROM messages WHERE mailbox = ? AND remote_uid IN (\(list))", arguments) where row.count == 3 {
+                    if let id = row[0].int { removeBody(id, mailboxRowID: mailbox, url: box.url) }
+                    if (row[1].int ?? 0) != 0 { hidden += 1 } else if (row[2].int ?? 0) == 0 { unread += 1 }
                 }
                 try db.run("DELETE FROM messages WHERE mailbox = ? AND remote_uid IN (\(list))", arguments)
             }
+            if removedHere { try adjustServerCounts(mailbox, total: hidden - uids.count, unread: -unread) }
             try refreshCounts(mailbox)
         }
         touched()
@@ -150,19 +155,36 @@ extension NativeMailStore {
         return file[start..<min(file.endIndex, start + max(0, count))]
     }
 
-    /// Changes read or flagged status here at once, before the server hears of it.
+    /// Changes read or flagged status here at once, before the server hears of it. A read change
+    /// moves the server's unread count with it.
     public func setLocal(_ rowID: Int64, read: Bool? = nil, flagged: Bool? = nil) throws {
+        let before = try state(rowID)
         if let read { try db.run("UPDATE messages SET read = ? WHERE ROWID = ?", [.int(read ? 1 : 0), .int(rowID)]) }
         if let flagged { try db.run("UPDATE messages SET flagged = ? WHERE ROWID = ?", [.int(flagged ? 1 : 0), .int(rowID)]) }
         touched()
-        if let boxID = try db.rows("SELECT mailbox FROM messages WHERE ROWID = ?", [.int(rowID)]).first?.first?.int { try refreshCounts(boxID) }
+        guard let before else { return }
+        if let read, !before.hidden, before.read != read { try adjustServerCounts(before.mailbox, total: 0, unread: read ? -1 : 1) }
+        try refreshCounts(before.mailbox)
     }
 
-    /// Hides a message that is being moved or deleted, and shows it again if that fails.
+    /// Hides a message that is being moved or deleted, and shows it again if that fails. The
+    /// server's counts for its mailbox move with it.
     public func setHidden(_ rowID: Int64, _ hidden: Bool) throws {
+        let before = try state(rowID)
         try db.run("UPDATE messages SET pending_hide = ?, deleted = ? WHERE ROWID = ?", [.int(hidden ? 1 : 0), .int(hidden ? 1 : 0), .int(rowID)])
         touched()
-        if let boxID = try db.rows("SELECT mailbox FROM messages WHERE ROWID = ?", [.int(rowID)]).first?.first?.int { try refreshCounts(boxID) }
+        guard let before else { return }
+        if before.hidden != hidden {
+            let step = hidden ? -1 : 1
+            try adjustServerCounts(before.mailbox, total: step, unread: before.read ? 0 : step)
+        }
+        try refreshCounts(before.mailbox)
+    }
+
+    private func state(_ rowID: Int64) throws -> (mailbox: Int64, read: Bool, hidden: Bool)? {
+        guard let row = try db.rows("SELECT mailbox, read, pending_hide FROM messages WHERE ROWID = ?", [.int(rowID)]).first,
+              row.count == 3, let mailbox = row[0].int else { return nil }
+        return (mailbox, (row[1].int ?? 0) != 0, (row[2].int ?? 0) != 0)
     }
 
     // MARK: Bodies

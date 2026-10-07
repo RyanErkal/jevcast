@@ -172,7 +172,8 @@ final class MailModel: ObservableObject {
     private var bodyOrder: [Int64] = []
     private static let bodyLimit = 24
     /// Messages removed here whose change Mail has not written to its index yet. A refresh in the
-    /// meantime must not bring them back.
+    /// meantime must not bring them back. Each stays out while its change waits behind earlier
+    /// ones, such as a run of deletes, and for two minutes after it is done.
     private var removing: [Int64: Date] = [:]
     /// Mail actions run one after another, so quick deletes never race each other.
     private var actionChain: Task<Void, Never>?
@@ -389,7 +390,9 @@ final class MailModel: ObservableObject {
         generation += 1
         loadingMore = false; refreshing = false; reloading = true
         bodySearch = .off; bodyCursor = nil
-        olderOnServer = search.isEmpty && NativeMailCenter.activeEngine != nil
+        // A new list may hold older server mail until its first page says. The same list read
+        // again keeps its answer, so an empty mailbox does not flicker at every store change.
+        if !keepSelection { olderOnServer = search.isEmpty && NativeMailCenter.activeEngine != nil }
         let generation = self.generation
         updateMailRunning()
         loadWork = Task { @MainActor [weak self] in
@@ -821,7 +824,7 @@ final class MailModel: ObservableObject {
         if let account = mailbox(message.mailbox)?.accountID { changedAccounts.insert(account) }
         let index = messages.firstIndex { $0.rowID == message.rowID }
         if removes, let index {
-            removing[message.rowID] = Date()
+            removing[message.rowID] = .distantFuture
             messages.remove(at: index)
             // The next message shows and counts as read, as in Mail.
             select(messages.indices.contains(index) ? messages[index].rowID : messages.last?.rowID, byUser: false)
@@ -833,6 +836,7 @@ final class MailModel: ObservableObject {
             do {
                 guard backend == MailBackend.current else { throw LauncherError("The mail source changed. Nothing was changed.") }
                 try await action()
+                if removes { self?.removing[message.rowID] = Date() }
             }
             catch {
                 // After a failed change the index decides the row again.

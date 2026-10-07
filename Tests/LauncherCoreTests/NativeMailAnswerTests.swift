@@ -254,4 +254,53 @@ final class NativeMailAnswerTests: XCTestCase {
         XCTAssertEqual(server.commands("STATUS"), 0, "One LIST with LIST-STATUS")
         await engine.stopAll()
     }
+
+    private func serverCounts(_ mailbox: String) throws -> [Int64] {
+        try reader.rows("SELECT server_total, server_unread FROM mailboxes WHERE name = ?", [.text(mailbox)]).first?.compactMap(\.int) ?? []
+    }
+
+    /// The sidebar shows the server's counts. Deletes, moves, reads, and Empty change them at once,
+    /// not only at the next status check, which can be minutes away.
+    func testChangesMadeHereMoveTheServerCountsAtOnce() async throws {
+        server.capabilities.append("LIST-STATUS")
+        for n in 1...3 { server.deliver(to: "Trash", subject: "Bin \(n)") }
+        server.deliver(to: "INBOX", subject: "Unread")
+        server.deliver(to: "INBOX", subject: "Read", flags: ["\\Seen"])
+        let engine = try await started(["INBOX", "Trash"])
+        try await waitUntil("Trash and its counts") { try self.subjects("Trash").count == 3 && self.serverCounts("Trash") == [3, 3] }
+        XCTAssertEqual(try serverCounts("INBOX"), [2, 1])
+
+        try await engine.delete(try row("Bin 1"), permanently: true)
+        XCTAssertEqual(try serverCounts("Trash"), [2, 2])
+
+        try await engine.delete(try row("Unread"))
+        XCTAssertEqual(try serverCounts("INBOX"), [1, 0])
+        XCTAssertEqual(try serverCounts("Trash"), [3, 3])
+
+        try await engine.setRead(try row("Read"), false)
+        XCTAssertEqual(try serverCounts("INBOX"), [1, 1])
+        try await engine.setRead(try row("Read"), true)
+        XCTAssertEqual(try serverCounts("INBOX"), [1, 0])
+
+        try await waitUntil("the trashed copy") { try self.subjects("Trash").contains("Unread") }
+        let trash = try mailboxRow("Trash")
+        let counted = try await engine.contents(of: trash)
+        try await engine.empty(trash, uids: counted.uids, validity: counted.validity)
+        XCTAssertEqual(try serverCounts("Trash"), [0, 0])
+        XCTAssertEqual(server.commands("STATUS"), 0, "Counted here, not asked again")
+        await engine.stopAll()
+    }
+
+    func testARefusedDeleteGivesTheCountsBack() async throws {
+        server.capabilities.append("LIST-STATUS")
+        server.capabilities.removeAll { $0 == "UIDPLUS" }
+        for n in 1...2 { server.deliver(to: "Trash", subject: "Bin \(n)") }
+        let engine = try await started(["INBOX", "Trash"])
+        try await waitUntil("Trash and its counts") { try self.subjects("Trash").count == 2 && self.serverCounts("Trash") == [2, 2] }
+        do { try await engine.delete(try row("Bin 1"), permanently: true); XCTFail("Without UIDPLUS nothing is deleted") }
+        catch MailError.notFound {}
+        XCTAssertEqual(try serverCounts("Trash"), [2, 2])
+        XCTAssertEqual(try subjects("Trash").count, 2)
+        await engine.stopAll()
+    }
 }

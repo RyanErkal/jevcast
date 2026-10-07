@@ -128,6 +128,14 @@ public actor NativeMailStore {
         touched()
     }
 
+    /// Moves the server's counts by what a change made here did, so the sidebar does not wait for
+    /// the next status check, which sets them exactly again. Unknown counts stay unknown.
+    func adjustServerCounts(_ mailbox: Int64, total: Int, unread: Int) throws {
+        guard total != 0 || unread != 0 else { return }
+        try db.run("UPDATE mailboxes SET server_total = MAX(0, server_total + ?), server_unread = MAX(0, server_unread + ?) WHERE ROWID = ?",
+                   [.int(Int64(total)), .int(Int64(unread)), .int(mailbox)])
+    }
+
     // MARK: Mailboxes
 
     /// A mailbox and what sync knows about it.

@@ -1,8 +1,8 @@
 import AppKit
 import LauncherCore
 
-/// "mail", "inbox", and "mail <words>" in the launcher: open the mail window, see unread
-/// messages, or search. Rows open the message in the Jevcast mail window.
+/// "mail", "inbox", and "mail <words>" in the launcher: open Mail in the panel, see unread
+/// messages, or search. Rows open the message in the panel's Mail view.
 @MainActor
 final class MailSource: ThingSource {
     let section = "Mail"
@@ -17,7 +17,7 @@ final class MailSource: ThingSource {
     func load(_ filter: String) async throws -> [LauncherResult] {
         let openScore = explicit ? 150.0 : Self.openScore
         let open = Verb(title: "Open Mail", after: .keepOpen) { [weak model] in model?.openMail?(nil); return nil }
-        let compose = Verb(title: "New Message") { [weak model] in model?.composeMail?(""); return nil }
+        let compose = Verb(title: "New Message", after: .keepOpen) { [weak model] in model?.composeMail?(""); return nil }
         let status = await Task.detached(priority: .userInitiated) { MailStore.status() }.value
         try Task.checkCancellation()
         guard case .ready(let root) = status else {

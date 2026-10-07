@@ -34,8 +34,8 @@ an action fails. Queued sends and changes stop if their source changes.
 - Google and Microsoft sign-in use PKCE, a random state, a loopback callback, and
   fixed HTTPS token endpoints. Concurrent connections share a token refresh.
   Passwords, optional Google desktop secrets, and tokens stay in the Keychain.
-- The composer works like Apple Mail's, inside the reading pane of the mail
-  window and the launcher panel, not in a separate window. It has To, Cc, Bcc,
+- The composer works like Apple Mail's, inside the reading pane of the
+  launcher panel's Mail view, not in a separate window. It has To, Cc, Bcc,
   Subject, and From fields, a signature button, and a formatting bar: font,
   size, palette colour, bold, italic, underline, strikethrough, alignment,
   lists, indent, link, image, and attachment. Default text has no colour, so

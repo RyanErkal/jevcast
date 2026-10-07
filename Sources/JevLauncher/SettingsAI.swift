@@ -60,7 +60,7 @@ struct MailSettings: View {
             Section {
                 Toggle("Load web images, fonts, and styles", isOn: $loadsImages)
                 InfoCaption("Mail never runs scripts.",
-                            detail: "HTML mail can load images, fonts, and style sheets from the web. Senders can see when those load. The ⋯ menu in the mail window changes this too.")
+                            detail: "HTML mail can load images, fonts, and style sheets from the web. Senders can see when those load. The ⋯ menu above a message changes this too.")
                 HStack { Spacer(); Button("Open Mail") { openMail() }.controlSize(.small) }
             } header: { Text("Inbox") }
             Section {
@@ -78,7 +78,7 @@ struct MailSettings: View {
                     ForEach(MailReading.MarkRead.allCases, id: \.self) { Text($0.title).tag($0.rawValue) }
                 }
                 Toggle("Prefer plain text", isOn: $prefersPlain)
-                Text("In the launcher, Space shows the message across the full panel. Escape shows the list again. ⌘O opens the Mail window.")
+                Text("In the launcher, Space shows the message across the full panel. Escape shows the list again.")
                     .font(.caption).foregroundStyle(.secondary)
             } header: { Text("Reading") }
             if native.backend == .appleMail {

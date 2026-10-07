@@ -86,7 +86,7 @@ public struct AIWritingRequest: Equatable, Sendable {
                     maxOutputTokens: 8000)
     }
 
-    /// A summary of one email for the mail window.
+    /// A summary of one email for the Mail view.
     public static func summarise(message: String, now: Date = Date()) -> AIWritingRequest {
         AIWritingRequest(action: "Summarise email",
                     system: system("Summarise the email in two to four short bullet points. Then list any request, deadline, or question for the reader.", now: now),

@@ -1,18 +1,14 @@
 import SwiftUI
 import LauncherCore
 
+/// The mailboxes beside the list in the panel: unified views, favourites, then each account's
+/// folders, which expand and collapse. Outbox opens in place of the list.
 struct MailSidebar: View {
     @ObservedObject var model: MailModel
     @ObservedObject private var center = NativeMailCenter.shared
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("Mail").font(.title3.weight(.semibold))
-                Spacer()
-                Button { model.compose() } label: { Image(systemName: "square.and.pencil") }
-                    .buttonStyle(.borderless).help("New message (⌘N)")
-            }.padding(.horizontal, 16).padding(.vertical, 14)
             List {
                 Section("Mailboxes") {
                     row("Inbox", "tray", .inbox, count: model.unreadInInbox)
@@ -42,13 +38,13 @@ struct MailSidebar: View {
                         }
                     }
                 }
-            }.listStyle(.sidebar)
+            }
+            .listStyle(.sidebar).scrollContentBackground(.hidden)
             if model.persistenceProblem != nil {
                 Label("Drafts need attention", systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(.orange).padding(12)
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private func expanded(_ id: String) -> Binding<Bool> {

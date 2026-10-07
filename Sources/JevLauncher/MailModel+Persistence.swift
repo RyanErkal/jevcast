@@ -79,6 +79,5 @@ extension MailModel {
         guard startDraft(recovered) else { return }
         unsent.removeAll { $0.id == recovered.id }
         if allowResend { recordDelivery(recovered, state: .failed, note: "You confirmed this message was not sent.") }
-        showsOutbox = false
     }
 }

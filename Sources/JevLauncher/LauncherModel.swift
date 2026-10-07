@@ -273,7 +273,7 @@ final class LauncherModel: ObservableObject {
     var openSettingsTab: ((String) -> Void)?
     /// Shows a view in the panel, such as "mail", "calendar", or "tasks". Nil until the app has views.
     var openView: ((String) -> Void)?
-    /// Opens the mail window, on a message when given; opens a new message to an address.
+    /// Opens Mail in the panel, on a message when given; opens a new message to an address.
     var openMail: ((Int64?) -> Void)?
     var composeMail: ((String) -> Void)?
     /// The view filling the panel, such as Mail, or nil for search. See LauncherPages.swift.

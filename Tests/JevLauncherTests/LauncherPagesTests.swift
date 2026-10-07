@@ -28,6 +28,38 @@ final class LauncherPagesTests: XCTestCase {
         XCTAssertEqual(model.query, "clip")
     }
 
+    @MainActor func testMailStaysInThePanelWithoutAWindow() {
+        let suite = "JevLauncherTests." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = Preferences(defaults: defaults)
+        preferences.voiceEnabled = false; preferences.jevEnabled = false; preferences.fileFolders = []
+        let model = LauncherModel(preferences: preferences, catalogue: AppCatalogue(loadCache: false),
+                                  keys: JevKeyCache(key: nil), clipboard: ClipboardHistory(pasteboard: FakePasteboard()))
+        model.makePage = { [unowned model] id in LauncherPages.make(id, model: model, links: .init(), snapshot: true) }
+        model.begin(); defer { model.end() }
+        model.showView(.mail, fromHyper: true)
+        let page = model.page as? MailPage
+        XCTAssertNotNil(page)
+        XCTAssertEqual(page?.canPopOut, false, "No Open Window hint and no ⌘O for Mail")
+        let commandO = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: 0, context: nil,
+                                        characters: "o", charactersIgnoringModifiers: "o", isARepeat: false, keyCode: 31)!
+        XCTAssertTrue(model.handleViewKey(commandO))
+        XCTAssertEqual(model.mode, .view(.mail), "⌘O leaves Mail in the panel")
+    }
+
+    func testMailColumnsFitEveryPanelWidth() {
+        for width: CGFloat in [860, 980, 1320] {
+            for split in MailReading.Split.allCases {
+                let sidebar = MailPanelLayout.sidebarWidth(width)
+                let list = MailPanelLayout.listWidth(width, sidebar: sidebar, split: split)
+                XCTAssertGreaterThanOrEqual(sidebar, 190)
+                XCTAssertGreaterThanOrEqual(list, 240)
+                XCTAssertGreaterThanOrEqual(width - sidebar - list - 2, 420, "The reader keeps room at \(width) (\(split))")
+            }
+        }
+    }
+
     @MainActor private func makeModel(_ page: SpyPage) -> (LauncherModel, () -> Void) {
         let suite = "JevLauncherTests." + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!

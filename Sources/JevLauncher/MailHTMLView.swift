@@ -4,7 +4,7 @@ import LauncherCore
 
 /// Shows an HTML email as the sender styled it, with its images. Scripts never run, frames and
 /// forms cannot load anything, and clicked links open in the default browser. Web images load
-/// unless the user turns them off in the mail window.
+/// unless the user turns them off in the ⋯ menu above a message.
 struct MailHTMLView: NSViewRepresentable {
     let html: String
     /// Identifies the message. The prepared content also participates in revision checks.

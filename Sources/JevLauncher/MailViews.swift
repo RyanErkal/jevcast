@@ -1,52 +1,6 @@
 import SwiftUI
 import LauncherCore
 
-/// The mail window: every inbox in one list, and the message beside it. Built for checking mail:
-/// ↑↓ or J K move, ⌫ deletes, E archives, R replies, F forwards, S flags, U marks unread,
-/// C or ⌘N writes a new message.
-struct MailRootView: View {
-    @ObservedObject var model: MailModel
-    @State private var showsSidebar: Bool
-
-    init(model: MailModel, showsSidebar: Bool = true) {
-        self.model = model
-        _showsSidebar = State(initialValue: showsSidebar)
-    }
-
-    var body: some View {
-        Group {
-            switch model.status {
-            case .ready: split
-            case .needsFullDiskAccess: MailSetupView(model: model, needsAccess: true)
-            case .noMail: MailSetupView(model: model, needsAccess: false)
-            }
-        }
-        .frame(minWidth: showsSidebar ? 920 : 760, minHeight: 480)
-        .sheet(isPresented: Binding(get: { model.showsOutbox && model.draft == nil }, set: { model.showsOutbox = $0 })) { MailDeliveryView(model: model) }
-    }
-
-    private var split: some View {
-        HSplitView {
-            if showsSidebar { MailSidebar(model: model).frame(minWidth: 180, idealWidth: 215, maxWidth: 280) }
-            if model.place == .outbox {
-                MailDeliveryView(model: model, inline: true).frame(minWidth: 560, maxWidth: .infinity)
-            } else {
-                MailList(model: model, showsPlacePicker: !showsSidebar, toggleSidebar: { showsSidebar.toggle() })
-                    .frame(minWidth: 280, idealWidth: 340, maxWidth: 460)
-                Group {
-                    if model.draft != nil { ComposeView(model: model).id(model.draft?.id) } else { MailReader(model: model) }
-                }.frame(minWidth: 420, maxWidth: .infinity)
-            }
-        }
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button { showsSidebar.toggle() } label: { Image(systemName: "sidebar.left") }.help("Show or hide mailboxes")
-            }
-        }
-        .overlay(alignment: .bottom) { MailBanner(model: model).padding(.bottom, 14) }
-    }
-}
-
 struct MailSetupView: View {
     @ObservedObject var model: MailModel
     let needsAccess: Bool
@@ -80,54 +34,6 @@ struct MailSetupView: View {
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-struct MailList: View {
-    @ObservedObject var model: MailModel
-    var showsPlacePicker = true
-    var toggleSidebar: (() -> Void)?
-    @FocusState private var searchFocused: Bool
-    var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            if model.place == .drafts { MailSavedDraftList(model: model) }
-            MailMessageList(model: model)
-        }
-        .onChange(of: model.searching) { _, on in searchFocused = on }
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                if let toggleSidebar {
-                    Button(action: toggleSidebar) { Image(systemName: "sidebar.left") }.help("Show or hide mailboxes")
-                }
-                if showsPlacePicker { MailPlacePicker(model: model).font(.headline) }
-                else { Text(model.placeTitle).font(.headline).lineLimit(1) }
-                if model.place == .inbox, model.unreadInInbox > 0 {
-                    Text("\(model.unreadInInbox) unread").font(.caption).foregroundStyle(.secondary)
-                }
-                MailEmptyButton(model: model)
-                Spacer()
-                Button { model.searching.toggle() } label: { Image(systemName: "magnifyingglass") }.help("Search (⌘F)")
-                Button { model.checkMail() } label: { Image(systemName: "arrow.clockwise") }.help("Check for new mail")
-                Button { model.compose() } label: { Image(systemName: "square.and.pencil") }.help("New message (⌘N)")
-                if showsPlacePicker { Button { model.showsOutbox = true } label: { Image(systemName: "tray.and.arrow.up") }.help("Outbox and send history") }
-            }
-            .buttonStyle(.borderless)
-            MailClosedNote(model: model)
-            if model.searching {
-                TextField("Search senders, subjects, and text", text: $model.search)
-                    .textFieldStyle(.roundedBorder).focused($searchFocused)
-                    .onSubmit { model.searching = !model.search.isEmpty }
-                Picker("Search in", selection: $model.searchScope) {
-                    ForEach(MailModel.SearchScope.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }.pickerStyle(.segmented).controlSize(.small)
-            }
-        }
-        .padding(.horizontal, 12).padding(.vertical, 9)
     }
 }
 
@@ -173,13 +79,11 @@ struct MailRow: View, Equatable {
 
 struct MailReader: View {
     @ObservedObject var model: MailModel
-    /// Set in the launcher panel: shows an Expand button that hides the list.
+    /// Shows an Expand button that hides the sidebar and list.
     var expanded: Binding<Bool>? = nil
     /// A reply or forward docked below. The reader shows the message it answers, even when the
     /// selection moved on, and keeps only the view controls: its actions would change the selection.
     var draft: MailModel.Draft? = nil
-    /// True in the launcher panel, where the keys differ from the mail window's.
-    var inPanel = false
     @AppStorage(MailReading.zoomKey) private var zoom = 1.0
     @AppStorage(MailReading.fitKey) private var fitsWidth = true
     @AppStorage(MailReading.plainKey) private var prefersPlain = false
@@ -289,21 +193,21 @@ struct MailReader: View {
         HStack(spacing: 16) {
             if !composing {
                 Button { model.delete() } label: { Image(systemName: "trash") }.help("Delete (⌫)")
-                Button { model.archive() } label: { Image(systemName: "archivebox") }.help(inPanel ? "Archive" : "Archive (E)")
+                Button { model.archive() } label: { Image(systemName: "archivebox") }.help("Archive")
                 if NativeMailCenter.isActive, model.mailbox(message.mailbox)?.role == .drafts {
                     Button("Edit Draft") {
                         Task { do { try await model.editSelectedServerDraft() } catch { model.banner = error.localizedDescription } }
                     }.font(.caption)
                 } else {
-                    Button { model.reply(all: false) } label: { Image(systemName: "arrowshape.turn.up.left") }.help(inPanel ? "Reply (⌘R)" : "Reply (R)")
+                    Button { model.reply(all: false) } label: { Image(systemName: "arrowshape.turn.up.left") }.help("Reply (⌘R)")
                 }
                 Button { model.toggleRead() } label: { Image(systemName: model.selected?.read == false ? "envelope.open" : "envelope.badge") }
-                    .help(inPanel ? "Mark read or unread" : "Mark read or unread (U)")
+                    .help("Mark read or unread")
             }
             Menu {
                 if !composing {
-                    Button(inPanel ? "Forward (⇧⌘F)" : "Forward (F)") { model.forward() }
-                    Button((model.selected?.flagged == true ? "Unflag" : "Flag") + (inPanel ? "" : " (S)")) { model.toggleFlag() }
+                    Button("Forward (⇧⌘F)") { model.forward() }
+                    Button(model.selected?.flagged == true ? "Unflag" : "Flag") { model.toggleFlag() }
                     Button(model.selectedIsJunk ? "Not Junk: Move to Inbox" : "Mark as Junk") { model.setJunk(!model.selectedIsJunk) }
                     let destinations = model.moveDestinations
                     if !destinations.isEmpty {
@@ -318,7 +222,7 @@ struct MailReader: View {
                 Toggle("Load Images from the Web", isOn: $model.loadsImages)
                 Toggle("Fit Wide Mail to Width", isOn: $fitsWidth)
                 Toggle("Prefer Plain Text", isOn: $prefersPlain)
-                if !composing, !NativeMailCenter.isActive { Button("Open in Mail (Return)") { model.openInMail() } }
+                if !composing, !NativeMailCenter.isActive { Button("Open in Mail") { model.openInMail() } }
             } label: { Image(systemName: "ellipsis.circle") }
             .menuIndicator(.hidden).fixedSize()
             Spacer()
@@ -327,7 +231,7 @@ struct MailReader: View {
                 Button { expanded.wrappedValue.toggle() } label: {
                     Image(systemName: expanded.wrappedValue ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
                 }
-                .help(expanded.wrappedValue ? "Show the list (Escape)" : "Expand (Space)")
+                .help(expanded.wrappedValue ? "Show the list (Escape)" : "Expand (Space or Return)")
             }
             Text(message.date.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary)
                 .lineLimit(1).layoutPriority(-1)

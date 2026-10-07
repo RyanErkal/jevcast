@@ -71,10 +71,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     private let status = LauncherStatus()
     private var panel: LauncherPanel!
     private var settings: SettingsWindow?
-    private var mail: MailWindow?
     /// The shell behind the Terminal view. It keeps running while the launcher is closed.
     private var terminal: TerminalView?
-    /// One mail model for the Mail view and the mail window, so ⌘O keeps your place. Made on first use.
+    /// One mail model for the Mail view, kept between visits so drafts and sends outlive the panel. Made on first use.
     private var madeMailModel: MailModel?
     /// Set once quitting starts, while a message in its undo time still goes to Mail.
     private var quitting = false
@@ -125,13 +124,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             if name == "dictation" { self?.showSettings(tab: .voice, voicePart: .dictation); return }
             if let tab = SettingsWindow.Tab(rawValue: name) { self?.showSettings(tab: tab) }
         }
-        model.openMail = { [weak self] rowID in self?.showMailView(select: rowID) }
+        model.openMail = { [weak self] rowID in self?.showMail(select: rowID) }
         model.openTaskRun = { [weak self] run in self?.showRunView(run) }
         model.openView = { [weak self] id in if let view = ViewID(rawValue: id) { self?.showView(view) } }
         model.makePage = { [weak self] id in
             guard let self else { return nil }
-            // The view and the mail window share one inbox; an open window comes forward instead.
-            if id == .mail, self.mail?.isOpen == true { self.showMail(); return nil }
             return LauncherPages.make(id, model: self.model, links: self.pageLinks, snapshot: false)
         }
         viewSizeWatch = model.$page.map { $0?.id }.removeDuplicates().sink { [weak self] view in self?.panel.setViewSize(view) }
@@ -176,7 +173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             guard let self, self.wasVisible, event.window === self.panel else { return event }
             // An input method composing text owns Return, arrows, and Escape until it commits.
             if let editor = self.panel.firstResponder as? NSTextView, editor.hasMarkedText() { return event }
-            // A view such as Mail takes ↑↓, Return, ⌫, Escape, and ⌘O; other keys type in the filter.
+            // A view such as Mail takes ↑↓, Return, ⌫, and Escape; other keys type in the filter.
             if self.model.page != nil { return self.model.handleViewKey(event) ? nil : event }
             // With the AI answer showing, Escape goes back to the rows and row keys do nothing.
             if self.model.aiWritingAnswer != nil {
@@ -585,21 +582,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         [.banner, .list, .sound]
     }
-    /// A send that fails while no mail view is on screen, such as after the panel closed, shows
-    /// in the launcher like any other failure. A mail view on screen shows it in its banner.
+    /// A send that fails while Mail is not on screen, such as after the panel closed, shows
+    /// in the launcher like any other failure. Mail on screen shows it in its banner.
     private func mailSendFailed(_ text: String) {
         // While Jevcast quits there is nothing left to show it in.
-        guard !quitting else { return }
-        let inPanel = wasVisible && model.page?.id == .mail
-        let inWindow = mail?.isOpen == true && mail?.window?.isVisible == true && mail?.window?.isMiniaturized == false
-        guard !inPanel, !inWindow else { return }
+        guard !quitting, !(wasVisible && model.page?.id == .mail) else { return }
         model.showFailure(text)
     }
-    /// The Jevcast mail window, made on first use.
+    /// Mail in the panel, optionally on one message, or with a new message to an address.
+    /// An open draft with text is kept, with a note, instead of a new one.
     func showMail(select rowID: Int64? = nil, compose address: String? = nil) {
-        hide(restoreFocus: false)
-        if mail == nil { mail = MailWindow(model: mailModel) }
-        mail?.show(select: rowID, compose: address)
+        showView(.mail)
+        if let rowID { (model.page as? MailPage)?.show(rowID) }
+        if let address { mailModel.compose(to: address) }
     }
     /// The running shell, or a new one. When the shell exits, the view closes and the next
     /// Hyper–T starts a new shell. Nil when libghostty cannot start.
@@ -618,22 +613,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     /// Shows the launcher as a view, such as Mail, in place of a separate window.
     /// `fromHyper` makes Escape close the launcher instead of going back to search.
     func showView(_ view: ViewID, fromHyper: Bool = false) {
-        if view == .mail, mail?.isOpen == true { showMail(); return }
         show(); model.showView(view, fromHyper: fromHyper)
-    }
-    private func showMailView(select rowID: Int64?) {
-        if mail?.isOpen == true { showMail(select: rowID); return }
-        showView(.mail)
-        if let rowID { (model.page as? MailPage)?.show(rowID) }
     }
     private func showRunView(_ run: ScheduledBriefRun) {
         showView(.tasks)
         (model.page as? SourcePage)?.showDetail(AIWritingStorageKeys.runRowPrefix + run.id)
     }
-    /// What views open outside the panel. ⌘O on Mail keeps the list's selection in the mail window.
+    /// What views share with the app: Mail's model, the task result window, and the shell.
     private var pageLinks: LauncherPages.Links {
         .init(mail: { [unowned self] in self.mailModel },
-              mailWindow: { [weak self] rowID in self?.model.closeAllViews(handingOff: true); self?.showMail(select: rowID) },
               runWindow: { [weak self] run in self?.showRun(run) },
               terminal: { [weak self] in self?.runningTerminal() })
     }
@@ -673,7 +661,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         model.updateQuery(text, typed: true)
     }
     @objc func checkForUpdates() { updates.checkAndReport() }
-    @objc func openMailWindow() { showView(.mail) }
+    @objc func openMail() { showView(.mail) }
     @objc func showCleanup() { showView(.cleanup) }
     @objc func showTaskResults() { showView(.tasks) }
     @objc func showAbout() { AboutPanel.show() }

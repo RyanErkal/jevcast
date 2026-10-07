@@ -116,7 +116,7 @@ extension LauncherModel {
         }
     }
 
-    /// The checked request, used by the launcher and the mail window.
+    /// The checked request, used by the launcher and its Mail view.
     func sendAIWriting(_ request: AIWritingRequest) async throws -> AIWritingReply {
         let refused = Set(request.sent).subtracting(allowedAIWritingContext)
         guard preferences.aiWritingEnabled else { throw LauncherError("AI writing is off. Turn it on in Settings › AI › Writing.") }

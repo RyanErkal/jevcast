@@ -2,7 +2,7 @@ import AppKit
 import Combine
 import LauncherCore
 
-/// The mail window's state. Lists come from Mail's index; changes go through Apple Mail;
+/// Mail's state in the panel. Lists come from Mail's index; changes go through Apple Mail;
 /// the list updates when Mail's index changes.
 @MainActor
 final class MailModel: ObservableObject {
@@ -19,14 +19,12 @@ final class MailModel: ObservableObject {
     @Published private(set) var mailboxes: [MailMailbox] = []
     @Published var place: Place = .inbox { didSet { if oldValue != place { selectedID = nil; reload(); syncPlace() } } }
     @Published var search = "" { didSet { if oldValue != search { reloadSoon() } } }
-    /// The search field shows only while searching.
-    @Published var searching = false
     /// Web images in HTML mail. On by default; the ⋯ menu turns them off.
     @Published var loadsImages = UserDefaults.standard.object(forKey: "mailLoadsImages") as? Bool ?? true {
         didSet { UserDefaults.standard.set(loadsImages, forKey: "mailLoadsImages") }
     }
-    /// True while the mail window has the keyboard, so a message counts as read only when seen.
-    /// Coming back to the window counts the message on screen.
+    /// True while Mail is on screen in the panel, so a message counts as read only when seen.
+    /// Coming back to Mail counts the message on screen.
     var windowIsKey = false { didSet { if windowIsKey != oldValue { armRead() } } }
     private var readTimer: Task<Void, Never>?
     @Published private(set) var messages: [MailSummary] = [] {
@@ -97,7 +95,7 @@ final class MailModel: ObservableObject {
     @Published var composeNote: String?
     /// Set by the first Escape on a draft with text. The second discards it.
     var discardArmed = false
-    /// Counts refused new drafts, so a view that hid the open draft shows it again.
+    /// Counts refused new drafts and picks of the open one, so a view that hid it shows it again.
     @Published var draftNudge = 0
     /// A sent draft during its undo time. Undo brings it back; after the time it goes to Mail.
     @Published var pendingSend: Draft?
@@ -110,7 +108,6 @@ final class MailModel: ObservableObject {
     /// Drafts that did not go, oldest first. The banner offers Show.
     @Published var unsent: [Unsent] = [] { didSet { persistComposition() } }
     @Published var deliveries: [MailDelivery] = [] { didSet { persistComposition() } }
-    @Published var showsOutbox = false
     @Published var repairingSentCopies: Set<UUID> = []
     @Published var senders: [MailSendingIdentity] = []
     let draftStore: MailDraftStore?
@@ -680,7 +677,7 @@ final class MailModel: ObservableObject {
     }
 
     /// Queues a launcher selection. The lookup runs off the main thread, including when access
-    /// is still being checked on the first opening of the mail window.
+    /// is still being checked on the first opening of Mail.
     @discardableResult
     func open(_ rowID: Int64) -> Bool {
         if statusWork != nil { pendingOpen = rowID; return true }

@@ -42,7 +42,6 @@ final class ScheduledBriefsPageSource: ThingSource {
 enum LauncherPages {
     struct Links {
         var mail: (() -> MailModel)?
-        var mailWindow: ((Int64?) -> Void)?
         var runWindow: ((ScheduledBriefRun) -> Void)?
         /// The running shell, or a new one. Nil when libghostty cannot start.
         var terminal: (() -> TerminalView?)?
@@ -51,7 +50,7 @@ enum LauncherPages {
     static func make(_ id: ViewID, model: LauncherModel, links: Links, snapshot: Bool) -> LauncherPage? {
         switch id {
         case .mail:
-            return MailPage(mail: snapshot ? nil : links.mail?(), popOut: links.mailWindow, focusFilter: { [weak model] in model?.focusInput() })
+            return MailPage(mail: snapshot ? nil : links.mail?(), focusFilter: { [weak model] in model?.focusInput() })
         case .calendar:
             let list = SourcePage(.calendar, source: snapshot ? nil : CalendarSource(), model: model, scope: "week", hasDetail: true,
                                   emptyText: "Nothing in the next seven days.",

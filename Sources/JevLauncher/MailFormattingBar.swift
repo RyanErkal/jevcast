@@ -10,18 +10,19 @@ struct MailFormattingBar: View {
     let attach: () -> Void
 
     var body: some View {
+        ViewThatFits(in: .horizontal) {
+            full.fixedSize(horizontal: true, vertical: false)
+            compact
+        }
+        .buttonStyle(.borderless)
+        .font(.system(size: 12))
+    }
+
+    private var full: some View {
         HStack(spacing: 10) {
-            Menu {
-                ForEach(MailEditorCommands.families, id: \.self) { family in
-                    Button(family) { commands.family(family == MailEditorCommands.systemFamily ? nil : family) }
-                }
-            } label: { Text("Font") }.menuStyle(.borderlessButton).fixedSize().help("Font")
-            Menu {
-                ForEach(MailEditorCommands.sizes, id: \.self) { size in Button("\(Int(size))") { commands.size(size) } }
-            } label: { Text("Size") }.menuStyle(.borderlessButton).fixedSize().help("Text size")
-            Menu {
-                ForEach(MailEditorCommands.colors, id: \.name) { choice in Button(choice.name) { commands.color(choice.color) } }
-            } label: { Image(systemName: "paintpalette") }.menuStyle(.borderlessButton).fixedSize().help("Text colour")
+            fontMenu
+            sizeMenu
+            colorMenu
             divider
             button("bold", "Bold") { commands.trait(.boldFontMask) }
             button("italic", "Italic") { commands.trait(.italicFontMask) }
@@ -41,8 +42,55 @@ struct MailFormattingBar: View {
             button("photo", "Insert an image", insertImage)
             button("paperclip", "Attach files", attach)
         }
-        .buttonStyle(.borderless)
-        .font(.system(size: 12))
+    }
+
+    private var compact: some View {
+        HStack(spacing: 10) {
+            fontMenu
+            sizeMenu
+            colorMenu
+            button("bold", "Bold") { commands.trait(.boldFontMask) }
+            button("italic", "Italic") { commands.trait(.italicFontMask) }
+            button("underline", "Underline") { commands.underline() }
+            Menu {
+                Button("Strikethrough") { commands.strikethrough() }
+                Section("Alignment") {
+                    Button("Align Left") { commands.align(.left) }
+                    Button("Centre") { commands.align(.center) }
+                    Button("Align Right") { commands.align(.right) }
+                }
+                Section("Lists") {
+                    Button("Bulleted List") { commands.list(numbered: false) }
+                    Button("Numbered List") { commands.list(numbered: true) }
+                    Button("Decrease Indent") { commands.indent(by: -MailEditorCommands.indentStep) }
+                    Button("Increase Indent") { commands.indent(by: MailEditorCommands.indentStep) }
+                }
+                Button("Add Link", action: addLink)
+                Button("Insert Image", action: insertImage)
+            } label: { Image(systemName: "ellipsis.circle") }
+                .menuStyle(.borderlessButton).fixedSize().help("More formatting options")
+            button("paperclip", "Attach files", attach)
+        }
+    }
+
+    private var fontMenu: some View {
+        Menu {
+            ForEach(MailEditorCommands.families, id: \.self) { family in
+                Button(family) { commands.family(family == MailEditorCommands.systemFamily ? nil : family) }
+            }
+        } label: { Text("Font") }.menuStyle(.borderlessButton).fixedSize().help("Font")
+    }
+
+    private var sizeMenu: some View {
+        Menu {
+            ForEach(MailEditorCommands.sizes, id: \.self) { size in Button("\(Int(size))") { commands.size(size) } }
+        } label: { Text("Size") }.menuStyle(.borderlessButton).fixedSize().help("Text size")
+    }
+
+    private var colorMenu: some View {
+        Menu {
+            ForEach(MailEditorCommands.colors, id: \.name) { choice in Button(choice.name) { commands.color(choice.color) } }
+        } label: { Image(systemName: "paintpalette") }.menuStyle(.borderlessButton).fixedSize().help("Text colour")
     }
 
     private var divider: some View { Divider().frame(height: 14) }

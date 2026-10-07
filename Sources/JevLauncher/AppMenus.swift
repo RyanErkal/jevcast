@@ -9,7 +9,7 @@ import AppKit
     func openWebsite()
     func openSourceCode()
     func reportIssue()
-    func openMailWindow()
+    func openMail()
     func showCleanup()
     func showTaskResults()
     func showAutomationsWindow()

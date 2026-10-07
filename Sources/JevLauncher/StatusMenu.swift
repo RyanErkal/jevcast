@@ -66,7 +66,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         open.target = self
         menu.addItem(.separator())
 
-        menu.addItem(AppMenus.item("Mail", #selector(AppCommands.openMailWindow), commands))
+        menu.addItem(AppMenus.item("Mail", #selector(AppCommands.openMail), commands))
         menu.addItem(AppMenus.item("Clean Up…", #selector(AppCommands.showCleanup), commands))
         menu.addItem(AppMenus.item("Automations…", #selector(AppCommands.showAutomationsWindow), commands))
         let waiting = automations.attentionCount

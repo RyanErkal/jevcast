@@ -1,17 +1,19 @@
 import SwiftUI
 import LauncherCore
 
-/// The message list for the mail window and the panel. Rows keep their message IDs, and the
-/// next page loads when a row near the end appears.
+/// The message list in the panel. Rows keep their message IDs, and the next page loads when a
+/// row near the end appears.
 struct MailMessageList: View {
     @ObservedObject var model: MailModel
     /// The panel scrolls to a message the keyboard selects.
     var scrollsToSelection = false
+    /// A row the user clicked. The panel picks it through its page, so an open draft is kept.
+    var pick: ((Int64) -> Void)?
     var onDoubleClick: ((Int64) -> Void)?
 
     var body: some View {
         ScrollViewReader { proxy in
-            List(selection: $model.selectedID) {
+            List(selection: selection) {
                 ForEach(model.messages) { message in
                     MailRow(message: message, delete: { model.delete(message.rowID) },
                             deleteAll: { model.select(message.rowID, byUser: false); model.deleteAllFromSender() })
@@ -64,6 +66,12 @@ struct MailMessageList: View {
         }
     }
 
+    private var selection: Binding<Int64?> {
+        Binding(get: { model.selectedID }, set: { id in
+            if let id, let pick { pick(id) } else { model.selectedID = id }
+        })
+    }
+
     private var emptyText: String {
         if !model.search.isEmpty { return model.bodySearch == .running ? "Searching…" : "No matches" }
         if model.place == .drafts, !model.savedDrafts.isEmpty { return "No other drafts" }
@@ -108,7 +116,7 @@ struct MailPlacePicker: View {
             Button("Flagged") { model.place = .flagged }
             Button("Drafts") { model.place = .drafts }
             Button("Sent") { model.place = .sent }
-            Button("Outbox") { model.showsOutbox = true }
+            Button("Outbox") { model.place = .outbox }
             ForEach(model.accounts, id: \.self) { account in
                 Divider()
                 Section(model.accountTitle(account)) {

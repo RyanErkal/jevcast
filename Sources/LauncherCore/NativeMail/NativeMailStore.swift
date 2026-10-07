@@ -1,7 +1,7 @@
 import Foundation
 
 /// Jevcast's own mail store for accounts it syncs itself. The database has the tables and columns
-/// of Apple Mail's `Envelope Index` that the mail window reads, and bodies sit where Mail keeps
+/// of Apple Mail's `Envelope Index` that the Mail view reads, and bodies sit where Mail keeps
 /// them (`<account>/<mailbox>.mbox/Data/…/<row>.emlx`). So one reader, one list query, and one
 /// search serve both. Extra columns hold what sync needs. Folders are 0700 and files 0600.
 public actor NativeMailStore {

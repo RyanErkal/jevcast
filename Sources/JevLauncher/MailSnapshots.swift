@@ -13,6 +13,8 @@ enum MailSnapshots {
             ("mail-reply", AnyView(reply()), NSSize(width: 820, height: 760)),
             panel("mail-outbox", outbox()),
             panel("mail-workspace", MailPage(mail: workspace())),
+            panel("mail-workspace-light", MailPage(mail: workspace())),
+            panel("mail-workspace-folders-expanded", MailPage(mail: workspace(providerFoldersExpanded: true))),
             panel("mail-workspace-compact", MailPage(mail: workspace()), width: 980),
             panel("mail-workspace-drafts-compact", MailPage(mail: workspace(drafts: true)), width: 980),
             panel("mail-workspace-drafts-smallest", MailPage(mail: workspace(drafts: true)), width: 860),
@@ -47,6 +49,7 @@ enum MailSnapshots {
             window.isReleasedWhenClosed = false
             window.alphaValue = 0
             window.ignoresMouseEvents = true
+            if name == "mail-workspace-light" { window.appearance = NSAppearance(named: .aqua) }
             window.contentView = NSHostingView(rootView: view)
             window.orderFrontRegardless()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
@@ -115,14 +118,16 @@ enum MailSnapshots {
     }
 
     /// Invented accounts, folders, and messages, ready as the panel shows them. The first message is selected.
-    static func workspace(drafts: Bool = false, search: Bool = false) -> MailModel {
+    static func workspace(drafts: Bool = false, search: Bool = false, providerFoldersExpanded: Bool = false) -> MailModel {
         let model = fixture()
-        let roles: [MailMailbox.Role] = [.inbox, .drafts, .sent, .archive, .junk, .trash, .other, .other]
-        let names = ["INBOX", "Drafts", "Sent", "Archive", "Junk", "Trash", "Clients", "Clients/Acme"]
+        let roles: [MailMailbox.Role] = [.inbox, .drafts, .sent, .archive, .junk, .trash, .other, .other, .other, .other]
+        let names = ["INBOX", "[Gmail]/Drafts", "[Gmail]/Sent Mail", "[Gmail]/All Mail", "[Gmail]/Spam", "[Gmail]/Trash",
+                     "Clients", "Clients/Acme", "[Gmail]/Important", "[Gmail]/Starred"]
         let boxes = names.enumerated().map { offset, name in
             MailMailbox(rowID: Int64(offset + 1), url: "imap://demo/" + name, unread: offset == 0 ? 12 : offset == 7 ? 3 : 0,
                         total: offset == 0 ? 500 : 20, serverRole: roles[offset],
-                        serverTotal: offset == 0 ? 18_240 : 240, syncComplete: false, initialized: offset != 7)
+                        serverTotal: offset == 0 ? 48_240 : offset == 1 ? 3 : offset == 5 ? 6 : 240,
+                        serverUnread: offset == 0 ? 33_007 : nil, syncComplete: false, initialized: offset != 7)
         } + [MailMailbox(rowID: 20, url: "imap://personal/INBOX", unread: 2, total: 25, serverRole: .inbox)]
         let subjects = ["Friday's Plan", "Design Review", "October Invoice", "Launch Checklist", "Project Update", "Catch Up Next Week"]
         let people = ["Sam Lee", "Jamie Park", "Accounts", "Alex Chen", "Morgan Riley", "Casey"]
@@ -137,7 +142,8 @@ enum MailSnapshots {
         let detail = MIMEMessage.parse(MailComposer.render(message))
         model.installDemo(mailboxes: boxes, messages: drafts ? [] : search ? messages.filter { $0.subject.contains("Friday") } : messages, detail: detail)
         model.favoriteMailboxKeys = [boxes[7].url]
-        model.senders.append(.init(accountID: "personal", address: "alex@personal.example", name: "Alex", signature: ""))
+        if providerFoldersExpanded { model.expandedSidebarGroupKeys = ["demo:[Gmail]"] }
+        model.senders.append(.init(accountID: "personal", address: "alex@gmail.com", name: "Alex", signature: ""))
         if drafts {
             model.place = .drafts
             model.draft = .init(backend: MailBackend.jevcast.rawValue, fromAccountID: "demo", fromAddress: "alex@example.com",

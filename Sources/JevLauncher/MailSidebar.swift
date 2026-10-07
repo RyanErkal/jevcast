@@ -1,53 +1,85 @@
 import SwiftUI
 import LauncherCore
 
-/// The mailboxes beside the list in the panel: unified views, favourites, then each account's
-/// folders, which expand and collapse. Outbox opens in place of the list.
+/// Unified views, favourites, and account folders, all inside the launcher panel.
 struct MailSidebar: View {
     @ObservedObject var model: MailModel
     @ObservedObject private var center = NativeMailCenter.shared
 
     var body: some View {
         VStack(spacing: 0) {
-            List {
-                Section("Mailboxes") {
-                    row("Inbox", "tray", .inbox, count: model.unreadInInbox)
-                    row("All Mail", "tray.full", .allMail)
-                    row("Unread", "envelope.badge", .unread)
-                    row("Flagged", "flag", .flagged)
-                    row("Drafts", "doc", .drafts, count: model.savedDrafts.count)
-                    row("Sent", "paperplane", .sent)
-                    row("Outbox", "tray.and.arrow.up", .outbox, count: model.pendingDeliveryCount)
-                }
-                .listSectionSeparator(.hidden)
-                if !model.favoriteMailboxes.isEmpty {
-                    Section("Favourites") {
-                        ForEach(model.favoriteMailboxes) { box in mailbox(box, title: box.name) }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    VStack(spacing: 0) {
+                        MailSidebarHeading(title: "Mailboxes")
+                        row("Inbox", "tray", .inbox, count: model.unreadInInbox)
+                        row("All Mail", "tray.full", .allMail)
+                        row("Unread", "envelope.badge", .unread)
+                        row("Flagged", "flag", .flagged)
+                        row("Drafts", "doc", .drafts, count: model.savedDrafts.count)
+                        row("Sent", "paperplane", .sent)
+                        row("Outbox", "tray.and.arrow.up", .outbox, count: model.pendingDeliveryCount)
                     }
-                    .listSectionSeparator(.hidden)
-                }
-                ForEach(model.accounts, id: \.self) { account in
-                    Section {
-                        DisclosureGroup(isExpanded: expanded("account:" + account)) {
-                            ForEach(MailboxTree.build(model.mailboxes.filter { $0.accountID == account })) { node in
-                                MailFolderNode(node: node, model: model)
-                            }
-                        } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(model.accountTitle(account)).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                                if let state = center.states[account] { Text(status(state)).font(.caption2).foregroundStyle(.secondary) }
+                    if !model.favoriteMailboxes.isEmpty {
+                        VStack(spacing: 0) {
+                            MailSidebarHeading(title: "Favourites")
+                            ForEach(model.favoriteMailboxes) { box in
+                                MailSidebarMailbox(box: box, title: box.name, model: model)
                             }
                         }
-                        .listRowSeparator(.hidden)
                     }
-                    .listSectionSeparator(.hidden)
+                    ForEach(model.accounts, id: \.self) { account in
+                        accountSection(account)
+                    }
                 }
+                .padding(.horizontal, 8).padding(.top, 6).padding(.bottom, 12)
             }
-            .listStyle(.inset).scrollContentBackground(.hidden)
-            .environment(\.defaultMinListRowHeight, 24)
             if model.persistenceProblem != nil {
                 Label("Drafts need attention", systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(.orange).padding(12)
+            }
+        }
+    }
+
+    private var accountLabels: [String: String] {
+        MailSidebarAccounts.labels(model.accounts.map { (id: $0, address: model.accountTitle($0)) })
+    }
+
+    private func accountSection(_ account: String) -> some View {
+        let expanded = expanded("account:" + account)
+        let folders = MailSidebarFolders(model.mailboxes.filter { $0.accountID == account })
+        let state = center.states[account]
+        let label = accountLabels[account] ?? account
+        return VStack(alignment: .leading, spacing: 0) {
+            Button { expanded.wrappedValue.toggle() } label: {
+                HStack(spacing: 6) {
+                    Circle().fill(statusColor(state)).frame(width: 6, height: 6)
+                    Text(label).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Image(systemName: expanded.wrappedValue ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                }
+                .foregroundStyle(.secondary).padding(.horizontal, 8)
+                .frame(height: 24).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(model.accountTitle(account) + " · " + status(state))
+            .accessibilityLabel(label + ", " + model.accountTitle(account))
+            .accessibilityValue(status(state) + ", " + (expanded.wrappedValue ? "Expanded" : "Collapsed"))
+            if case .failed = state {
+                Text(status(state)).font(.system(size: 11)).foregroundStyle(.orange)
+                    .padding(.horizontal, 8).padding(.bottom, 4)
+            }
+            if expanded.wrappedValue {
+                ForEach(folders.primary) { node in
+                    MailFolderNode(node: node, title: folders.title(node), model: model)
+                }
+                ForEach(folders.providerFolders) { node in
+                    MailProviderFolders(node: node, model: model)
+                }
+                ForEach(folders.folders) { node in
+                    MailFolderNode(node: node, title: node.title, model: model)
+                }
             }
         }
     }
@@ -60,89 +92,80 @@ struct MailSidebar: View {
         MailSidebarRow(title: title, symbol: symbol, count: count, selected: model.place == place) { model.place = place }
     }
 
-    private func mailbox(_ box: MailMailbox, title: String) -> some View {
-        MailSidebarMailbox(box: box, title: title, model: model)
+    private func statusColor(_ state: MailAccountSync.State?) -> Color {
+        switch state {
+        case .ready: return .green
+        case .syncing: return .accentColor
+        case .failed: return .orange
+        default: return .secondary
+        }
     }
 
-    private func status(_ state: MailAccountSync.State) -> String {
+    private func status(_ state: MailAccountSync.State?) -> String {
         switch state {
         case .starting: return "Starting"
         case .syncing: return "Syncing…"
         case .ready: return "Up to date"
         case .failed(_, let signIn): return signIn ? "Sign in required" : "Sync needs attention"
+        case nil: return "Status unavailable"
         }
     }
 }
 
 private struct MailFolderNode: View {
     let node: MailboxTree
+    let title: String
     @ObservedObject var model: MailModel
 
+    private var expanded: Binding<Bool> {
+        Binding(get: { !model.collapsedMailboxKeys.contains(node.id) }, set: { model.setMailboxExpanded(node.id, $0) })
+    }
+
     var body: some View {
-        if node.children.isEmpty {
-            if let box = node.mailbox { MailSidebarMailbox(box: box, title: node.title, model: model) }
-        } else {
-            DisclosureGroup(isExpanded: Binding(get: { !model.collapsedMailboxKeys.contains(node.id) }, set: { model.setMailboxExpanded(node.id, $0) })) {
-                ForEach(node.children) { child in MailFolderNode(node: child, model: model) }
-            } label: {
-                if let box = node.mailbox { MailSidebarMailbox(box: box, title: node.title, model: model) }
-                else { Label(node.title, systemImage: "folder").font(.system(size: 12)).lineLimit(1) }
+        VStack(spacing: 0) {
+            if let box = node.mailbox {
+                MailSidebarMailbox(box: box, title: title, model: model, expanded: node.children.isEmpty ? nil : expanded)
+            } else if !node.children.isEmpty {
+                MailSidebarRow(title: title, symbol: "folder", expanded: expanded) { expanded.wrappedValue.toggle() }
             }
-            .listRowSeparator(.hidden)
+            if !node.children.isEmpty && expanded.wrappedValue {
+                VStack(spacing: 0) {
+                    ForEach(node.children) { child in MailFolderNode(node: child, title: child.title, model: model) }
+                }.padding(.leading, 12)
+            }
         }
     }
 }
 
-private struct MailSidebarMailbox: View {
-    let box: MailMailbox
-    let title: String
+private struct MailProviderFolders: View {
+    let node: MailboxTree
     @ObservedObject var model: MailModel
 
+    private var expanded: Binding<Bool> {
+        Binding(get: { model.expandedSidebarGroupKeys.contains(node.id) }, set: { model.setSidebarGroupExpanded(node.id, $0) })
+    }
+
     var body: some View {
-        MailSidebarRow(title: title, symbol: symbol, count: count, selected: model.place == .mailbox(box.rowID),
-                       partial: box.initialized == false) { model.place = .mailbox(box.rowID) }
-            .help(box.initialized == false ? "Opens and downloads this folder" : box.syncComplete == false ? "Older messages load as you scroll" : box.path)
-            .contextMenu {
-                Button(model.isFavorite(box) ? "Remove from Favourites" : "Add to Favourites") { model.toggleFavorite(box) }
+        VStack(spacing: 0) {
+            if let box = node.mailbox {
+                MailSidebarMailbox(box: box, title: node.title, model: model, expanded: node.children.isEmpty ? nil : expanded)
+            } else {
+                Button { expanded.wrappedValue.toggle() } label: {
+                    HStack(spacing: 5) {
+                        Text("Gmail folders")
+                        Image(systemName: expanded.wrappedValue ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                        Spacer(minLength: 0)
+                    }
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .padding(.leading, 31).padding(.trailing, 8).frame(height: 22).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityValue(expanded.wrappedValue ? "Expanded" : "Collapsed")
             }
-    }
-    private var count: Int {
-        [.junk, .trash, .drafts].contains(box.role) ? box.serverTotal ?? box.total : box.serverUnread ?? box.unread
-    }
-    private var symbol: String {
-        switch box.role {
-        case .inbox: return "tray"
-        case .sent: return "paperplane"
-        case .drafts: return "doc"
-        case .trash: return "trash"
-        case .junk: return "exclamationmark.shield"
-        case .archive: return "archivebox"
-        case .other: return "folder"
+            if expanded.wrappedValue {
+                ForEach(node.children) { child in MailFolderNode(node: child, title: child.title, model: model) }
+            }
         }
-    }
-}
-
-private struct MailSidebarRow: View {
-    let title: String
-    let symbol: String
-    let count: Int
-    let selected: Bool
-    var partial = false
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: symbol).frame(width: 16).foregroundStyle(selected ? Color.accentColor : Color.secondary)
-                Text(title).lineLimit(1)
-                Spacer(minLength: 4)
-                if partial { Image(systemName: "icloud.and.arrow.down").font(.caption2).foregroundStyle(.tertiary) }
-                if count > 0 { Text(count.formatted()).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).monospacedDigit() }
-            }
-            .font(.system(size: 12)).padding(.vertical, 3).padding(.horizontal, 6)
-            .background(selected ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 5))
-            .contentShape(Rectangle())
-        }.buttonStyle(.plain).accessibilityAddTraits(selected ? [.isSelected] : [])
-            .listRowSeparator(.hidden)
     }
 }

@@ -71,8 +71,11 @@ updates the sign-in. A queued action refuses a changed mail source.
 Demo snapshots include `mail-workspace` (the panel at 1320 points), `mail-workspace-compact` (980 points), `mail-workspace-sidebar-hidden`, `mail-workspace-drafts`, `mail-workspace-search`, `mail-outbox`, `mail-compose`, `mail-reply`, and `mail-add-account`, and the Automations window at its normal size, at 980 points wide, and at its minimum size (`automations-*`).
 They contain invented addresses and content, without account or credential reads.
 AppleScript compilation and these renders are separate from live Mail proof.
-Add `--mail-only` to `--snapshot-ui <dir> --demo` to render only the thirteen Mail
+Add `--mail-only` to `--snapshot-ui <dir> --demo` to render only the fifteen Mail
 fixtures. The `mail-workspace*`, `mail-outbox`, and `mail-draft-*` fixtures render `MailPage` content and its footer at the panel's view size, with an invented model. This path does not start a launcher session or read desktop context.
+`mail-workspace-light` checks the light appearance. `mail-workspace-folders-expanded`
+shows Gmail's extra folders beside the flat main folders. Sidebar demo counts include
+`33,007`, so the full badge can be checked at compact panel widths.
 `mail-draft-signin-blocked` and `mail-draft-review-blocked` show the draft recovery
 row with invented failures. After fixing a refused sign-in, choose Save to Drafts
 Again to retry that draft's server save. This action does not send. Uncertain or

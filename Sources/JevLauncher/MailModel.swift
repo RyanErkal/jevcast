@@ -14,6 +14,7 @@ final class MailModel: ObservableObject {
     @Published var searchScope = SearchScope.mailbox { didSet { if oldValue != searchScope { reload() } } }
     @Published var favoriteMailboxKeys: Set<String> = []
     @Published var collapsedMailboxKeys: Set<String> = []
+    @Published var expandedSidebarGroupKeys: Set<String> = []
     let mailDefaults: UserDefaults?
     @Published private(set) var status: MailStore.Status = .noMail
     @Published private(set) var mailboxes: [MailMailbox] = []
@@ -185,6 +186,7 @@ final class MailModel: ObservableObject {
         self.mailDefaults = mailDefaults
         favoriteMailboxKeys = Set(mailDefaults?.stringArray(forKey: "mailFavoriteMailboxes") ?? [])
         collapsedMailboxKeys = Set(mailDefaults?.stringArray(forKey: "mailCollapsedMailboxes") ?? [])
+        expandedSidebarGroupKeys = Set(mailDefaults?.stringArray(forKey: "mailExpandedSidebarGroups") ?? [])
         self.draftStore = draftStore
         self.statusProvider = statusProvider
         self.setReadAction = setRead

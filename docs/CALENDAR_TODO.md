@@ -1,5 +1,14 @@
 # Calendar: morning checklist
 
+Update, 7 October 2026: the app and runner were installed and relaunched from
+`/Applications/Jevcast.app`. Their signatures and binary hashes were verified.
+Ryan reported that the installed app works. The agent did not exercise live
+Google sign-in or a Meet join. The original checklist and offline evidence follow.
+
+Release check, 7 October 2026: the full offline suite passed with 1,057 tests,
+3 skipped, and no failures. The universal 1.20.0 (build 41) app and runner built
+successfully and passed strict signature verification.
+
 Worktree: `/Users/ryanerkal/Dev/jevcast-calendar-20261006`  
 Branch: `feat/google-calendar-20261006`  
 Base: `aaf5a55` from `feat/mail-workspace`.
@@ -32,8 +41,9 @@ event details, meeting notes, guests, linked documents, and Join Google Meet.
 - Six demo snapshots inspected: Week, Day, Month, details, compact Week, sign-in.
 - Universal arm64/x86_64 app and runner build: **passed**. Code signature: **passed**.
 
-Live Google consent, account access, browser joins, physical input, and installed
-app behavior remain unverified. No account was connected or changed by this task.
-No app was installed or relaunched. Work remains in the separate worktree.
+At the original offline checkpoint, live Google consent, account access, browser
+joins, physical input, and installed app behavior were unverified. No account
+was connected or changed by the agent. Installation and Ryan's report are recorded
+in the update above. The separate feature worktree remains available.
 
 Evidence is in `dist/calendar-preview/`. See [Calendar development notes](DEVELOPMENT.md#calendar).

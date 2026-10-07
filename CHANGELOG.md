@@ -2,6 +2,16 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.20.0] - 2026-10-07
+
+### Added
+
+- **Google Calendar sign-in.** Connect Google directly with read-only access, choose which calendars to show, and refresh events. Calendar has its own Keychain token and does not use the Mail token. Sign-in uses your own Google Desktop app client.
+- **Hourly Calendar views.** Calendar opens in Week. Week and Day show horizontal hour lines, overlapping meetings, all-day events, and the current time. Month and List remain available.
+- **Meeting details.** Click an event to see its description and meeting notes, location, organiser, guests, and linked documents. Join Google Meet opens the event's meeting link in the browser.
+- **Mail workspace.** The sidebar groups accounts and folders, with favourites and combined views. Server search, older-mail loading, server drafts, and received attachments are available for Jevcast accounts.
+- **Durable mail sending.** Drafts and delivery results are saved locally. Interrupted or uncertain sends wait for review. A Sent-copy repair never sends the message again.
+
 ## [1.19.0] - 2026-10-04
 
 ### Changed

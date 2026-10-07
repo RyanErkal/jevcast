@@ -2,6 +2,19 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Changed
+
+- **Calendar opens on 3 Days.** Today and the next two days show in the hourly grid. Day, Week, Month, and List are also available, and ← and → switch between them. ↑ and ↓ move by the days on screen, and Today goes back to today. A clicked event shows its details beside the calendar; × or Escape closes them.
+- **Mail lives in the launcher panel.** The panel shows the mailbox sidebar, the message list, and the message or the open draft. There is no separate mail window. The sidebar is more compact, and a button above the list hides it.
+
+### Fixed
+
+- **Trash counts follow your deletes.** Delete, move, Empty, and read or unread now change the sidebar counts at once for Jevcast accounts. Before, Trash kept its old count until the next server check, which could be minutes later.
+- **The list stays steady while deletes finish.** After you delete many messages quickly, the empty list no longer flickers between "Load older mail" and "is empty", and deleted messages no longer come back for a moment.
+- **Drafts recover after a refused sign-in.** After you fix the sign-in, Save to Drafts Again retries that draft's server save. It never sends. Uncertain server changes still wait for your review.
+
 ## [1.20.0] - 2026-10-07
 
 ### Added

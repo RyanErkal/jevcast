@@ -2,7 +2,7 @@ import AppKit
 import Combine
 import LauncherCore
 
-/// The mail window's state. Lists come from Mail's index; changes go through Apple Mail;
+/// Mail's state in the panel. Lists come from Mail's index; changes go through Apple Mail;
 /// the list updates when Mail's index changes.
 @MainActor
 final class MailModel: ObservableObject {
@@ -14,19 +14,18 @@ final class MailModel: ObservableObject {
     @Published var searchScope = SearchScope.mailbox { didSet { if oldValue != searchScope { reload() } } }
     @Published var favoriteMailboxKeys: Set<String> = []
     @Published var collapsedMailboxKeys: Set<String> = []
+    @Published var expandedSidebarGroupKeys: Set<String> = []
     let mailDefaults: UserDefaults?
     @Published private(set) var status: MailStore.Status = .noMail
     @Published private(set) var mailboxes: [MailMailbox] = []
     @Published var place: Place = .inbox { didSet { if oldValue != place { selectedID = nil; reload(); syncPlace() } } }
     @Published var search = "" { didSet { if oldValue != search { reloadSoon() } } }
-    /// The search field shows only while searching.
-    @Published var searching = false
     /// Web images in HTML mail. On by default; the ⋯ menu turns them off.
     @Published var loadsImages = UserDefaults.standard.object(forKey: "mailLoadsImages") as? Bool ?? true {
         didSet { UserDefaults.standard.set(loadsImages, forKey: "mailLoadsImages") }
     }
-    /// True while the mail window has the keyboard, so a message counts as read only when seen.
-    /// Coming back to the window counts the message on screen.
+    /// True while Mail is on screen in the panel, so a message counts as read only when seen.
+    /// Coming back to Mail counts the message on screen.
     var windowIsKey = false { didSet { if windowIsKey != oldValue { armRead() } } }
     private var readTimer: Task<Void, Never>?
     @Published private(set) var messages: [MailSummary] = [] {
@@ -97,7 +96,7 @@ final class MailModel: ObservableObject {
     @Published var composeNote: String?
     /// Set by the first Escape on a draft with text. The second discards it.
     var discardArmed = false
-    /// Counts refused new drafts, so a view that hid the open draft shows it again.
+    /// Counts refused new drafts and picks of the open one, so a view that hid it shows it again.
     @Published var draftNudge = 0
     /// A sent draft during its undo time. Undo brings it back; after the time it goes to Mail.
     @Published var pendingSend: Draft?
@@ -110,7 +109,6 @@ final class MailModel: ObservableObject {
     /// Drafts that did not go, oldest first. The banner offers Show.
     @Published var unsent: [Unsent] = [] { didSet { persistComposition() } }
     @Published var deliveries: [MailDelivery] = [] { didSet { persistComposition() } }
-    @Published var showsOutbox = false
     @Published var repairingSentCopies: Set<UUID> = []
     @Published var senders: [MailSendingIdentity] = []
     let draftStore: MailDraftStore?
@@ -174,7 +172,8 @@ final class MailModel: ObservableObject {
     private var bodyOrder: [Int64] = []
     private static let bodyLimit = 24
     /// Messages removed here whose change Mail has not written to its index yet. A refresh in the
-    /// meantime must not bring them back.
+    /// meantime must not bring them back. Each stays out while its change waits behind earlier
+    /// ones, such as a run of deletes, and for two minutes after it is done.
     private var removing: [Int64: Date] = [:]
     /// Mail actions run one after another, so quick deletes never race each other.
     private var actionChain: Task<Void, Never>?
@@ -188,6 +187,7 @@ final class MailModel: ObservableObject {
         self.mailDefaults = mailDefaults
         favoriteMailboxKeys = Set(mailDefaults?.stringArray(forKey: "mailFavoriteMailboxes") ?? [])
         collapsedMailboxKeys = Set(mailDefaults?.stringArray(forKey: "mailCollapsedMailboxes") ?? [])
+        expandedSidebarGroupKeys = Set(mailDefaults?.stringArray(forKey: "mailExpandedSidebarGroups") ?? [])
         self.draftStore = draftStore
         self.statusProvider = statusProvider
         self.setReadAction = setRead
@@ -390,7 +390,9 @@ final class MailModel: ObservableObject {
         generation += 1
         loadingMore = false; refreshing = false; reloading = true
         bodySearch = .off; bodyCursor = nil
-        olderOnServer = search.isEmpty && NativeMailCenter.activeEngine != nil
+        // A new list may hold older server mail until its first page says. The same list read
+        // again keeps its answer, so an empty mailbox does not flicker at every store change.
+        if !keepSelection { olderOnServer = search.isEmpty && NativeMailCenter.activeEngine != nil }
         let generation = self.generation
         updateMailRunning()
         loadWork = Task { @MainActor [weak self] in
@@ -680,7 +682,7 @@ final class MailModel: ObservableObject {
     }
 
     /// Queues a launcher selection. The lookup runs off the main thread, including when access
-    /// is still being checked on the first opening of the mail window.
+    /// is still being checked on the first opening of Mail.
     @discardableResult
     func open(_ rowID: Int64) -> Bool {
         if statusWork != nil { pendingOpen = rowID; return true }
@@ -822,7 +824,7 @@ final class MailModel: ObservableObject {
         if let account = mailbox(message.mailbox)?.accountID { changedAccounts.insert(account) }
         let index = messages.firstIndex { $0.rowID == message.rowID }
         if removes, let index {
-            removing[message.rowID] = Date()
+            removing[message.rowID] = .distantFuture
             messages.remove(at: index)
             // The next message shows and counts as read, as in Mail.
             select(messages.indices.contains(index) ? messages[index].rowID : messages.last?.rowID, byUser: false)
@@ -834,6 +836,7 @@ final class MailModel: ObservableObject {
             do {
                 guard backend == MailBackend.current else { throw LauncherError("The mail source changed. Nothing was changed.") }
                 try await action()
+                if removes { self?.removing[message.rowID] = Date() }
             }
             catch {
                 // After a failed change the index decides the row again.

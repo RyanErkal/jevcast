@@ -96,7 +96,7 @@ final class MailComposeTests: XCTestCase {
 
     func testAReplyKeyAfterShowingAnotherMessageBringsBackTheKeptReply() async throws {
         let model = try await rig.model(delay: 0)
-        let page = MailPage(mail: model, popOut: nil)
+        let page = MailPage(mail: model)
         let other = try XCTUnwrap(model.messages.last?.rowID)
         model.reply(all: false)
         model.draft?.body = "Kept"
@@ -111,7 +111,7 @@ final class MailComposeTests: XCTestCase {
 
     func testANewDraftShowsEvenWhenTheKeptOneWasHidden() async throws {
         let model = try await rig.model(delay: 0)
-        let page = MailPage(mail: model, popOut: nil)
+        let page = MailPage(mail: model)
         model.reply(all: false)
         page.show(try XCTUnwrap(model.messages.last?.rowID))
         XCTAssertTrue(page.draftHidden)
@@ -124,7 +124,7 @@ final class MailComposeTests: XCTestCase {
 
     func testCommandRRepliesInTheLauncherAndLettersType() async throws {
         let model = try await rig.model(delay: 0)
-        let page = MailPage(mail: model, popOut: nil)
+        let page = MailPage(mail: model)
         XCTAssertFalse(page.handleEvent(MailComposeRig.key("r")), "Plain R types in the filter")
         XCTAssertFalse(page.handleEvent(MailComposeRig.key("r", .shift)))
         XCTAssertNil(model.draft)
@@ -141,14 +141,14 @@ final class MailComposeTests: XCTestCase {
         XCTAssertEqual(page.footerHints.first?.key, "⌘↩")
         XCTAssertEqual(page.backTitle, "Discard")
         model.draft = nil
-        XCTAssertEqual(page.footerHints.map(\.key), ["⌘R", "⇧⌘F", "Space"])
+        XCTAssertEqual(page.footerHints.map(\.key), ["⌘R", "⇧⌘F", "Space", "⌘N"])
         XCTAssertEqual(page.footerHints.first?.title, "Reply")
         XCTAssertNil(page.backTitle)
     }
 
     func testCommandZUndoesASendButShiftCommandZDoesNot() async throws {
         let model = try await rig.model(delay: 30)
-        let page = MailPage(mail: model, popOut: nil)
+        let page = MailPage(mail: model)
         model.reply(all: false)
         model.draft?.body = "Hello"
         model.send()
@@ -159,29 +159,97 @@ final class MailComposeTests: XCTestCase {
         XCTAssertEqual(model.draft?.body, "Hello")
     }
 
-    func testMailWindowKeysReadCharacters() async throws {
-        let model = try await rig.model(delay: 30)
-        let window = MailWindow(model: model)
-        defer { window.window?.close() }
-        func event(_ character: String, _ flags: NSEvent.ModifierFlags = []) -> NSEvent {
-            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: window.window?.windowNumber ?? 0,
-                             context: nil, characters: character, charactersIgnoringModifiers: character, isARepeat: false, keyCode: 0)!
-        }
-        XCTAssertTrue(window.handle(event("r")), "Plain R replies in the mail window, whatever the key code")
-        XCTAssertEqual(model.draft?.mode, .reply(all: false))
-        model.draft?.body = "Hi"
-        model.send()
-        XCTAssertFalse(window.handle(event("Z", [.command, .shift])), "⇧⌘Z is not Undo Send")
-        XCTAssertNotNil(model.pendingSend)
-        XCTAssertTrue(window.handle(event("z", .command)))
-        XCTAssertEqual(model.draft?.body, "Hi")
+    func testCommandNWritesANewMessageInThePanel() async throws {
+        let model = try await rig.model(delay: 0)
+        let page = MailPage(mail: model)
+        XCTAssertFalse(page.handleEvent(MailComposeRig.key("n")), "Plain N types in the filter")
+        XCTAssertFalse(page.handleEvent(MailComposeRig.key("n", [.command, .shift])))
+        XCTAssertNil(model.draft)
+        XCTAssertTrue(page.handleEvent(MailComposeRig.key("n", .command)))
+        XCTAssertEqual(model.draft?.mode, .new)
+        XCTAssertTrue(page.isTyping, "The composer opens in the panel and takes the keys")
+    }
+
+    // MARK: Panel workspace
+
+    func testReturnAndDoubleClickReadInThePanel() async throws {
+        let model = try await rig.model(delay: 0)
+        let page = MailPage(mail: model)
+        XCTAssertFalse(page.canPopOut, "Mail has no window of its own")
+        XCTAssertEqual(page.openTitle, "Read")
+        XCTAssertTrue(page.handle(.open(shift: false)))
+        XCTAssertTrue(page.expanded, "Return reads the message across the panel")
+        XCTAssertTrue(page.back())
+        XCTAssertFalse(page.expanded, "Escape shows the sidebar and list again")
+        let other = try XCTUnwrap(model.messages.last?.rowID)
+        page.read(other)
+        XCTAssertEqual(model.selectedID, other, "A double click reads the row it hit")
+        XCTAssertTrue(page.expanded)
+    }
+
+    func testPickingAMailboxKeepsTheOpenDraftOnScreen() async throws {
+        let model = try await rig.model(delay: 0)
+        let page = MailPage(mail: model)
+        model.compose(to: "ann@example.com")
+        model.draft?.body = "Half written"
+        model.place = .sent
+        model.place = .drafts
+        XCTAssertEqual(model.draft?.body, "Half written", "A mailbox change never closes the draft")
+        XCTAssertTrue(page.composing, "The composer stays beside the list")
+        model.place = .outbox
+        XCTAssertEqual(model.draft?.body, "Half written", "Outbox shows beside the draft")
+        XCTAssertTrue(page.composing)
+    }
+
+    func testOutboxHasNoMessageKeyboardActionsOrReadHint() async throws {
+        let model = try await rig.model(delay: 0)
+        let page = MailPage(mail: model)
+        model.place = .outbox
+        // A previously selected message may remain until the new list finishes loading.
+        model.select(try XCTUnwrap(model.messages.last?.rowID), byUser: false)
+        XCTAssertEqual(page.openTitle, "")
+        XCTAssertEqual(page.footerHints.map(\.key), ["⌘N"])
+        XCTAssertFalse(page.handleEvent(MailComposeRig.key("r", .command)))
+        XCTAssertFalse(page.handleEvent(MailComposeRig.key(" ")))
+        XCTAssertNil(model.draft)
+        page.read()
+        XCTAssertFalse(page.expanded)
+    }
+
+    func testClickingAnotherMessageKeepsTheDraftAside() async throws {
+        let model = try await rig.model(delay: 0)
+        let page = MailPage(mail: model)
+        let other = try XCTUnwrap(model.messages.last?.rowID)
+        model.reply(all: false)
+        model.draft?.body = "Kept"
+        page.pick(other)
+        XCTAssertEqual(model.selectedID, other)
+        XCTAssertTrue(page.draftHidden)
+        XCTAssertEqual(model.banner, "Your unsent reply is kept. Press Escape to go back to it.")
+        XCTAssertTrue(page.back())
+        XCTAssertFalse(page.draftHidden, "Escape brings the kept reply back")
+        XCTAssertEqual(model.draft?.body, "Kept")
+    }
+
+    func testPickingTheOpenDraftInDraftsShowsItAsItIs() async throws {
+        let model = try await rig.model(delay: 0)
+        let page = MailPage(mail: model)
+        model.compose(to: "ann@example.com")
+        model.draft?.body = "Kept"
+        page.pick(try XCTUnwrap(model.messages.last?.rowID))
+        XCTAssertTrue(page.draftHidden)
+        let open = try XCTUnwrap(model.draft)
+        model.restoreSavedDraft(open)
+        XCTAssertFalse(page.draftHidden, "The kept draft shows again")
+        XCTAssertEqual(model.draft?.id, open.id)
+        XCTAssertEqual(model.draft?.body, "Kept")
     }
 
     // MARK: Escape
 
     func testEscapeAsksTwiceForAnyDraftWithText() async throws {
         let model = try await rig.model(delay: 0)
-        let page = MailPage(mail: model, popOut: nil)
+        let page = MailPage(mail: model)
 
         model.compose(to: "ann@example.com")
         XCTAssertTrue(page.back())

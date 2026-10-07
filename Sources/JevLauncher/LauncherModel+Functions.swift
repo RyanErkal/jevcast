@@ -100,7 +100,8 @@ extension LauncherModel {
             return LauncherResult(id: entry.id, title: entry.title, detail: "", symbol: entry.symbol, action: .route(Self.sourceRoutes[value] ?? entry.title.lowercased()), score: 0)
         case "view":
             if value == "mail" {
-                return verbRow(entry, "Open Mail") { [weak self] in self?.openMail?(nil); return nil }
+                // Mail opens in the panel, so the panel stays open for it.
+                return verbRow(entry, "Open Mail", after: .keepOpen) { [weak self] in self?.openMail?(nil); return nil }
             }
             // Without views, each opens its list in the launcher.
             return LauncherResult(id: entry.id, title: entry.title, detail: "", symbol: entry.symbol, action: .route(Self.viewRoutes[value] ?? value), score: 0)
@@ -113,9 +114,10 @@ extension LauncherModel {
     private static let viewRoutes = ["calendar": "calendar", "tasks": "scheduled briefs", "clipboard": "clip ", "cleanup": "clean up", "tailnet": "tailnet"]
     private static let sourceRoutes = ["reminders": "reminders ", "scheduled": "scheduled tasks", "taskRuns": "task results", "contacts": "contacts ", "tabs": "tabs ", "history": "browser history ", "help": "help"]
 
-    private func verbRow(_ entry: FunctionEntry, _ title: String, run: @escaping @MainActor () async throws -> String?) -> LauncherResult {
+    private func verbRow(_ entry: FunctionEntry, _ title: String, after: Verb.After = .closeKeepFocus,
+                         run: @escaping @MainActor () async throws -> String?) -> LauncherResult {
         LauncherResult(id: entry.id, title: entry.title, detail: "", symbol: entry.symbol,
-                       action: .thing(Thing(verbs: [Verb(title: title, run: run)], twoLine: false)), score: 0)
+                       action: .thing(Thing(verbs: [Verb(title: title, after: after, run: run)], twoLine: false)), score: 0)
     }
 }
 

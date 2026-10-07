@@ -3,7 +3,7 @@ import LauncherCore
 
 /// Writing a reply, forward, or new message, laid out like Apple Mail's composer: To, Cc, Bcc,
 /// Subject, and From, a formatting bar, your text, and below it the original exactly as it is
-/// sent. It fills the reading pane in the mail window and in the launcher panel. Send looks
+/// sent. It fills the reading pane in the launcher panel. Send looks
 /// dimmed until the draft can go; pressing it then says what is missing.
 struct ComposeView: View {
     @ObservedObject var model: MailModel
@@ -34,8 +34,7 @@ struct ComposeView: View {
                 Divider()
                 composeTools(current)
                 if let reason = current.serverDraftBlockedReason {
-                    Label(reason, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
-                        .padding(.horizontal, 14).padding(.vertical, 6)
+                    MailServerDraftStatusRow(coordinator: model.serverDrafts, draft: current, reason: reason)
                 }
                 if !current.attachments.isEmpty { attachments(current) }
                 Divider()
@@ -45,7 +44,6 @@ struct ComposeView: View {
             }
             .background(Color(nsColor: .textBackgroundColor))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .sheet(isPresented: $model.showsOutbox) { MailDeliveryView(model: model) }
             .alert("Add a Link to Selected Text", isPresented: $showsLink) {
                 TextField("https://", text: $link)
                 Button("Cancel", role: .cancel) {}
@@ -143,15 +141,15 @@ struct ComposeView: View {
     private func composeTools(_ draft: MailModel.Draft) -> some View {
         HStack(spacing: 10) {
             if native(draft) {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    MailFormattingBar(commands: editorCommands, addLink: { link = ""; showsLink = true },
-                                      insertImage: { model.pickAttachments(inline: true) }, attach: { model.pickAttachments() })
-                }
+                MailFormattingBar(commands: editorCommands, addLink: { link = ""; showsLink = true },
+                                  insertImage: { model.pickAttachments(inline: true) }, attach: { model.pickAttachments() })
+                    .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Button { model.pickAttachments() } label: { Image(systemName: "paperclip") }.help("Attach files")
             }
             Spacer(minLength: 0)
-            Button("Outbox") { model.showsOutbox = true }.font(.caption)
+            // Outbox shows in the list column, beside this draft.
+            Button("Outbox") { model.place = .outbox }.font(.caption)
         }
         .buttonStyle(.borderless).padding(.horizontal, Self.gutter).padding(.vertical, 6)
     }

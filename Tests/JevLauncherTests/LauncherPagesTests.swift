@@ -28,6 +28,38 @@ final class LauncherPagesTests: XCTestCase {
         XCTAssertEqual(model.query, "clip")
     }
 
+    @MainActor func testMailStaysInThePanelWithoutAWindow() {
+        let suite = "JevLauncherTests." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = Preferences(defaults: defaults)
+        preferences.voiceEnabled = false; preferences.jevEnabled = false; preferences.fileFolders = []
+        let model = LauncherModel(preferences: preferences, catalogue: AppCatalogue(loadCache: false),
+                                  keys: JevKeyCache(key: nil), clipboard: ClipboardHistory(pasteboard: FakePasteboard()))
+        model.makePage = { [unowned model] id in LauncherPages.make(id, model: model, links: .init(), snapshot: true) }
+        model.begin(); defer { model.end() }
+        model.showView(.mail, fromHyper: true)
+        let page = model.page as? MailPage
+        XCTAssertNotNil(page)
+        XCTAssertEqual(page?.canPopOut, false, "No Open Window hint and no ⌘O for Mail")
+        let commandO = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: 0, context: nil,
+                                        characters: "o", charactersIgnoringModifiers: "o", isARepeat: false, keyCode: 31)!
+        XCTAssertTrue(model.handleViewKey(commandO))
+        XCTAssertEqual(model.mode, .view(.mail), "⌘O leaves Mail in the panel")
+    }
+
+    func testMailColumnsFitEveryPanelWidth() {
+        for width: CGFloat in [860, 980, 1320] {
+            for split in MailReading.Split.allCases {
+                let sidebar = MailPanelLayout.sidebarWidth(width)
+                let list = MailPanelLayout.listWidth(width, sidebar: sidebar, split: split)
+                XCTAssertGreaterThanOrEqual(sidebar, 190)
+                XCTAssertGreaterThanOrEqual(list, 240)
+                XCTAssertGreaterThanOrEqual(width - sidebar - list - 2, 420, "The reader keeps room at \(width) (\(split))")
+            }
+        }
+    }
+
     @MainActor private func makeModel(_ page: SpyPage) -> (LauncherModel, () -> Void) {
         let suite = "JevLauncherTests." + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!
@@ -159,34 +191,40 @@ final class LauncherPagesTests: XCTestCase {
             XCTAssertNotNil(NSImage(systemSymbolName: view.symbol, accessibilityDescription: nil), "\(view) uses missing symbol \(view.symbol)")
         }
     }
-    @MainActor func testCalendarStartsOnWeekAndArrowsSwitchViews() {
+    @MainActor func testCalendarStartsOnThreeDaysAndArrowsSwitchViews() {
         let page = SpyPage()
         let (model, done) = makeModel(page); defer { done() }
         let list = SourcePage(.calendar, source: nil, model: model, hasDetail: true, emptyText: "")
         let calendar = CalendarPage(list: list, readsEvents: false)
         calendar.opened(); defer { calendar.closed(handingOff: false) }
-        XCTAssertEqual(calendar.mode, CalendarPage.Mode.week)
-        XCTAssertEqual(calendar.days.count, 7)
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let day = { (offset: Int) in cal.date(byAdding: .day, value: offset, to: today)! }
+        XCTAssertEqual(calendar.mode, CalendarPage.Mode.threeDays)
+        XCTAssertEqual(calendar.days, [today, day(1), day(2)], "3 Days starts today.")
+        XCTAssertTrue(calendar.handle(.down))
+        XCTAssertEqual(calendar.days.first, day(3), "↓ moves three days.")
+        XCTAssertTrue(calendar.handle(.up))
+        XCTAssertEqual(calendar.days.first, today, "↑ moves back three days.")
         calendar.setMode(.month)
         XCTAssertEqual(calendar.days.count % 7, 0, "The month shows whole weeks.")
         XCTAssertTrue(calendar.days.count >= 28)
         // Demo events: four today, and an all-day event tomorrow that ends at midnight and stays on its own day.
-        let today = Calendar.current.startOfDay(for: Date())
-        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today)!
-        let dayAfter = Calendar.current.date(byAdding: .day, value: 1, to: tomorrow)!
-        if calendar.days.contains(tomorrow) { XCTAssertEqual(calendar.events(on: tomorrow).map(\.title), ["Holiday"]) }
-        if calendar.days.contains(dayAfter) { XCTAssertFalse(calendar.events(on: dayAfter).contains { $0.title == "Holiday" }) }
+        if calendar.days.contains(day(1)) { XCTAssertEqual(calendar.events(on: day(1)).map(\.title), ["Holiday"]) }
+        if calendar.days.contains(day(2)) { XCTAssertFalse(calendar.events(on: day(2)).contains { $0.title == "Holiday" }) }
         XCTAssertEqual(calendar.events(on: today).count, 4)
         calendar.filter("gym")
         XCTAssertEqual(calendar.events(on: today).map(\.title), ["Gym"])
         calendar.filter("")
-        XCTAssertTrue(calendar.handle(.right)); XCTAssertEqual(calendar.mode, CalendarPage.Mode.week)
-        XCTAssertEqual(calendar.days.count, 7)
+        XCTAssertTrue(calendar.handle(.right)); XCTAssertEqual(calendar.mode, CalendarPage.Mode.list)
         XCTAssertTrue(calendar.handle(.right)); XCTAssertEqual(calendar.mode, CalendarPage.Mode.day)
         XCTAssertEqual(calendar.days.count, 1)
-        XCTAssertTrue(calendar.handle(.right)); XCTAssertEqual(calendar.mode, CalendarPage.Mode.list)
+        XCTAssertTrue(calendar.handle(.right)); XCTAssertEqual(calendar.mode, CalendarPage.Mode.threeDays)
+        XCTAssertEqual(calendar.days.count, 3)
+        XCTAssertTrue(calendar.handle(.right)); XCTAssertEqual(calendar.mode, CalendarPage.Mode.week)
+        XCTAssertEqual(calendar.days.count, 7)
         XCTAssertTrue(calendar.handle(.right)); XCTAssertEqual(calendar.mode, CalendarPage.Mode.month)
-        XCTAssertTrue(calendar.handle(.left)); XCTAssertEqual(calendar.mode, CalendarPage.Mode.list)
+        XCTAssertTrue(calendar.handle(.left)); XCTAssertEqual(calendar.mode, CalendarPage.Mode.week)
         calendar.setMode(.month)
         let start = calendar.days[10]
         XCTAssertTrue(calendar.handle(.down))

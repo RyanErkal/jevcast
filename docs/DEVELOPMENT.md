@@ -14,7 +14,7 @@ The package has three targets.
   - `LauncherModel.swift`: builds, ranks, and runs results.
   - `LauncherPanel.swift`, `LauncherView.swift`, `ResultList.swift`: the panel. It is a non-activating key panel, so typing works without activating the app.
   - `Clipboard*.swift`, `ClipStyle.swift`, `ClipThumbnails.swift`, `DemoClipboard.swift`: clipboard history. `ClipboardHistory` polls the change count on the main thread; `ClipboardWorker` (an actor) reads large data, hashes, encodes, makes thumbnails, and writes `ClipboardStore` files in `~/Library/Application Support/Jevcast/Clipboard` (folder 0700, files 0600: `index.json` plus one folder of blobs per entry). `ClipboardCapture` sorts a read into an entry and finds text in images with Vision. `ClipboardPage`, `ClipboardPageView`, `ClipboardPreview`, and `ClipboardActions` are the view, its preview, and the ⌘K menu. Pasteboard access goes through `PasteboardReading`, so tests use a fake.
-  - `LauncherPages.swift`, `SourcePage.swift`, `PageSources.swift`, `MailPage.swift`: views that fill the panel in place of the results: Mail, Calendar, Tasks, Clipboard, Clean Up, and Terminal. The search field filters the view, Escape goes back one level (a view opened with a Hyper key closes the launcher at its top level, and the footer says Close), and ⌘O opens Mail in its own window. The panel grows for a view, up to 1320×880 and within the screen.
+  - `LauncherPages.swift`, `SourcePage.swift`, `PageSources.swift`, `MailPage.swift`: views that fill the panel in place of the results: Mail, Calendar, Tasks, Clipboard, Clean Up, and Terminal. The search field filters the view, Escape goes back one level (a view opened with a Hyper key closes the launcher at its top level, and the footer says Close), and ⌘O opens Calendar or Tasks in its own app or window. Mail has no window of its own and no ⌘O. The panel grows for a view, up to 1320×880 and within the screen.
   - `FileSearch.swift`: Spotlight queries inside the configured folders.
   - `WindowManager.swift`: Accessibility window moves, snapping, and undo.
   - `LauncherModel+Commands.swift`: command, custom-command, and port rows.
@@ -37,7 +37,7 @@ The package has three targets.
   - `BrowserSources.swift`, `FrontContext.swift`: tabs, history, and "this". `BrowserTabs.swift` in LauncherCore holds the fixed AppleScript for each browser.
   - `AIWritingService.swift`, `LauncherModel+AIWriting.swift`, `SettingsAIWriting.swift`, `AIWritingAnswerView.swift`: AI writing (Ask AI, selected text, mail, and dictation clean-up) through OpenRouter, the context switches, and the activity log. `AIWritingPrompt.swift` in LauncherCore builds each request. `AIWritingStorageKeys.swift` holds the stored names; they keep the old "luna" and "quill" spellings so settings, keys, and history survive the renames.
   - `TerminalPage.swift`, `TerminalView.swift`, `GhosttyRuntime.swift`: the Terminal view (Hyper–T). `GhosttyRuntime` is the one libghostty app and its callbacks; `TerminalView` is one surface running the login shell, with keys, mouse, and clipboard passed to libghostty. `TerminalPage` puts it in the panel: `LauncherPage.inputView` gives it the keys and `hasFilter` hides the search field; Escape still closes the view. The app delegate owns the surface, so the shell keeps running while the launcher is closed, and it is freed when the shell exits. `TerminalStyle.swift` writes the launcher look as a Ghostty config file (transparent background, margins, accent bar cursor, text and selection colours per appearance) that loads after the user's Ghostty config; `GhosttyRuntime` reloads it when the appearance changes. `ShellFolder.swift` reads the shell's folder for the bar from the process table (the child of Jevcast's `/usr/bin/login`) once a second while the view shows. The view is 35% smaller than other views (`LauncherPanel.viewSize(for:)`). It has no input method support yet.
-  - `Mail*.swift`: the mail window. `MailStore.swift` reads Apple Mail's index and `.emlx` files through one read-only connection on a serial queue, with cached prepared statements. Lists use keyset pages of 200 (`date_received DESC, ROWID DESC`), one index walk per mailbox merged with `UNION ALL`; search terms are matched once against the subject, address, and summary tables. `MailPagingTests` builds a 100k-message synthetic index, checks query plans with `EXPLAIN QUERY PLAN`, and asserts timings (skipped under a sanitizer). `MailListParts.swift` holds the shared list, mailbox menu, and closed-Mail note; `MailActions.swift` changes mail through Apple Mail. `MIMEMessage.swift` parses messages, `MailIndex.swift` holds mailbox and message types, and `MailScripts.swift` plus `MailScripts+Compose.swift` hold fixed AppleScript.
+  - `Mail*.swift`: Mail in the launcher panel. `MailPage.swift` holds the page and its keys; `MailWorkspace.swift` lays out the sidebar, list, and reader or composer, with column widths in `MailPanelLayout` that fit every panel width from 860 to 1320 points. `MailStore.swift` reads Apple Mail's index and `.emlx` files through one read-only connection on a serial queue, with cached prepared statements. Lists use keyset pages of 200 (`date_received DESC, ROWID DESC`), one index walk per mailbox merged with `UNION ALL`; search terms are matched once against the subject, address, and summary tables. `MailPagingTests` builds a 100k-message synthetic index, checks query plans with `EXPLAIN QUERY PLAN`, and asserts timings (skipped under a sanitizer). `MailListParts.swift` holds the shared list, mailbox menu, and closed-Mail note; `MailActions.swift` changes mail through Apple Mail. `MIMEMessage.swift` parses messages, `MailIndex.swift` holds mailbox and message types, and `MailScripts.swift` plus `MailScripts+Compose.swift` hold fixed AppleScript.
   - `SQLiteReader.swift`: a read-only SQLite reader with bound values.
   - `NativeMailCenter.swift`, `SettingsMailAccounts.swift`: Jevcast's own mail accounts. The mail source (`MailBackend`: Apple Mail or Jevcast accounts), the account list in `~/Library/Application Support/Jevcast/Mail/accounts.json`, app passwords in the Keychain (`mail-<account id>`), and the running `NativeMailEngine`. With Jevcast accounts, `MailStore.status()` returns the native store and `MailActions` sends each change to the engine instead of Apple Mail.
   - `LauncherCore/NativeMail/`: the engine, with no external dependencies. `IMAPParser`, `IMAPFramer`, `IMAPCommand`, `ModifiedUTF7`, and `IMAPSequenceSet` read and write IMAP; `IMAPClient` runs one command at a time on one connection (with IDLE in `IMAPClient+Idle.swift`); `SMTPClient` sends; `MailTransport` wraps `URLSessionStreamTask`, which can start TLS on an open connection for STARTTLS. `MailComposer` writes RFC 5322 messages, and `MailReplies` builds replies and forwards. `NativeMailStore` writes a SQLite database with the tables and columns of Apple Mail's `Envelope Index` that `MailStore` reads, and `.emlx` bodies in Mail's layout, so one reader serves both. `MailAccountSync` keeps one account in step on three connections (sync, changes, IDLE). It reads only the newest mail of the inbox and of opened folders, in UID ranges sized for the server's MESSAGELIMIT, and older mail only when the list asks (`loadOlder`); `MailSyncPolicy` holds its batch sizes and intervals. `NativeMailEngine` runs every account and makes changes locally first. `MailProvider` holds the Yahoo, iCloud, Gmail, and Outlook servers. `FakeIMAPServer` and `FakeSMTPServer` in the tests stand in for real servers.
@@ -68,13 +68,20 @@ Delete moves to a unique Trash folder. There is no purge action. Moves never use
 mailbox-wide EXPUNGE. A refused sign-in stops background sync until the user
 updates the sign-in. A queued action refuses a changed mail source.
 
-Demo snapshots include `mail-workspace`, `mail-workspace-compact`, `mail-workspace-drafts`, `mail-workspace-search`, `mail-compose`, `mail-outbox`, and `mail-add-account`, and the Automations window at its normal size, at 980 points wide, and at its minimum size (`automations-*`).
+Demo snapshots include `mail-workspace` (the panel at 1320 points), `mail-workspace-compact` (980 points), `mail-workspace-sidebar-hidden`, `mail-workspace-drafts`, `mail-workspace-search`, `mail-outbox`, `mail-compose`, `mail-reply`, and `mail-add-account`, and the Automations window at its normal size, at 980 points wide, and at its minimum size (`automations-*`).
 They contain invented addresses and content, without account or credential reads.
 AppleScript compilation and these renders are separate from live Mail proof.
-Add `--mail-only` to `--snapshot-ui <dir> --demo` to render only the eight Mail
-fixtures. This path does not start a launcher session or read desktop context.
+Add `--mail-only` to `--snapshot-ui <dir> --demo` to render only the fifteen Mail
+fixtures. The `mail-workspace*`, `mail-outbox`, and `mail-draft-*` fixtures render `MailPage` content and its footer at the panel's view size, with an invented model. This path does not start a launcher session or read desktop context.
+`mail-workspace-light` checks the light appearance. `mail-workspace-folders-expanded`
+shows Gmail's extra folders beside the flat main folders. Sidebar demo counts include
+`33,007`, so the full badge can be checked at compact panel widths.
+`mail-draft-signin-blocked` and `mail-draft-review-blocked` show the draft recovery
+row with invented failures. After fixing a refused sign-in, choose Save to Drafts
+Again to retry that draft's server save. This action does not send. Uncertain or
+unclassified server changes stay blocked and require review.
 
-The Mail window has an account and folder sidebar, favourites, and unified Inbox,
+The Mail view in the panel has an account and folder sidebar, favourites, and unified Inbox,
 All Mail, Unread, Flagged, Drafts, Sent, and Outbox views. All Mail and Unread cover
 non-Trash/non-Junk folders and remove duplicate message copies. Native accounts
 retain every selectable server folder. Opening a folder syncs its newest headers;
@@ -95,9 +102,12 @@ Preview, Open, Save, or Forward action.
 
 ## Calendar
 
-Calendar opens in Week with a scrollable hourly grid. Day uses the same grid;
-Month and List remain available. Click an event to read its description, meeting
-notes, location, organizer, guests, and attachments. Join Google Meet opens the
+Calendar opens in 3 Days: today and the next two days in a scrollable hourly grid.
+Day and Week use the same grid; Month and List remain available. ← and → switch
+views. The arrows beside the month, or ↑ and ↓, move back and forward by the days
+on screen, and Today returns to today. Click an event to show its
+time, description, meeting notes, location, organizer, guests, and attachments
+beside the calendar; × or Escape closes it. Join Google Meet opens the
 event's meeting link in the system browser. Notes come from the event description.
 Linked documents open in the browser. Jevcast does not record meetings or generate notes.
 
@@ -125,9 +135,9 @@ inject fake HTTP responses and account checks inject in-memory credentials.
 `JEVCAST_CALENDAR_OFFLINE=1` blocks live Calendar traffic and sign-in.
 `JEVCAST_MAIL_OFFLINE=1` and snapshot mode also block it.
 
-`--snapshot-ui <dir> --demo --calendar-only` renders Week, Day, Month, event
-details, a compact Week, and the Google sign-in form with invented events and
-fresh preferences. It does not read EventKit or Keychain credentials.
+`--snapshot-ui <dir> --demo --calendar-only` renders 3 Days (also with event
+details, in light appearance, and with details at 860 points), Week, Day, Month,
+and the Google sign-in form with invented events and fresh preferences. It does not read EventKit or Keychain credentials.
 
 ## Rename the app
 

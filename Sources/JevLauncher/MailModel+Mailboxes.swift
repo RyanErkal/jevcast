@@ -20,8 +20,13 @@ extension MailModel {
         if expanded { collapsedMailboxKeys.remove(key) } else { collapsedMailboxKeys.insert(key) }
         mailDefaults?.set(collapsedMailboxKeys.sorted(), forKey: "mailCollapsedMailboxes")
     }
+    func setSidebarGroupExpanded(_ key: String, _ expanded: Bool) {
+        if expanded { expandedSidebarGroupKeys.insert(key) } else { expandedSidebarGroupKeys.remove(key) }
+        mailDefaults?.set(expandedSidebarGroupKeys.sorted(), forKey: "mailExpandedSidebarGroups")
+    }
     func restoreSavedDraft(_ saved: Draft) {
-        guard startDraft(saved) else { return }
+        // The open draft, picked again: it shows as it is, with no new recipients or sender.
+        if draft?.id == saved.id { draftNudge += 1 } else if !startDraft(saved) { return }
         unsent.removeAll { $0.id == saved.id }
     }
 }

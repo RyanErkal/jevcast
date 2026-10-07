@@ -15,7 +15,7 @@ struct PageFooter: View {
             Spacer(minLength: 10)
             ForEach(page.footerHints, id: \.key) { hint in KeyHint(hint.title, hint.key) }
             // While a text box in the view has the keys, Return types there.
-            if page.hasFilter && !page.isTyping { KeyHint(page.openTitle, "↩") }
+            if page.hasFilter && !page.isTyping && !page.openTitle.isEmpty { KeyHint(page.openTitle, "↩") }
             KeyHint(page.backTitle ?? (escapeClosesLauncher ? "Close" : "Back"), "esc")
             if page.canPopOut { KeyHint("Open Window", "⌘O") }
         }

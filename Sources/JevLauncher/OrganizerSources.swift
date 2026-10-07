@@ -190,7 +190,7 @@ final class RemindersSource: ThingSource {
 @MainActor
 final class ContactsSource: ThingSource {
     let section = "Contacts"
-    /// Opens the Jevcast compose window, or nil to use the default mail app.
+    /// Writes to the address in Jevcast's Mail view, or nil to use the default mail app.
     private let compose: ((String) -> Void)?
     init(compose: ((String) -> Void)? = nil) { self.compose = compose }
 
@@ -234,7 +234,8 @@ final class ContactsSource: ThingSource {
     private func row(_ person: Person, score: Double) -> LauncherResult {
         var verbs: [Verb] = []
         for email in person.emails.prefix(3) {
-            verbs.append(Verb(title: "Email " + email) { [compose] in
+            // Jevcast's composer opens in the panel, so the panel stays open for it.
+            verbs.append(Verb(title: "Email " + email, after: compose == nil ? .closeKeepFocus : .keepOpen) { [compose] in
                 if let compose { compose(email) } else if let url = URL(string: "mailto:" + email) { Frontmost.open(url) }
                 return nil
             })

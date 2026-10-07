@@ -7,7 +7,8 @@ import SwiftUI
 /// Local Calendar and opt-in Google Calendar. Data is copied into values before drawing.
 @MainActor
 final class CalendarPage: ObservableObject, LauncherPage {
-    enum Mode: String, CaseIterable { case month = "Month", week = "Week", day = "Day", list = "List" }
+    /// In ← and → order. Calendar opens on 3 Days.
+    enum Mode: String, CaseIterable { case day = "Day", threeDays = "3 Days", week = "Week", month = "Month", list = "List" }
     enum Source: String { case mac = "On This Mac", google = "Google" }
     struct Event: Identifiable, Equatable, Sendable {
         let id: String
@@ -32,7 +33,7 @@ final class CalendarPage: ObservableObject, LauncherPage {
     private let list: SourcePage
     /// False for snapshot runs, which never read real events.
     private let readsEvents: Bool
-    @Published private(set) var mode: Mode = .week
+    @Published private(set) var mode: Mode = .threeDays
     @Published private(set) var source: Source = .mac
     @Published private(set) var selectedEvent: Event?
     @Published private(set) var loading = false
@@ -110,7 +111,7 @@ final class CalendarPage: ObservableObject, LauncherPage {
     }
 
     func opened() {
-        mode = .week; anchor = Date(); listOpened = false; selectedEvent = nil
+        mode = .threeDays; anchor = Date(); listOpened = false; selectedEvent = nil
         if readsEvents { Self.watchStore() }
         load()
         // Changes made in Calendar show while the view is open. A burst of changes reloads once.
@@ -174,19 +175,27 @@ final class CalendarPage: ObservableObject, LauncherPage {
         let index = all.firstIndex(of: mode) ?? 0
         setMode(all[(index + delta + all.count) % all.count])
     }
-    /// The previous or next month or week.
+    /// The previous or next day, three days, week, or month.
     func step(_ delta: Int) {
         selectedEvent = nil
-        anchor = calendar.date(byAdding: mode == .day ? .day : mode == .month ? .month : .weekOfYear, value: delta, to: anchor) ?? anchor
+        let (unit, size): (Calendar.Component, Int) = switch mode {
+        case .day: (.day, 1)
+        case .threeDays: (.day, 3)
+        case .month: (.month, 1)
+        case .week, .list: (.weekOfYear, 1)
+        }
+        anchor = calendar.date(byAdding: unit, value: delta * size, to: anchor) ?? anchor
         load()
     }
     func today() { anchor = Date(); selectedEvent = nil; load() }
 
-    /// The days on screen: whole weeks covering the month, or the one week.
+    /// The days on screen: whole weeks covering the month, the one week, or days from the anchor.
     private func computeDays() -> [Date] {
         let range: DateInterval?
-        if mode == .day { range = calendar.dateInterval(of: .day, for: anchor) }
-        else if mode == .week || mode == .list {
+        if mode == .day || mode == .threeDays {
+            let first = calendar.startOfDay(for: anchor)
+            range = calendar.date(byAdding: .day, value: mode == .day ? 1 : 3, to: first).map { DateInterval(start: first, end: $0) }
+        } else if mode == .week || mode == .list {
             range = calendar.dateInterval(of: .weekOfYear, for: anchor)
         } else if let month = calendar.dateInterval(of: .month, for: anchor),
                   let first = calendar.dateInterval(of: .weekOfYear, for: month.start),
@@ -202,12 +211,13 @@ final class CalendarPage: ObservableObject, LauncherPage {
         }
         return result
     }
+    /// The month on screen, or both months when the days cross into the next one.
     var title: String {
-        if mode == .day { return anchor.formatted(.dateTime.weekday(.wide).day().month(.wide).year()) }
-        if mode == .week || mode == .list, let first = days.first, let last = days.last {
-            return first.formatted(.dateTime.day().month(.abbreviated)) + " – " + last.formatted(.dateTime.day().month(.abbreviated).year())
-        }
-        return anchor.formatted(.dateTime.month(.wide).year())
+        guard mode != .month, let first = days.first, let last = days.last,
+              !calendar.isDate(first, equalTo: last, toGranularity: .month) else { return (mode == .month ? anchor : days.first ?? anchor).formatted(.dateTime.month(.wide).year()) }
+        let sameYear = calendar.isDate(first, equalTo: last, toGranularity: .year)
+        return first.formatted(sameYear ? .dateTime.month(.abbreviated) : .dateTime.month(.abbreviated).year())
+            + " – " + last.formatted(.dateTime.month(.abbreviated).year())
     }
     func events(on day: Date) -> [Event] { byDay[day] ?? [] }
     /// Puts each event on every day it covers, with the filter applied. One pass over the events.
@@ -336,7 +346,8 @@ final class CalendarPage: ObservableObject, LauncherPage {
             (0, 9, 30, "Team stand-up", .blue, false), (0, 13, 60, "Lunch with Sam", .orange, false),
             (0, 16, 45, "Design review", .purple, false), (0, 18, 30, "Gym", .green, false),
             (1, 0, 0, "Holiday", .red, true), (2, 11, 60, "Dentist", .teal, false),
-            (-2, 10, 90, "Workshop", .pink, false), (-1, 15, 30, "Call with Alex", .blue, false)
+            (-2, 10, 90, "Workshop", .pink, false), (-1, 15, 30, "Call with Alex", .blue, false),
+            (2, 11, 45, "Planning", .indigo, false)
         ]
         return items.enumerated().compactMap { index, item in
             guard let day = cal.date(byAdding: .day, value: item.0, to: today),

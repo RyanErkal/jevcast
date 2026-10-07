@@ -1,7 +1,7 @@
 import AppKit
 import LauncherCore
 
-/// Where the mail window reads mail: Apple Mail's own store, or the accounts Jevcast syncs itself.
+/// Where Mail reads mail: Apple Mail's own store, or the accounts Jevcast syncs itself.
 enum MailBackend: String, CaseIterable, Identifiable {
     case appleMail, jevcast
     static let key = "mailBackend"

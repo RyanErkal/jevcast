@@ -16,7 +16,8 @@ final class MailServerDraftCoordinator: ObservableObject {
         var accountID: String?
         var reference: MailServerDraftReference?
         var previous: MailServerDraftReference?
-        var blockedReason: String?
+        private(set) var blockedReason: String?
+        private(set) var blockKind: MailModel.Draft.ServerDraftBlockKind?
         var uncertain = false
         var stopped = false
         var lastFields: MailModel.Draft.Fields?
@@ -30,7 +31,22 @@ final class MailServerDraftCoordinator: ObservableObject {
             reference = draft.serverDraftReference
             previous = draft.previousServerDraftReference
             blockedReason = draft.serverDraftBlockedReason
+            blockKind = blockedReason == nil ? nil : draft.serverDraftBlockKind
             uncertain = draft.serverDraftAcknowledgementUncertain == true
+        }
+
+        /// Sets or clears the block. Only a caller that knows the exact cause may name a kind, so
+        /// every other block, including one replacing a refused sign-in, cannot be retried.
+        func block(_ reason: String?, kind: MailModel.Draft.ServerDraftBlockKind? = nil) {
+            blockedReason = reason
+            blockKind = reason == nil ? nil : kind
+        }
+
+        /// A refused sign-in happens before APPEND or removal, so it leaves no server state to
+        /// review. Any uncertain, partial, or cleanup reference keeps the draft blocked.
+        var canRetrySignIn: Bool {
+            blockedReason != nil && blockKind == .signInRefused && !uncertain
+                && previous == nil && cleanupReferences.isEmpty
         }
 
         var references: [MailServerDraftReference] {
@@ -47,6 +63,8 @@ final class MailServerDraftCoordinator: ObservableObject {
     private let debounceNanoseconds: UInt64
     private var slots: [UUID: Slot] = [:]
     @Published private(set) var pendingCleanupRecords: [MailServerDraftCleanupRecord] = []
+    /// Drafts with an explicit server-save retry in progress, for the composer's status.
+    @Published private(set) var retryingDraftIDs: Set<UUID> = []
     private var cleanupReloadTask: Task<Void, Never>?
 
     /// Production coordinator. It does no file or network work until `changed`, `prepareForSend`,
@@ -77,10 +95,7 @@ final class MailServerDraftCoordinator: ObservableObject {
         if slot.stopped {
             // A known failed send or an Undo restores the same draft ID. It is safe to resume
             // autosave for that explicit recovery state. Accepted/discarded IDs never resume.
-            let recoverable = model.deliveries.first(where: { $0.id == draft.id }).map { delivery in
-                delivery.state == .failed || delivery.state == .undone
-            } ?? false
-            if recoverable, !slot.uncertain, slot.blockedReason == nil {
+            if deliveryAllowsRecovery(draft.id), !slot.uncertain, slot.blockedReason == nil {
                 slot.stopped = false
                 slot.lastFields = nil
             } else {
@@ -96,7 +111,7 @@ final class MailServerDraftCoordinator: ObservableObject {
         if let oldAccount = slot.accountID, let newAccount = draft.fromAccountID,
            oldAccount != newAccount, !slot.references.isEmpty {
             let reason = "This draft was switched to another account. Discard it and reopen it before saving a new server copy."
-            slot.blockedReason = reason
+            slot.block(reason)
             applyState(slot, to: draft, reason: reason, uncertain: false)
             model.banner = reason
             return
@@ -128,6 +143,100 @@ final class MailServerDraftCoordinator: ObservableObject {
         }
     }
 
+    /// True when the open draft's only block is a refused sign-in and a server API is available.
+    /// Uncertain, partial, account-switch, cleanup, and older unclassified blocks are never eligible.
+    func canRetryServerSave(_ draft: MailModel.Draft) -> Bool {
+        hasServerAPI(for: draft) && blockAllowsRetry(draft)
+    }
+
+    /// The block alone allows a retry, whether or not a server API is available right now.
+    func blockAllowsRetry(_ draft: MailModel.Draft) -> Bool {
+        (slots[draft.id] ?? Slot(draft)).canRetrySignIn
+    }
+
+    /// Explicit user action after the account's sign-in is fixed. It makes one server Drafts save
+    /// of the latest local draft, replacing only the exact reference it already owns. It never
+    /// calls SMTP or resumes a send. A refused sign-in blocks again; any other problem keeps or
+    /// replaces the block exactly as autosave would. Returns true when the block was cleared.
+    @discardableResult
+    func retryServerSave(_ draft: MailModel.Draft) async -> Bool {
+        let id = draft.id
+        guard model.draft?.id == id, model.pendingSend?.id != id else {
+            model.banner = "Open this draft to save it to the server again."
+            return false
+        }
+        guard hasServerAPI(for: draft) else {
+            model.banner = "Select Jevcast accounts as the mail source before saving this server draft."
+            return false
+        }
+        guard !retryingDraftIDs.contains(id) else { return false }
+        let slot = slot(for: draft)
+        guard slot.canRetrySignIn else {
+            model.banner = "Jevcast cannot retry this server draft. " + (slot.blockedReason ?? "Nothing is blocked.")
+            return false
+        }
+        if slot.stopped, !deliveryAllowsRecovery(id) {
+            model.banner = "This draft is being sent or was closed. Nothing was saved."
+            return false
+        }
+
+        retryingDraftIDs.insert(id)
+        defer { retryingDraftIDs.remove(id) }
+        let cleared: Bool = await withCheckedContinuation { continuation in
+            enqueue(slot) { [weak self, weak slot] in
+                guard let self, let slot else { continuation.resume(returning: false); return }
+                continuation.resume(returning: await self.retry(id: id, slot: slot))
+            }
+        }
+        // Edits typed while the retry ran were not part of its save. Normal autosave takes them.
+        if cleared, let current = model.draft, current.id == id { changed(current) }
+        return cleared
+    }
+
+    /// Runs inside `serial`, so earlier admitted saves and later sends or discards stay ordered.
+    private func retry(id: UUID, slot: Slot) async -> Bool {
+        // An earlier admitted operation can have replaced the sign-in block or closed the draft.
+        guard slot.canRetrySignIn, let current = model.serverDraft(for: id) else { return false }
+        guard hasServerAPI(for: current) else {
+            model.banner = "The mail source changed. The server draft was not saved."
+            return false
+        }
+        if let oldAccount = slot.accountID, let newAccount = current.fromAccountID,
+           oldAccount != newAccount, !slot.references.isEmpty {
+            let reason = "This draft was switched to another account. Discard it and reopen it before saving a new server copy."
+            slot.block(reason)
+            applyState(slot, to: current, reason: reason, uncertain: false)
+            try? await model.saveCompositionAsync()
+            model.banner = reason
+            return false
+        }
+        if slot.references.isEmpty { slot.accountID = current.fromAccountID }
+
+        do {
+            try await model.saveCompositionAsync()
+            try await save(current, slot: slot)
+        } catch let error as MailServerDraftRenderError {
+            model.banner = error.localizedDescription
+        } catch {
+            await handleSaveFailure(error, draft: current, slot: slot)
+        }
+        guard slot.blockedReason == nil, !slot.uncertain else {
+            // A failure that did not replace the sign-in block (a dropped connection, say) leaves
+            // it retryable. Keep the stored draft in step with it.
+            if slot.canRetrySignIn, let latest = model.serverDraft(for: id) {
+                preserveBlockedState(slot, on: latest)
+                try? await model.saveCompositionAsync()
+            }
+            return false
+        }
+        model.banner = "The draft was saved to the server Drafts folder. Autosave is on again."
+        return true
+    }
+
+    private func deliveryAllowsRecovery(_ id: UUID) -> Bool {
+        model.deliveries.first(where: { $0.id == id }).map { $0.state == .failed || $0.state == .undone } ?? false
+    }
+
     /// Stops new autosaves, waits behind all already-admitted work, and returns the latest local
     /// draft with its safe server references. This does not call SMTP or resume any send.
     func prepareForSend(_ draft: MailModel.Draft) async throws -> MailModel.Draft {
@@ -149,6 +258,7 @@ final class MailServerDraftCoordinator: ObservableObject {
                     latest.serverDraftReference = slot.reference
                     latest.previousServerDraftReference = slot.previous
                     latest.serverDraftBlockedReason = slot.blockedReason
+                    latest.serverDraftBlockKind = slot.blockKind
                     latest.serverDraftAcknowledgementUncertain = slot.uncertain ? true : nil
                     try await self.model.saveCompositionAsync()
                     continuation.resume(returning: latest)
@@ -371,7 +481,7 @@ final class MailServerDraftCoordinator: ObservableObject {
         slot.reference = result
         slot.previous = nil
         slot.lastFields = draft.fields
-        slot.blockedReason = nil
+        slot.block(nil)
         slot.uncertain = false
 
         // A stale result still must be checkpointed by ID. This updates only server metadata, not
@@ -381,7 +491,7 @@ final class MailServerDraftCoordinator: ObservableObject {
         do { try await model.saveCompositionAsync() }
         catch {
             let reason = "The server draft was saved, but its local reference could not be checkpointed: " + error.localizedDescription
-            slot.blockedReason = reason
+            slot.block(reason)
             applyState(slot, to: draft, reason: reason, uncertain: false)
             model.banner = reason
             throw LauncherError(reason)
@@ -420,12 +530,12 @@ final class MailServerDraftCoordinator: ObservableObject {
             case let .acknowledgementUncertain(_, _, candidate, replacing):
                 slot.reference = candidate ?? replacing ?? slot.reference
                 slot.previous = replacing
-                slot.blockedReason = reason
+                slot.block(reason)
                 slot.uncertain = true
             case let .partialReplacement(previous, new, _):
-                slot.reference = new; slot.previous = previous; slot.blockedReason = reason; slot.uncertain = false
+                slot.reference = new; slot.previous = previous; slot.block(reason); slot.uncertain = false
             default:
-                if !slot.references.isEmpty { slot.blockedReason = reason }
+                if !slot.references.isEmpty { slot.block(reason) }
             }
             applyState(slot, to: draft, reason: reason, uncertain: slot.uncertain)
             if slot.blockedReason != nil || slot.uncertain { try? await model.saveCompositionAsync() }
@@ -433,12 +543,13 @@ final class MailServerDraftCoordinator: ObservableObject {
         default:
             if let mailError = error as? MailError, case .signInFailed(_) = mailError {
                 // A refused login is not a transient draft-rendering failure. Block this slot so
-                // every later edit cannot repeatedly prompt or retry the same account. A fresh
-                // coordinator after the account credentials are repaired is the explicit recovery.
-                slot.blockedReason = reason
+                // every later edit cannot repeatedly prompt or retry the same account. The sign-in
+                // fails before APPEND, so the kind lets the user retry once they fix the account.
+                slot.block(reason, kind: .signInRefused)
                 applyState(slot, to: draft, reason: reason, uncertain: false)
                 try? await model.saveCompositionAsync()
                 model.banner = "Server-draft autosave stopped for this account: " + reason
+                    + " After you fix the sign-in, choose Save to Drafts Again in the draft."
                 return
             }
             model.banner = "The server draft could not be saved: " + reason
@@ -446,8 +557,10 @@ final class MailServerDraftCoordinator: ObservableObject {
     }
 
     private func applyState(_ slot: Slot, to draft: MailModel.Draft, reason: String?, uncertain: Bool) {
+        // The kind travels only with the exact block it describes, never with another reason.
+        let kind = reason != nil && reason == slot.blockedReason ? slot.blockKind : nil
         model.updateServerDraftState(for: draft.id, reference: slot.reference, previous: slot.previous,
-                                     blockedReason: reason, acknowledgementUncertain: uncertain)
+                                     blockedReason: reason, blockKind: kind, acknowledgementUncertain: uncertain)
     }
 
     private func preserveBlockedState(_ slot: Slot, on draft: MailModel.Draft) {
@@ -456,6 +569,7 @@ final class MailServerDraftCoordinator: ObservableObject {
         let same = draft.serverDraftReference == slot.reference
             && draft.previousServerDraftReference == slot.previous
             && draft.serverDraftBlockedReason == blocked
+            && draft.serverDraftBlockKind == (blocked == nil ? nil : slot.blockKind)
             && draft.serverDraftAcknowledgementUncertain == (uncertain ? true : nil)
         if !same { applyState(slot, to: draft, reason: blocked, uncertain: uncertain) }
     }
@@ -475,7 +589,7 @@ final class MailServerDraftCoordinator: ObservableObject {
         do { try await cleanupStore?.saveAsync(record) }
         catch {
             let reason = "Server-draft cleanup could not be recorded: " + error.localizedDescription
-            slot.blockedReason = reason
+            slot.block(reason)
             model.banner = reason
             return
         }
@@ -489,7 +603,7 @@ final class MailServerDraftCoordinator: ObservableObject {
             let reason = "\(initialReason) Select Jevcast accounts to remove it explicitly."
             record.reason = reason
             try? await cleanupStore?.updateAsync(record)
-            slot.blockedReason = reason
+            slot.block(reason)
             applyState(slot, to: model.serverDraft(for: id) ?? MailModel.Draft(id: id), reason: reason, uncertain: true)
             model.banner = reason
             return
@@ -508,7 +622,7 @@ final class MailServerDraftCoordinator: ObservableObject {
                 do { try await model.saveCompositionAsync() }
                 catch {
                     let reason = "Server-draft cleanup succeeded for one UID, but the local cleanup checkpoint failed: " + error.localizedDescription
-                    slot.blockedReason = reason
+                    slot.block(reason)
                     model.banner = reason
                     return
                 }
@@ -519,7 +633,7 @@ final class MailServerDraftCoordinator: ObservableObject {
                 try? await cleanupStore?.updateAsync(record)
                 slot.reference = remaining.first
                 slot.previous = remaining.dropFirst().first
-                slot.blockedReason = reason
+                slot.block(reason)
                 slot.uncertain = error is MailServerDraftError
                 if model.serverDraft(for: id) != nil {
                     model.updateServerDraftState(for: id, reference: slot.reference, previous: slot.previous,
@@ -529,7 +643,7 @@ final class MailServerDraftCoordinator: ObservableObject {
                 return
             }
         }
-        slot.reference = nil; slot.previous = nil; slot.blockedReason = nil; slot.uncertain = false
+        slot.reference = nil; slot.previous = nil; slot.block(nil); slot.uncertain = false
         slot.cleanupReferences = []
         if model.updateServerDraftState(for: id, reference: nil) {
             try? await model.saveCompositionAsync()

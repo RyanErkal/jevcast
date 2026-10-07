@@ -1,18 +1,13 @@
 import SwiftUI
 
+/// Outbox in the panel, in place of the message list: sends waiting for Undo, sends that did not
+/// go or may have gone, and recent send history.
 struct MailDeliveryView: View {
     @ObservedObject var model: MailModel
-    var inline = false
-    @Environment(\.dismiss) private var dismiss
     @State private var resend: MailDelivery?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Outbox").font(.title3.weight(.semibold))
-                Spacer()
-                if !inline { Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }
-            }
             Text("Messages recovered after restart stay here until you send them. A message marked Uncertain may already be sent.")
                 .font(.caption).foregroundStyle(.secondary)
             MailServerDraftCleanupView(model: model)
@@ -43,9 +38,10 @@ struct MailDeliveryView: View {
                             Divider()
                         }
                     }
-                }.frame(maxHeight: inline ? .infinity : 330)
+                }.frame(maxHeight: .infinity)
             }
-        }.padding(20).frame(width: inline ? nil : 540).frame(maxWidth: inline ? .infinity : nil)
+        }
+        .padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .confirmationDialog("This message may already be sent", isPresented: Binding(get: { resend != nil }, set: { if !$0 { resend = nil } })) {
             if let resend { Button("I Checked Sent. It Was Not Sent") { model.restoreDelivery(resend, allowResend: true); self.resend = nil } }
             Button("Cancel", role: .cancel) { resend = nil }

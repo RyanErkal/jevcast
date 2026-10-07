@@ -4,14 +4,16 @@ import SwiftUI
 struct CalendarPageView: View {
     @ObservedObject var page: CalendarPage
     let list: SourcePage
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The event details beside the calendar: 260 points in the smallest panel, up to 320.
+    static func inspectorWidth(_ total: CGFloat) -> CGFloat { min(320, max(260, (total * 0.26).rounded())) }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
-            if let event = page.selectedEvent {
-                CalendarEventDetail(event: event, back: page.clearSelection, open: page.open, openCalendar: { page.openInCalendar(event) })
-            } else if let problem = page.problem {
+            if let problem = page.problem {
                 VStack(spacing: 12) {
                     Text(problem.text).foregroundStyle(.secondary)
                     Button("Allow Calendar Access") { page.grant() }
@@ -26,10 +28,29 @@ struct CalendarPageView: View {
                         Button("Sign in with Google", action: signIn).disabled(page.google == nil)
                     }
                 }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if page.mode == .list {
-                if page.source == .mac { list.content() } else { googleList }
-            } else if page.mode == .month { month }
-            else { CalendarTimeGrid(page: page) }
+            } else if page.mode == .list && page.source == .mac {
+                list.content()
+            } else {
+                GeometryReader { geometry in
+                    HStack(spacing: 0) {
+                        VStack(spacing: 0) {
+                            switch page.mode {
+                            case .month: month
+                            case .list: googleList
+                            case .day, .threeDays, .week: CalendarTimeGrid(page: page)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        if let event = page.selectedEvent {
+                            Divider()
+                            CalendarEventDetail(event: event, close: page.clearSelection, open: page.open, openCalendar: { page.openInCalendar(event) })
+                                .frame(width: Self.inspectorWidth(geometry.size.width))
+                                .transition(.move(edge: .trailing).combined(with: .opacity))
+                        }
+                    }
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: page.selectedEvent?.id)
+                }
+            }
         }
     }
 
@@ -37,31 +58,47 @@ struct CalendarPageView: View {
         page.signIn()
     }
 
+    /// One row: the month and the steps on the left; the source, refresh, and views on the right.
     private var header: some View {
-        VStack(spacing: 9) {
-            HStack(spacing: 10) {
-                if page.mode == .list && page.source == .mac { Text("Upcoming").font(.system(size: 17, weight: .semibold)) }
-                else {
-                Button { page.step(-1) } label: { Image(systemName: "chevron.left") }.buttonStyle(.borderless).help("Previous (↑)")
-                Button { page.step(1) } label: { Image(systemName: "chevron.right") }.buttonStyle(.borderless).help("Next (↓)")
-                Text(page.title).font(.system(size: 17, weight: .semibold)).lineLimit(1)
-                Button("Today") { page.today() }.controlSize(.small)
-                }
-                Spacer(minLength: 8)
-                Picker("Calendar view", selection: Binding(get: { page.mode }, set: { page.setMode($0) })) {
-                    ForEach(CalendarPage.Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }.pickerStyle(.segmented).labelsHidden().fixedSize().help("← and → switch views")
+        HStack(spacing: 10) {
+            if page.mode == .list && page.source == .mac {
+                Text("Upcoming").font(.system(size: 15, weight: .semibold))
+            } else {
+                Text(page.title).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                stepper
             }
-            HStack(spacing: 10) {
+            Spacer(minLength: 8)
+            if page.loading { ProgressView().controlSize(.mini).help("Loading events") }
+            Group {
                 if let google = page.google {
                     CalendarAccountControls(page: page, google: google, signIn: signIn)
-                } else { Label("Demo calendar", systemImage: "calendar").foregroundStyle(.secondary) }
-                Spacer()
-                if page.loading { ProgressView().controlSize(.mini); Text("Loading…").foregroundStyle(.secondary) }
-                Text(TimeZone.current.identifier.replacingOccurrences(of: "_", with: " ")).foregroundStyle(.secondary)
-                Button { page.refresh() } label: { Image(systemName: "arrow.clockwise") }.buttonStyle(.borderless).help("Refresh events")
-            }.font(.system(size: 11))
-        }.padding(.horizontal, 16).padding(.vertical, 10)
+                } else { Label("Demo calendar", systemImage: "calendar") }
+            }
+            // Small controls draw their text at 11 points; a larger font would cut it off.
+            .font(.system(size: 11)).controlSize(.small).foregroundStyle(.secondary)
+            Button { page.refresh() } label: { Image(systemName: "arrow.clockwise") }
+                .buttonStyle(.borderless).foregroundStyle(.secondary).help("Refresh events")
+            Picker("Calendar view", selection: Binding(get: { page.mode }, set: { page.setMode($0) })) {
+                ForEach(CalendarPage.Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.small).help("← and → switch views")
+        }
+        .font(.system(size: 12))
+        .padding(.horizontal, 16).frame(height: 46)
+    }
+
+    /// ‹ Today › in one quiet group.
+    private var stepper: some View {
+        HStack(spacing: 0) {
+            Button { page.step(-1) } label: { Image(systemName: "chevron.left").frame(width: 24, height: 22).contentShape(Rectangle()) }
+                .help("Previous (↑)").accessibilityLabel("Previous")
+            Button { page.today() } label: { Text("Today").padding(.horizontal, 4).frame(height: 22).contentShape(Rectangle()) }
+                .help("Go to today")
+            Button { page.step(1) } label: { Image(systemName: "chevron.right").frame(width: 24, height: 22).contentShape(Rectangle()) }
+                .help("Next (↓)").accessibilityLabel("Next")
+        }
+        .buttonStyle(.plain).font(.system(size: 12, weight: .medium))
+        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.primary.opacity(0.06)))
     }
 
     private var month: some View {
@@ -88,15 +125,19 @@ struct CalendarPageView: View {
 
     private func monthDay(_ day: Date) -> some View {
         let events = page.events(on: day)
+        let today = Calendar.current.isDateInToday(day)
         return VStack(alignment: .leading, spacing: 3) {
             HStack {
                 Spacer()
                 Button(day.formatted(.dateTime.day())) { page.showDay(day) }
-                    .buttonStyle(.plain).font(.system(size: 12, weight: .medium))
+                    .buttonStyle(.plain).font(.system(size: 12, weight: today ? .semibold : .medium)).monospacedDigit()
+                    .foregroundStyle(today ? Color.white : .primary)
                     .frame(width: 23, height: 23)
-                    .background(Circle().fill(Calendar.current.isDateInToday(day) ? Color.accentColor.opacity(0.2) : .clear))
+                    .background(Circle().fill(today ? Color.accentColor : .clear))
             }
-            ForEach(events.prefix(3)) { event in CalendarEventButton(event: event) { page.select(event) }.frame(height: 22) }
+            ForEach(events.prefix(3)) { event in
+                CalendarEventButton(event: event, selected: page.selectedEvent?.id == event.id) { page.select(event) }.frame(height: 20)
+            }
             if events.count > 3 {
                 Button("+\(events.count - 3) more") { page.showDay(day) }.buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)
             }
@@ -123,8 +164,8 @@ struct CalendarPageView: View {
                                     }
                                     Spacer()
                                     if event.meetingURL != nil { Image(systemName: "video") }
-                                }.padding(10).background(RoundedRectangle(cornerRadius: 7).fill(event.color.opacity(0.08)))
-                            }.buttonStyle(.plain)
+                                }.padding(10).background(RoundedRectangle(cornerRadius: 7).fill(event.color.opacity(page.selectedEvent?.id == event.id ? 0.22 : 0.08)))
+                            }.buttonStyle(.plain).accessibilityAddTraits(page.selectedEvent?.id == event.id ? .isSelected : [])
                         }
                     }
                 }
@@ -152,7 +193,7 @@ private struct CalendarAccountControls: View {
                 }
             } label: { Label(page.source == .google ? google.label : "On This Mac", systemImage: "calendar") }
                 .fixedSize().menuStyle(.borderlessButton)
-            if !google.connected { Button("Connect Google", action: signIn).controlSize(.small) }
+            if !google.connected { Button("Connect Google", action: signIn).controlSize(.small).fixedSize() }
             if page.source == .google, !google.calendars.isEmpty {
                 Menu("Calendars") {
                     ForEach(google.calendars) { calendar in
@@ -169,23 +210,62 @@ private struct CalendarAccountControls: View {
 }
 
 struct CalendarEventButton: View {
+    /// `title` alone, for Month and all-day rows; `line` adds the start time after the title, for
+    /// short events; `block` puts the time range under the title.
+    enum Style { case title, line, block }
     let event: CalendarPage.Event
-    var showsTime = false
+    var selected = false
+    var style = Style.title
     var fillsHeight = false
     let select: () -> Void
+
     var body: some View {
         Button(action: select) {
-            HStack(spacing: 4) {
+            HStack(alignment: .top, spacing: 5) {
                 RoundedRectangle(cornerRadius: 1.5).fill(event.color).frame(width: 3)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(event.title).fontWeight(.medium).lineLimit(2)
-                    if showsTime { Text(event.start.formatted(date: .omitted, time: .shortened)).font(.system(size: 10)).foregroundStyle(.secondary) }
-                }
+                    .frame(maxHeight: style == .block ? .infinity : 14)
+                content
                 Spacer(minLength: 0)
-                if event.meetingURL != nil { Image(systemName: "video").font(.system(size: 9)) }
-            }.padding(4).frame(maxWidth: .infinity, maxHeight: fillsHeight ? .infinity : nil, alignment: .topLeading)
-                .background(RoundedRectangle(cornerRadius: 4).fill(event.color.opacity(event.allDay ? 0.26 : 0.16)))
-        }.buttonStyle(.plain).font(.system(size: 11)).help(event.title + " · " + (event.allDay ? "All day" : event.start.formatted(date: .omitted, time: .shortened)))
-            .accessibilityLabel(event.title + ", " + (event.allDay ? "all day" : event.start.formatted(date: .omitted, time: .shortened)))
+                if event.meetingURL != nil && style != .title {
+                    Image(systemName: "video.fill").font(.system(size: 8)).foregroundStyle(.secondary).padding(.top, 3)
+                }
+            }
+            .padding(.leading, 3).padding(.trailing, 5).padding(.vertical, 3)
+            .frame(maxWidth: .infinity, maxHeight: fillsHeight ? .infinity : nil, alignment: .topLeading)
+            .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(event.color.opacity(selected ? 0.34 : event.allDay ? 0.24 : 0.16)))
+            .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(event.color.opacity(selected ? 0.85 : 0), lineWidth: 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).help(event.title + " · " + when)
+        .accessibilityLabel(event.title + ", " + when)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
+
+    @ViewBuilder private var content: some View {
+        let title = Text(event.title).font(.system(size: 11.5, weight: .semibold))
+        switch style {
+        case .title: title.lineLimit(1)
+        case .line:
+            // The time gives way when the title needs the room.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 5) { title.lineLimit(1); time(start) }
+                title.lineLimit(1)
+            }
+        case .block:
+            VStack(alignment: .leading, spacing: 1) {
+                title.lineLimit(2)
+                ViewThatFits(in: .horizontal) {
+                    time(start + " – " + event.end.formatted(date: .omitted, time: .shortened))
+                    time(start)
+                }
+            }
+        }
+    }
+
+    private func time(_ text: String) -> some View {
+        Text(text).font(.system(size: 10.5)).monospacedDigit().foregroundStyle(.secondary).lineLimit(1).fixedSize()
+    }
+
+    private var start: String { event.start.formatted(date: .omitted, time: .shortened) }
+    private var when: String { event.allDay ? "All day" : start }
 }

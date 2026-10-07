@@ -1,7 +1,7 @@
 import Foundation
 
 /// Jevcast's own mail store for accounts it syncs itself. The database has the tables and columns
-/// of Apple Mail's `Envelope Index` that the mail window reads, and bodies sit where Mail keeps
+/// of Apple Mail's `Envelope Index` that the Mail view reads, and bodies sit where Mail keeps
 /// them (`<account>/<mailbox>.mbox/Data/…/<row>.emlx`). So one reader, one list query, and one
 /// search serve both. Extra columns hold what sync needs. Folders are 0700 and files 0600.
 public actor NativeMailStore {
@@ -126,6 +126,14 @@ public actor NativeMailStore {
             }
         }
         touched()
+    }
+
+    /// Moves the server's counts by what a change made here did, so the sidebar does not wait for
+    /// the next status check, which sets them exactly again. Unknown counts stay unknown.
+    func adjustServerCounts(_ mailbox: Int64, total: Int, unread: Int) throws {
+        guard total != 0 || unread != 0 else { return }
+        try db.run("UPDATE mailboxes SET server_total = MAX(0, server_total + ?), server_unread = MAX(0, server_unread + ?) WHERE ROWID = ?",
+                   [.int(Int64(total)), .int(Int64(unread)), .int(mailbox)])
     }
 
     // MARK: Mailboxes

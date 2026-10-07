@@ -2,7 +2,7 @@ import XCTest
 import LauncherCore
 @testable import JevLauncher
 
-/// Jevcast's own store must read like Apple Mail's index: the mail window's list, search, and
+/// Jevcast's own store must read like Apple Mail's index: the Mail view's list, search, and
 /// bodies all go through `MailStore`, unchanged.
 final class NativeMailReaderTests: XCTestCase {
     private var root: URL!
@@ -63,7 +63,7 @@ final class NativeMailReaderTests: XCTestCase {
         XCTAssertEqual(body.messages.map(\.subject), ["Lunch on Friday"])
     }
 
-    /// 30,000 messages written as sync writes them, then read as the mail window reads them.
+    /// 30,000 messages written as sync writes them, then read as the Mail view reads them.
     /// Prints the timings; the limits are loose so a busy machine does not fail the test.
     func testSpeedAtThirtyThousandMessages() async throws {
         let big = FileManager.default.temporaryDirectory.appendingPathComponent("jevmail-speed-" + UUID().uuidString, isDirectory: true)

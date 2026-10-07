@@ -72,7 +72,7 @@ public enum FunctionCatalog {
         ("windows", "Windows", "Window gaps and shortcuts", "macwindow", ["gaps", "snapping"]),
         ("voice", "Voice", "Speech input", "waveform", ["microphone", "dictation"]),
         ("ai", "AI", "Jev, writing, and usage", "sparkles", ["jev", "writing", "chat", "openrouter", "usage", "key"]),
-        ("mail", "Mail", "Mail window options", "envelope", ["inbox"])
+        ("mail", "Mail", "Mail accounts, folders, and reading", "envelope", ["inbox"])
     ].map { id, title, summary, symbol, keywords in
         FunctionEntry(id: "settings:" + id, title: title + " Settings", keywords: keywords, summary: summary, symbol: symbol, group: .settings)
     } + [FunctionEntry(id: "settings:keys", title: "Keyboard Shortcuts", keywords: ["keys", "shortcuts", "keybinds", "hotkeys", "hyper"],

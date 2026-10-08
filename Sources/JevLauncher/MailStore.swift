@@ -64,11 +64,7 @@ enum MailStore {
     /// Runs `body` on the index queue. `stop` returning true interrupts a running query, which then
     /// throws `CancellationError`, so a newer search does not wait for an older one.
     static func withIndex<T>(_ root: String, stop: (() -> Bool)? = nil, _ body: (SQLiteReader, Set<String>) throws -> T) throws -> T {
-        fputs("index-step enter \(root)\n", stdout)
-        fflush(stdout)
-        return try queue.sync {
-            fputs("index-step on-queue\n", stdout)
-            fflush(stdout)
+        try queue.sync {
             if stop?() == true { throw CancellationError() }
             if let current = shared, current.root != root || current.identity != FileIdentity(path: indexPath(root)) { shared = nil }
             let connection = try shared ?? Connection(root: root)

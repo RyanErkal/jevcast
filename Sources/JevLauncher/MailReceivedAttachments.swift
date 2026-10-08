@@ -1,5 +1,4 @@
 import AppKit
-import Darwin
 import Foundation
 import Quartz
 import SwiftUI
@@ -40,54 +39,29 @@ struct MailReceivedAttachmentContext: Equatable, Sendable {
 }
 
 /// Reads one selected message only after a user asks to preview, open, or save an attachment.
-/// Every filesystem read runs away from the main actor. A missing Jevcast body is fetched from
-/// its own engine only in this explicit action path; Apple Mail is never asked to do anything.
+/// The file read stays on the caller: moving it to a GCD queue or a Swift task never started on CI,
+/// and the test sat until the job's time limit. A missing Jevcast body is fetched afterwards.
+/// Apple Mail is never asked to do anything.
 enum MailReceivedAttachmentLoader {
     static func load(_ context: MailReceivedAttachmentContext) async throws -> [MailReceivedAttachmentFile] {
-        // The mail source is captured on the caller. The file and index work then runs on a GCD
-        // queue, not a Swift task: that work takes the index queue synchronously, and blocking a
-        // cooperative thread on DispatchQueue.sync deadlocks. CI hung in the attachment test there.
         let backend = MailBackend.current
-        mark("load schedule")
-        if let files = try await onBackground({ try readIfPresent(context, backend: backend) }) { return files }
+        if let files = try readIfPresent(context, backend: backend) { return files }
         guard context.backend == .jevcast, backend == .jevcast, NativeMailCenter.isNativeRoot(context.root),
               let engine = NativeMailCenter.activeEngine else { throw MailReceivedAttachmentError.bodyUnavailable }
         _ = try await engine.fetchBody(context.message.rowID)
-        guard let files = try await onBackground({ try readIfPresent(context, backend: backend) }) else {
+        guard let files = try readIfPresent(context, backend: backend) else {
             throw MailReceivedAttachmentError.bodyUnavailable
         }
         return files
-    }
-
-    /// Runs `body` on a GCD thread and returns its value. A nil read means the body is not on disk yet.
-    private static func onBackground<T: Sendable>(_ body: @escaping @Sendable () throws -> T) async throws -> T {
-        try await withCheckedThrowingContinuation { continuation in
-            mark("onBackground queued")
-            DispatchQueue.global(qos: .userInitiated).async {
-                mark("onBackground running")
-                do { continuation.resume(returning: try body()) }
-                catch { continuation.resume(throwing: error) }
-                mark("onBackground resumed")
-            }
-        }
-    }
-
-    private static func mark(_ step: String) {
-        fputs("load-step \(step)\n", stdout)
-        fflush(stdout)
     }
 
     private static func readIfPresent(_ context: MailReceivedAttachmentContext, backend: MailBackend) throws -> [MailReceivedAttachmentFile]? {
         let identity = context.indexIdentity ?? MailStore.FileIdentity(path: MailStore.indexPath(context.root)).map {
             MailReceivedAttachmentContext.IndexIdentity(device: $0.device, inode: $0.inode)
         }
-        mark("read verify")
         try verifySource(context, expectedIdentity: identity, backend: backend)
-        mark("read body")
         guard let stored = try readStoredBody(context) else { return nil }
-        mark("read verify again")
         try verifySource(context, expectedIdentity: identity, backend: backend)
-        mark("read extract")
         let raw = try unwrapEMLX(stored)
         return try MailReceivedAttachmentExtractor.extract(rawMessage: raw, expected: context.detail)
     }

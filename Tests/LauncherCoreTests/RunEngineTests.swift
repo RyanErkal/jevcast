@@ -175,7 +175,11 @@ final class RunEngineTests: XCTestCase {
     func testCancel() throws {
         let a = try agent(.report)
         let control = RunControl()
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { control.cancel() }
+        // A thread sleep, not a GCD timer: the timer block has to run for this to cancel.
+        Thread.detachNewThread {
+            Thread.sleep(forTimeInterval: 0.5)
+            control.cancel()
+        }
         let run = engine(cli: try fake("sleep 30")).execute(newRun(a), automation: a, control: control)
         XCTAssertEqual(run.state, .cancelled)
     }

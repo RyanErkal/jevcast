@@ -1,34 +1,66 @@
 name: CI
 
+# Docs, the website, and the release version bump (read only by scripts/build.sh, which CI
+# does not run) do not change what swift test builds, so they skip the macOS job.
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "site/**"
+      - "LICENSE"
+      - ".github/ISSUE_TEMPLATE/**"
+      - "scripts/version.env"
   pull_request:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "site/**"
+      - "LICENSE"
+      - ".github/ISSUE_TEMPLATE/**"
+      - "scripts/version.env"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
+
+env:
+  # The oldest Xcode the project supports is 26 (NSGlassEffectView needs the macOS 26 SDK).
+  # CI pins a GA release on the runner instead of following the image default.
+  XCODE_VERSION: "26.6"
 
 jobs:
   test:
-    # NSGlassEffectView needs the macOS 26 SDK, so the runner needs Xcode 26 or later.
     runs-on: macos-26
-    # A libghostty build without the cache takes about 12 minutes.
-    timeout-minutes: 45
+    # A libghostty build without the cache takes about 12 minutes; a cached run about 5.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+      - name: Select Xcode
+        run: |
+          app="/Applications/Xcode_${XCODE_VERSION}.app"
+          if [ ! -d "$app" ]; then
+            echo "::error::Xcode $XCODE_VERSION is not on this runner image. Installed:"
+            ls -d /Applications/Xcode_*.app
+            exit 1
+          fi
+          echo "DEVELOPER_DIR=$app/Contents/Developer" >> "$GITHUB_ENV"
       - name: Toolchain
         run: |
           xcodebuild -version
           swift --version
       - name: Restore libghostty
         id: ghosttykit
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: Vendor
+          # Built with Xcode 26.6. Add the Xcode version to this key when XCODE_VERSION changes.
           key: ghosttykit-${{ runner.os }}-${{ hashFiles('scripts/ghosttykit.sh', 'scripts/ghosttykit-libtool.patch') }}
       - name: libghostty toolchain
         if: steps.ghosttykit.outputs.cache-hit != 'true'
@@ -40,13 +72,17 @@ jobs:
       # Saved before the tests, so a failed test does not throw the build away.
       - name: Save libghostty
         if: steps.ghosttykit.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: Vendor
           key: ${{ steps.ghosttykit.outputs.cache-primary-key }}
+      # Compiling apart from testing, so a compiler error and a test failure show as different steps.
+      - name: Build
+        timeout-minutes: 15
+        run: swift build --build-tests
       - name: Test
-        # A hung test fails the job here, not at the job's limit.
-        timeout-minutes: 20
+        # The suite takes about two minutes; a hung test fails here, not at the job's limit.
+        timeout-minutes: 10
         env:
           # Tests use fixtures and must not reach real mail accounts or Apple Mail.
           JEVCAST_MAIL_OFFLINE: "1"
@@ -57,4 +93,4 @@ jobs:
           JEVCAST_SKIP_MAIL_DICTIONARY: "1"
           # Writes each test line at once, so a cancelled run's log shows the test that hung.
           NSUnbufferedIO: "YES"
-        run: swift test
+        run: swift test --skip-build

@@ -50,22 +50,21 @@ struct MailSidebar: View {
         let folders = MailSidebarFolders(model.mailboxes.filter { $0.accountID == account })
         let state = center.states[account]
         let label = accountLabels[account] ?? account
+        let title = model.accountTitle(account)
+        let statusText = status(state)
+        let isExpanded = expanded.wrappedValue
+        // Built in parts: as one expression, Xcode 26's Swift 6.3 gives up type-checking it.
+        let help: String = title + " · " + statusText
+        let accessibilityLabel: String = label + ", " + title
+        let accessibilityValue: String = statusText + ", " + (isExpanded ? "Expanded" : "Collapsed")
         return VStack(alignment: .leading, spacing: 0) {
             Button { expanded.wrappedValue.toggle() } label: {
-                HStack(spacing: 6) {
-                    Circle().fill(statusColor(state)).frame(width: 6, height: 6)
-                    Text(label).font(.system(size: 11, weight: .semibold)).lineLimit(1)
-                    Spacer(minLength: 4)
-                    Image(systemName: expanded.wrappedValue ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                }
-                .foregroundStyle(.secondary).padding(.horizontal, 8)
-                .frame(height: 24).contentShape(Rectangle())
+                accountHeader(label, state: state, isExpanded: isExpanded)
             }
             .buttonStyle(.plain)
-            .help(model.accountTitle(account) + " · " + status(state))
-            .accessibilityLabel(label + ", " + model.accountTitle(account))
-            .accessibilityValue(status(state) + ", " + (expanded.wrappedValue ? "Expanded" : "Collapsed"))
+            .help(help)
+            .accessibilityLabel(accessibilityLabel)
+            .accessibilityValue(accessibilityValue)
             if case .failed = state {
                 Text(status(state)).font(.system(size: 11)).foregroundStyle(.orange)
                     .padding(.horizontal, 8).padding(.bottom, 4)
@@ -82,6 +81,18 @@ struct MailSidebar: View {
                 }
             }
         }
+    }
+
+    private func accountHeader(_ label: String, state: MailAccountSync.State?, isExpanded: Bool) -> some View {
+        HStack(spacing: 6) {
+            Circle().fill(statusColor(state)).frame(width: 6, height: 6)
+            Text(label).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+            Spacer(minLength: 4)
+            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                .font(.system(size: 9, weight: .semibold))
+        }
+        .foregroundStyle(.secondary).padding(.horizontal, 8)
+        .frame(height: 24).contentShape(Rectangle())
     }
 
     private func expanded(_ id: String) -> Binding<Bool> {

@@ -83,7 +83,9 @@ enum CommandRunner {
         let box = ProcessBox()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                DispatchQueue.global(qos: .userInitiated).async {
+                // A plain thread, not DispatchQueue.global. By this point in the suite CI's global
+                // queue had stopped starting new blocks, and the test waited out the job's time limit.
+                Thread.detachNewThread {
                     let process = Process()
                     process.executableURL = URL(fileURLWithPath: step[0])
                     process.arguments = Array(step.dropFirst())
@@ -103,17 +105,13 @@ enum CommandRunner {
                     }
                     // A cancel that came between start and run found nothing running yet.
                     if box.cancelled { process.terminate() }
-                    if let timeout {
-                        DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { [weak process] in
-                            guard let process, process.isRunning else { return }
-                            box.timedOut = true
-                            process.terminate()
-                        }
-                    }
+                    let pid = process.processIdentifier
+                    box.noteStarted(pid)
+                    if let timeout { box.armTimeout(pid, after: timeout) }
                     let errors = DispatchGroup()
                     nonisolated(unsafe) var errorData = Data()
                     errors.enter()
-                    DispatchQueue.global(qos: .utility).async { errorData = err.fileHandleForReading.readDataToEndOfFile(); errors.leave() }
+                    Thread.detachNewThread { errorData = err.fileHandleForReading.readDataToEndOfFile(); errors.leave() }
                     let outputData = out.fileHandleForReading.readDataToEndOfFile()
                     errors.wait()
                     process.waitUntilExit()
@@ -142,13 +140,11 @@ enum CommandRunner {
 private final class ProcessBox: @unchecked Sendable {
     private let lock = NSLock()
     private var process: Process?
+    private var pid: pid_t = 0
     private var _cancelled = false
     private var _timedOut = false
     var cancelled: Bool { lock.withLock { _cancelled } }
-    var timedOut: Bool {
-        get { lock.withLock { _timedOut } }
-        set { lock.withLock { _timedOut = newValue } }
-    }
+    var timedOut: Bool { lock.withLock { _timedOut } }
     /// Keeps the process, or returns false when the task was already cancelled.
     func start(_ process: Process) -> Bool {
         lock.withLock {
@@ -157,8 +153,28 @@ private final class ProcessBox: @unchecked Sendable {
             return true
         }
     }
+    func noteStarted(_ pid: pid_t) { lock.withLock { self.pid = pid } }
+    /// Signals the pid when the time limit passes. `Process` is not thread-safe: calling
+    /// `terminate()` from another thread deadlocks the pipe read, and the test then waits
+    /// until the job's own time limit. The wait is a thread sleep, not a GCD timer.
+    func armTimeout(_ pid: pid_t, after timeout: TimeInterval) {
+        Thread.detachNewThread { [weak self] in
+            Thread.sleep(forTimeInterval: timeout)
+            self?.expire(pid)
+        }
+    }
+    private func expire(_ pid: pid_t) {
+        let current = lock.withLock { () -> pid_t? in
+            guard !_cancelled, self.pid == pid, pid > 0 else { return nil }
+            _timedOut = true
+            return pid
+        }
+        guard let current else { return }
+        // The process already exited, so this was not a time limit.
+        if kill(current, SIGTERM) != 0 { lock.withLock { if self.pid == current { _timedOut = false } } }
+    }
     func cancel() {
-        let running = lock.withLock { () -> Process? in _cancelled = true; return process }
-        if let running, running.isRunning { running.terminate() }
+        let pid = lock.withLock { () -> pid_t? in _cancelled = true; return self.pid > 0 ? self.pid : nil }
+        if let pid { _ = kill(pid, SIGTERM) }
     }
 }

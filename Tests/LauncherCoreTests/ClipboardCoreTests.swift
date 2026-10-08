@@ -162,7 +162,8 @@ final class ClipSearchTests: XCTestCase {
         XCTAssertEqual(ClipSearch.joined([text("one"), image, file, text("two")]), "one\n/a/b.txt\ntwo")
     }
 
-    /// 2000 entries filtered by a word must stay well inside one frame.
+    /// 2000 entries filtered by a word must stay well inside one frame. The median of five runs
+    /// keeps one slow run from failing it; shared CI machines get twice the local budget.
     func testFilteringTwoThousandEntriesIsFast() {
         let words = ["invoice", "meeting", "launch", "design", "budget", "travel", "report", "draft"]
         let entries = (0..<2000).map { index -> ClipEntry in
@@ -170,13 +171,18 @@ final class ClipSearchTests: XCTestCase {
             return text("Entry \(index) \(body)\nline two \(index)", ocr: index % 10 == 0 ? "scanned \(index)" : nil)
         }
         let keys = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, ClipSearch.key(for: $0)) })
-        let start = CFAbsoluteTimeGetCurrent()
-        let found = ClipSearch.filter(entries, keys: keys, chip: .all, query: ClipQuery.parse("budget report"))
-        let chip = ClipSearch.filter(entries, keys: keys, chip: .text, query: ClipQuery.parse("scanned 1"))
-        let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
-        print("[clip perf] filtered 2000 entries twice in \(String(format: "%.2f", elapsed)) ms")
+        var found: [ClipEntry] = [], chip: [ClipEntry] = [], times: [Double] = []
+        for _ in 0..<5 {
+            let start = CFAbsoluteTimeGetCurrent()
+            found = ClipSearch.filter(entries, keys: keys, chip: .all, query: ClipQuery.parse("budget report"))
+            chip = ClipSearch.filter(entries, keys: keys, chip: .text, query: ClipQuery.parse("scanned 1"))
+            times.append((CFAbsoluteTimeGetCurrent() - start) * 1000)
+        }
+        let elapsed = times.sorted()[times.count / 2]
+        let budget: Double = ProcessInfo.processInfo.environment["CI"] == "true" ? 100 : 50
+        print("[clip perf] filtered 2000 entries twice in \(String(format: "%.2f", elapsed)) ms (median of 5)")
         XCTAssertFalse(found.isEmpty)
         XCTAssertFalse(chip.isEmpty)
-        XCTAssertLessThan(elapsed, 50)
+        XCTAssertLessThan(elapsed, budget)
     }
 }

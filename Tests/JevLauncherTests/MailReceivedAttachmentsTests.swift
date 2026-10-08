@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import XCTest
 import LauncherCore
 @testable import JevLauncher
@@ -12,13 +13,18 @@ final class MailReceivedAttachmentsTests: XCTestCase {
     private var previousBackend: String?
 
     override func setUpWithError() throws {
+        mark("setup defaults")
         previousBackend = UserDefaults.standard.string(forKey: MailBackend.key)
         UserDefaults.standard.set(MailBackend.appleMail.rawValue, forKey: MailBackend.key)
+        mark("setup fixture")
         root = FileManager.default.temporaryDirectory.appendingPathComponent("received-mail-" + UUID().uuidString, isDirectory: true)
         try MailFixture.build(root: root.path, layout: .init(gmailInbox: 1, allMailOnly: 0, sent: 0, trash: 0, exchangeInbox: 0, projects: 0, perFolder: 0))
+        mark("setup mailboxes")
         let boxes = try MailStore.mailboxes(root: root.path)
         mailbox = try XCTUnwrap(boxes.first { $0.rowID == 1 })
+        mark("setup page")
         message = try XCTUnwrap(MailStore.page(root: root.path, MailModel.query(.inbox, "", boxes)).messages.first)
+        mark("setup parse")
         raw = Data("""
         From: sender@example.com\r
         Content-Type: multipart/mixed; boundary="parts"\r
@@ -36,6 +42,13 @@ final class MailReceivedAttachmentsTests: XCTestCase {
         --parts--\r
         """.utf8)
         detail = try XCTUnwrap(MIMEMessage.parse(raw))
+        mark("setup done")
+    }
+
+    /// Flushed immediately, so a hung CI run shows the last step that started.
+    private func mark(_ step: String) {
+        fputs("attach-step \(step)\n", stdout)
+        fflush(stdout)
     }
 
     override func tearDown() {
@@ -79,11 +92,14 @@ final class MailReceivedAttachmentsTests: XCTestCase {
     }
 
     func testChangedBodyIsRejectedWithTheReaderDetailStillOpen() async throws {
+        mark("test write")
         let context = makeContext(message: message)
         let changed = Data(String(decoding: raw, as: UTF8.self).replacingOccurrences(of: "hello", with: "other").utf8)
         try writeEMLX(changed)
+        mark("test load")
         do {
             _ = try await MailReceivedAttachmentLoader.load(context)
+            mark("test loaded")
             XCTFail("Expected changed body to be rejected")
         } catch {
             XCTAssertEqual(error as? MailReceivedAttachmentError, .sourceChanged)

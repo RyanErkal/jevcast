@@ -2,7 +2,7 @@ import AppKit
 import LauncherCore
 
 /// Where Mail reads mail: Apple Mail's own store, or the accounts Jevcast syncs itself.
-enum MailBackend: String, CaseIterable, Identifiable {
+enum MailBackend: String, CaseIterable, Identifiable, Sendable {
     case appleMail, jevcast
     static let key = "mailBackend"
     static var current: MailBackend { UserDefaults.standard.string(forKey: key).flatMap(MailBackend.init(rawValue:)) ?? .appleMail }

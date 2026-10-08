@@ -43,28 +43,36 @@ struct MailReceivedAttachmentContext: Equatable, Sendable {
 /// its own engine only in this explicit action path; Apple Mail is never asked to do anything.
 enum MailReceivedAttachmentLoader {
     static func load(_ context: MailReceivedAttachmentContext) async throws -> [MailReceivedAttachmentFile] {
-        // Captured here, on the caller's executor. The detached task must not read UserDefaults or
-        // initialize a main-actor static: a caller blocked on this wait never gets back to the main
-        // thread, and the read then waits forever. CI hung in this test until the job's time limit.
+        // The mail source is captured on the caller. The file and index work then runs on a GCD
+        // queue, not a Swift task: that work takes the index queue synchronously, and blocking a
+        // cooperative thread on DispatchQueue.sync deadlocks. CI hung in the attachment test there.
         let backend = MailBackend.current
-        return try await Task.detached(priority: .userInitiated) {
-            try await loadOffMain(context, backend: backend)
-        }.value
+        if let files = try await onBackground({ try readIfPresent(context, backend: backend) }) { return files }
+        guard context.backend == .jevcast, backend == .jevcast, NativeMailCenter.isNativeRoot(context.root),
+              let engine = NativeMailCenter.activeEngine else { throw MailReceivedAttachmentError.bodyUnavailable }
+        _ = try await engine.fetchBody(context.message.rowID)
+        guard let files = try await onBackground({ try readIfPresent(context, backend: backend) }) else {
+            throw MailReceivedAttachmentError.bodyUnavailable
+        }
+        return files
     }
 
-    private static func loadOffMain(_ context: MailReceivedAttachmentContext, backend: MailBackend) async throws -> [MailReceivedAttachmentFile] {
+    /// Runs `body` on a GCD thread and returns its value. A nil read means the body is not on disk yet.
+    private static func onBackground<T: Sendable>(_ body: @escaping @Sendable () throws -> T) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do { continuation.resume(returning: try body()) }
+                catch { continuation.resume(throwing: error) }
+            }
+        }
+    }
+
+    private static func readIfPresent(_ context: MailReceivedAttachmentContext, backend: MailBackend) throws -> [MailReceivedAttachmentFile]? {
         let identity = context.indexIdentity ?? MailStore.FileIdentity(path: MailStore.indexPath(context.root)).map {
             MailReceivedAttachmentContext.IndexIdentity(device: $0.device, inode: $0.inode)
         }
         try verifySource(context, expectedIdentity: identity, backend: backend)
-        var stored = try readStoredBody(context)
-        if stored == nil, context.backend == .jevcast {
-            guard backend == .jevcast, NativeMailCenter.isNativeRoot(context.root),
-                  let engine = NativeMailCenter.activeEngine else { throw MailReceivedAttachmentError.bodyUnavailable }
-            _ = try await engine.fetchBody(context.message.rowID)
-            stored = try readStoredBody(context)
-        }
-        guard let stored else { throw MailReceivedAttachmentError.bodyUnavailable }
+        guard let stored = try readStoredBody(context) else { return nil }
         try verifySource(context, expectedIdentity: identity, backend: backend)
         let raw = try unwrapEMLX(stored)
         return try MailReceivedAttachmentExtractor.extract(rawMessage: raw, expected: context.detail)

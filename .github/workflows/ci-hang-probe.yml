@@ -1,0 +1,60 @@
+name: Hang probe (temporary)
+
+on:
+  push:
+    branches: [cursor/ci-reliability-1c79]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: macos-26
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      JEVCAST_MAIL_OFFLINE: "1"
+      JEVCAST_SKIP_LIVE_MAIL_MODEL: "1"
+      JEVCAST_SKIP_MAIL_DICTIONARY: "1"
+      NSUnbufferedIO: "YES"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache/restore@v6
+        with:
+          path: Vendor
+          key: ghosttykit-${{ runner.os }}-${{ hashFiles('scripts/ghosttykit.sh', 'scripts/ghosttykit-libtool.patch') }}
+          fail-on-cache-miss: true
+      - run: scripts/ghosttykit.sh
+      - run: swift build --build-tests
+      - name: Probe
+        run: |
+          hangs=0
+          watch() {
+            local limit=$1 log=$2; shift 2
+            "$@" > "$log" 2>&1 &
+            local pid=$!
+            for _ in $(seq "$limit"); do
+              if ! kill -0 "$pid" 2>/dev/null; then wait "$pid"; echo "exit $? $(grep -E "Executed [0-9]+ tests" "$log" | tail -1)"; return 0; fi
+              sleep 1
+            done
+            hangs=$((hangs + 1))
+            echo "::warning::HANG after ${limit}s: $(grep -E "Test Case .* started" "$log" | tail -1)"
+            for x in $(pgrep -x xctest); do
+              sample "$x" 3 -file "/tmp/sample-$x.txt" > /dev/null 2>&1
+              echo "===== sample of xctest $x"; cat "/tmp/sample-$x.txt"
+              echo "===== children"; ps -o pid,ppid,stat,etime,command -g "$(ps -o pgid= -p "$x" | tr -d ' ')" || true
+            done
+            pkill -9 xctest || true; kill -9 "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
+          }
+          for i in 1 2 3; do
+            echo "--- full suite $i"
+            watch 420 "/tmp/full-$i.txt" swift test --skip-build
+          done
+          for i in $(seq 1 30); do
+            watch 30 "/tmp/one-$i.txt" swift test --skip-build --filter MailSendFailureTests
+          done
+          echo "hangs=$hangs"

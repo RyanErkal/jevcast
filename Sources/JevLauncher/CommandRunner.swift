@@ -83,7 +83,9 @@ enum CommandRunner {
         let box = ProcessBox()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                DispatchQueue.global(qos: .userInitiated).async {
+                // A plain thread, not DispatchQueue.global. By this point in the suite CI's global
+                // queue had stopped starting new blocks, and the test waited out the job's time limit.
+                Thread.detachNewThread {
                     let process = Process()
                     process.executableURL = URL(fileURLWithPath: step[0])
                     process.arguments = Array(step.dropFirst())
@@ -109,7 +111,7 @@ enum CommandRunner {
                     let errors = DispatchGroup()
                     nonisolated(unsafe) var errorData = Data()
                     errors.enter()
-                    DispatchQueue.global(qos: .utility).async { errorData = err.fileHandleForReading.readDataToEndOfFile(); errors.leave() }
+                    Thread.detachNewThread { errorData = err.fileHandleForReading.readDataToEndOfFile(); errors.leave() }
                     let outputData = out.fileHandleForReading.readDataToEndOfFile()
                     errors.wait()
                     process.waitUntilExit()
@@ -136,8 +138,6 @@ enum CommandRunner {
 
 /// The running process of one `capture`, so cancelling the task can end it.
 private final class ProcessBox: @unchecked Sendable {
-    /// Its own queue, so a busy global pool cannot hold the time limit past the process's own exit.
-    private let timeoutQueue = DispatchQueue(label: "jevcast.command-timeout", qos: .userInitiated)
     private let lock = NSLock()
     private var process: Process?
     private var pid: pid_t = 0
@@ -158,7 +158,10 @@ private final class ProcessBox: @unchecked Sendable {
     /// `terminate()` from this queue deadlocks the pipe read on the worker thread, and the
     /// test then waits until the job's own time limit.
     func armTimeout(_ pid: pid_t, after timeout: TimeInterval) {
-        timeoutQueue.asyncAfter(deadline: .now() + timeout) { [weak self] in self?.expire(pid) }
+        Thread.detachNewThread { [weak self] in
+            Thread.sleep(forTimeInterval: timeout)
+            self?.expire(pid)
+        }
     }
     private func expire(_ pid: pid_t) {
         let current = lock.withLock { () -> pid_t? in

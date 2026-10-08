@@ -99,11 +99,16 @@ public final class ProcessSupervisor: @unchecked Sendable {
             _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
         }
         let stdinData = launch.stdin, inFD = inPipe[1]
-        DispatchQueue.global().async(group: group) { Self.writeAll(stdinData, to: inFD, control: io); close(inFD) }
+        // Plain threads, not DispatchQueue.global. A block that never starts leaves
+        // group.wait below parked until something outside this process kills it.
+        group.enter()
+        Thread.detachNewThread { Self.writeAll(stdinData, to: inFD, control: io); close(inFD); group.leave() }
         let out = LineDrain(fd: outPipe[0], tailCap: stdoutTailBytes, lineCap: maxLineBytes, onLine: onLine, control: io)
         let err = LineDrain(fd: errPipe[0], tailCap: stderrTailBytes, lineCap: 0, onLine: nil, control: io)
-        DispatchQueue.global().async(group: group) { out.drain() }
-        DispatchQueue.global().async(group: group) { err.drain() }
+        group.enter()
+        Thread.detachNewThread { out.drain(); group.leave() }
+        group.enter()
+        Thread.detachNewThread { err.drain(); group.leave() }
 
         let reaper = Reaper(pid: pid)
         let wake = self.wake
@@ -122,7 +127,9 @@ public final class ProcessSupervisor: @unchecked Sendable {
         if kill(-pid, 0) == 0 { stopGroup(pid, reaper: nil) }
         if group.wait(timeout: .now() + 5) == .timedOut {
             io.stop()
-            group.wait()
+            // Workers poll every 100ms and leave once stopped. A wait with no limit
+            // never returns when a worker was not started.
+            _ = group.wait(timeout: .now() + 5)
         }
 
         let status = reaper.status

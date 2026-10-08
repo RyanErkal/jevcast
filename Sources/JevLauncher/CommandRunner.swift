@@ -155,8 +155,8 @@ private final class ProcessBox: @unchecked Sendable {
     }
     func noteStarted(_ pid: pid_t) { lock.withLock { self.pid = pid } }
     /// Signals the pid when the time limit passes. `Process` is not thread-safe: calling
-    /// `terminate()` from this queue deadlocks the pipe read on the worker thread, and the
-    /// test then waits until the job's own time limit.
+    /// `terminate()` from another thread deadlocks the pipe read, and the test then waits
+    /// until the job's own time limit. The wait is a thread sleep, not a GCD timer.
     func armTimeout(_ pid: pid_t, after timeout: TimeInterval) {
         Thread.detachNewThread { [weak self] in
             Thread.sleep(forTimeInterval: timeout)

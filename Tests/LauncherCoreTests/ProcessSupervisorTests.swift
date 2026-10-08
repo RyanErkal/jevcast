@@ -42,7 +42,11 @@ final class ProcessSupervisorTests: XCTestCase {
 
     func testCancel() {
         let s = ProcessSupervisor(); s.killGrace = 1
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { s.cancel() }
+        // A thread sleep, not a GCD timer: the timer block has to run for this to cancel.
+        Thread.detachNewThread {
+            Thread.sleep(forTimeInterval: 0.5)
+            s.cancel()
+        }
         let out = s.run(sh("sleep 30"), timeout: 60)
         XCTAssertEqual(out.reason, .cancelled)
     }

@@ -43,31 +43,36 @@ struct MailReceivedAttachmentContext: Equatable, Sendable {
 /// its own engine only in this explicit action path; Apple Mail is never asked to do anything.
 enum MailReceivedAttachmentLoader {
     static func load(_ context: MailReceivedAttachmentContext) async throws -> [MailReceivedAttachmentFile] {
-        try await Task.detached(priority: .userInitiated) {
-            try await loadOffMain(context)
+        // Captured here, on the caller's executor. The detached task must not read UserDefaults or
+        // initialize a main-actor static: a caller blocked on this wait never gets back to the main
+        // thread, and the read then waits forever. CI hung in this test until the job's time limit.
+        let backend = MailBackend.current
+        return try await Task.detached(priority: .userInitiated) {
+            try await loadOffMain(context, backend: backend)
         }.value
     }
 
-    private static func loadOffMain(_ context: MailReceivedAttachmentContext) async throws -> [MailReceivedAttachmentFile] {
+    private static func loadOffMain(_ context: MailReceivedAttachmentContext, backend: MailBackend) async throws -> [MailReceivedAttachmentFile] {
         let identity = context.indexIdentity ?? MailStore.FileIdentity(path: MailStore.indexPath(context.root)).map {
             MailReceivedAttachmentContext.IndexIdentity(device: $0.device, inode: $0.inode)
         }
-        try verifySource(context, expectedIdentity: identity)
+        try verifySource(context, expectedIdentity: identity, backend: backend)
         var stored = try readStoredBody(context)
         if stored == nil, context.backend == .jevcast {
-            guard NativeMailCenter.isActive, NativeMailCenter.isNativeRoot(context.root),
+            guard backend == .jevcast, NativeMailCenter.isNativeRoot(context.root),
                   let engine = NativeMailCenter.activeEngine else { throw MailReceivedAttachmentError.bodyUnavailable }
             _ = try await engine.fetchBody(context.message.rowID)
             stored = try readStoredBody(context)
         }
         guard let stored else { throw MailReceivedAttachmentError.bodyUnavailable }
-        try verifySource(context, expectedIdentity: identity)
+        try verifySource(context, expectedIdentity: identity, backend: backend)
         let raw = try unwrapEMLX(stored)
         return try MailReceivedAttachmentExtractor.extract(rawMessage: raw, expected: context.detail)
     }
 
     private static func verifySource(_ context: MailReceivedAttachmentContext,
-                                     expectedIdentity: MailReceivedAttachmentContext.IndexIdentity?) throws {
+                                     expectedIdentity: MailReceivedAttachmentContext.IndexIdentity?,
+                                     backend: MailBackend) throws {
         guard FileManager.default.fileExists(atPath: MailStore.indexPath(context.root)) else {
             throw MailReceivedAttachmentError.sourceChanged
         }
@@ -79,11 +84,11 @@ enum MailReceivedAttachmentLoader {
         }
         switch context.backend {
         case .appleMail:
-            guard MailBackend.current == .appleMail, !NativeMailCenter.isNativeRoot(context.root) else {
+            guard backend == .appleMail, !NativeMailCenter.isNativeRoot(context.root) else {
                 throw MailReceivedAttachmentError.sourceChanged
             }
         case .jevcast:
-            guard MailBackend.current == .jevcast, NativeMailCenter.isNativeRoot(context.root), NativeMailCenter.isActive else {
+            guard backend == .jevcast, NativeMailCenter.isNativeRoot(context.root) else {
                 throw MailReceivedAttachmentError.sourceChanged
             }
         }

@@ -10,6 +10,14 @@ enum MailBackend: String, CaseIterable, Identifiable {
     var title: String { self == .appleMail ? "Apple Mail" : "Jevcast accounts" }
 }
 
+/// The mail store folder. A free constant, not a member of the main-actor center: the attachment
+/// reader checks it from a background queue, and initializing a main-actor static from that queue
+/// deadlocks when the main thread is waiting for the read.
+enum NativeMailLocation {
+    static let root = URL(fileURLWithPath: NSHomeDirectory())
+        .appendingPathComponent("Library/Application Support/Jevcast/Mail", isDirectory: true)
+}
+
 /// Jevcast's own mail accounts: the account list beside the store, passwords in the Keychain, and
 /// the engine that syncs them. The mail reader and `MailActions` use the `nonisolated` parts from
 /// any thread.
@@ -17,8 +25,7 @@ enum MailBackend: String, CaseIterable, Identifiable {
 final class NativeMailCenter: ObservableObject {
     static let shared = NativeMailCenter()
 
-    nonisolated static let root = URL(fileURLWithPath: NSHomeDirectory())
-        .appendingPathComponent("Library/Application Support/Jevcast/Mail", isDirectory: true)
+    nonisolated static let root = NativeMailLocation.root
     nonisolated static var accountsFile: URL { root.appendingPathComponent("accounts.json") }
     /// Posted, on the main queue, after the store changes.
     nonisolated static let changed = Notification.Name("JevcastNativeMailChanged")
@@ -42,7 +49,7 @@ final class NativeMailCenter: ObservableObject {
     /// The engine while Jevcast accounts are the mail source.
     nonisolated static var activeEngine: NativeMailEngine? { isActive ? lock.withLock { runningEngine } : nil }
 
-    nonisolated static func isNativeRoot(_ path: String) -> Bool { path == root.path }
+    nonisolated static func isNativeRoot(_ path: String) -> Bool { path == NativeMailLocation.root.path }
 
     /// Ready once there is an account and a store to read.
     nonisolated static func status() -> MailStore.Status {

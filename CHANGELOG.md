@@ -7,7 +7,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 ### Fixed
 
 - **Source builds on Xcode 26.** Split the Mail account sidebar into smaller view expressions so the hosted Swift compiler can check it. Mail behavior and layout are unchanged.
-- **Background attachment reads.** Initialize the storage location outside the UI actor to avoid a first-read deadlock on Xcode 26. Files still load off the main actor.
+- **Background attachment reads.** Initialize the storage location outside the UI actor and remove a nested detached task that can stall the first read on Xcode 26. Files still load off the main actor.
 
 ## [1.21.0] - 2026-10-09
 

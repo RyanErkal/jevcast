@@ -42,13 +42,9 @@ struct MailReceivedAttachmentContext: Equatable, Sendable {
 /// Every filesystem read runs away from the main actor. A missing Jevcast body is fetched from
 /// its own engine only in this explicit action path; Apple Mail is never asked to do anything.
 enum MailReceivedAttachmentLoader {
-    static func load(_ context: MailReceivedAttachmentContext) async throws -> [MailReceivedAttachmentFile] {
-        try await Task.detached(priority: .userInitiated) {
-            try await loadOffMain(context)
-        }.value
-    }
-
-    private static func loadOffMain(_ context: MailReceivedAttachmentContext) async throws -> [MailReceivedAttachmentFile] {
+    // Nonisolated async work uses the generic executor in this package's Swift 5 mode.
+    // A second detached task can stall the older Swift runtime during a cold attachment read.
+    nonisolated static func load(_ context: MailReceivedAttachmentContext) async throws -> [MailReceivedAttachmentFile] {
         let identity = context.indexIdentity ?? MailStore.FileIdentity(path: MailStore.indexPath(context.root)).map {
             MailReceivedAttachmentContext.IndexIdentity(device: $0.device, inode: $0.inode)
         }

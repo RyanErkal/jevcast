@@ -16,6 +16,7 @@ struct MailHTMLView: NSViewRepresentable {
     var zoom: Double = 1
     /// Fits wide mail to the pane with a fixed style sheet. No script measures or changes the page.
     var fitsWidth = true
+    var selectMessage: ((Int64) -> Void)? = nil
 
     static func policy(remote: Bool) -> String {
         remote ? "default-src 'none'; img-src data: http: https:; style-src 'unsafe-inline' http: https:; font-src data: http: https:"
@@ -66,6 +67,7 @@ struct MailHTMLView: NSViewRepresentable {
     }
 
     func updateNSView(_ view: WKWebView, context: Context) {
+        context.coordinator.selectMessage = selectMessage
         if abs(view.pageZoom - zoom) > 0.001 { view.pageZoom = zoom }
         let key = DocumentKey(id: documentID, html: html, images: inlineImages, remote: loadsRemote, fitsWidth: fitsWidth)
         guard context.coordinator.shown != key else { return }
@@ -83,9 +85,12 @@ struct MailHTMLView: NSViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         var shown: DocumentKey?
+        var selectMessage: ((Int64) -> Void)?
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
             // Only the message itself loads. A click on a web or mail link opens outside Jevcast.
             if action.navigationType == .linkActivated, let url = action.request.url {
+                if url.scheme == "jevcast-message", url.host == "select",
+                   let id = Int64(url.lastPathComponent) { selectMessage?(id) }
                 if ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") { Frontmost.open(url) }
                 decisionHandler(.cancel)
                 return

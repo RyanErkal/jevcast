@@ -186,7 +186,7 @@ final class MailModel: ObservableObject {
     @Published private(set) var detailHTML: String?
     /// Parsed and prepared bodies of recent messages, most recently used last, so moving back
     /// and forth shows them at once.
-    private struct Body { let message: MIMEMessage; let html: String? }
+    struct Body: Sendable { let message: MIMEMessage; let html: String? }
     private var bodies: [Int64: Body] = [:]
     private var bodyOrder: [Int64] = []
     private static let bodyLimit = 24
@@ -208,7 +208,6 @@ final class MailModel: ObservableObject {
     var activeFilterRecipientMetadataUnknownRows: Set<Int64> = []
     var activeFilterAttachmentMetadataUnknownRows: Set<Int64> = []
     var activeFilterOffset = 0
-    var expandedConversationIDs: Set<MailConversationID> = []
 
     init(aiWriting: @escaping (AIWritingRequest) async throws -> AIWritingReply, aiWritingAllowed: @escaping () -> Bool, statusProvider: @escaping @Sendable () -> MailStore.Status = { MailStore.status() },
          setRead: @escaping (Bool, MailSummary, MailMailbox, MailMailbox?) async throws -> Void = { try await MailActions.setRead($0, $1, in: $2, fallback: $3) },
@@ -756,9 +755,6 @@ final class MailModel: ObservableObject {
         if byUser { selectedMessageIDs = rowID.map { [$0] } ?? [] }
         selectedID = rowID
         selectingQuietly = false
-        if let rowID, let conversation = conversationGroups.first(where: { $0.messages.contains { $0.summary.rowID == rowID } }), conversation.messages.count > 1 {
-            expandedConversationIDs.insert(conversation.id)
-        }
         guard unchanged else { return }
         // The same row again, such as a message the list just inserted, still needs its body.
         if detail == nil, !detailMissing { loadSelected() }
@@ -867,6 +863,31 @@ final class MailModel: ObservableObject {
         return Body(message: message, html: message.html.map { MailHTMLView.inlining($0, images: message.inlineImages) })
     }
 
+
+    /// Loads a visible thread member without changing the reader selection or marking it read.
+    func conversationBody(_ message: MailSummary) async -> Body? {
+        if let cached = bodies[message.rowID] { return cached }
+        guard !isDemo, let root, let box = mailbox(message.mailbox) else { return nil }
+        let identity = indexIdentity
+        var loaded = await Task.detached(priority: .userInitiated) {
+            Self.loadBody(root: root, box: box, rowID: message.rowID)
+        }.value
+        guard !Task.isCancelled else { return nil }
+        if loaded == nil, let engine = NativeMailCenter.activeEngine,
+           NativeMailCenter.isNativeRoot(root), (try? await engine.fetchBody(message.rowID)) == true {
+            loaded = await Task.detached(priority: .userInitiated) {
+                Self.loadBody(root: root, box: box, rowID: message.rowID)
+            }.value
+        }
+        guard !Task.isCancelled, self.root == root, indexIdentity == identity else { return nil }
+        if let loaded { remember(loaded, for: message.rowID) }
+        return loaded
+    }
+
+    func installDemoBody(_ detail: MIMEMessage, rowID: Int64) {
+        guard isDemo else { return }
+        bodies[rowID] = Body(message: detail, html: detail.html)
+    }
 
     /// Invented data for offline --snapshot-ui --demo renders. This does not start a mail source.
     func installDemo(mailboxes: [MailMailbox], messages: [MailSummary], detail: MIMEMessage? = nil) {
@@ -1061,11 +1082,13 @@ final class MailModel: ObservableObject {
     }
 
     func moveSelection(_ delta: Int) {
-        guard !messages.isEmpty else { return }
-        let index = messages.firstIndex { $0.rowID == selectedID } ?? 0
-        let next = min(max(index + delta, 0), messages.count - 1)
-        selectedID = messages[next].rowID
-        if next >= messages.count - 30 { loadNextPage() }
+        let groups = conversationGroups
+        guard !groups.isEmpty else { return }
+        let index = groups.firstIndex { $0.messages.contains { $0.summary.rowID == selectedID } }
+        let next = min(max((index ?? (delta > 0 ? -1 : groups.count)) + delta, 0), groups.count - 1)
+        select(groups[next].latest.summary.rowID, byUser: true)
+        selectionAnchorID = selectedID
+        if next >= groups.count - 10 { loadNextPage() }
     }
 
     // MARK: AI writing

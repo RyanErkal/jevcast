@@ -2,6 +2,14 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.21.2] - 2026-10-09
+
+### Fixed
+
+- **Mail keyboard selection.** Arrow keys move between visible conversation rows and keep the active row highlighted while the search field has focus.
+- **Conversation reading.** One list row per conversation, with replies together in one scrolling reader. Removed the nested list and conversation strip. Repeated HTML quotes stay hidden until Show quoted text is selected.
+- **Compact account status.** The connection dot opens account details. Status text remains in its tooltip and accessibility label.
+
 ## [1.21.1] - 2026-10-09
 
 ### Fixed

@@ -95,6 +95,17 @@ public enum MailHTML {
     private static func quoteParts(_ original: MIMEMessage) -> (style: String, className: String, fragment: String) {
         let body = original.html.map(clean) ?? plain(original.readableText)
         let className = "jevcast-quote-" + UUID().uuidString.lowercased()
+        let (css, fragment) = scopedParts(body, className: className)
+        return (css, className, fragment)
+    }
+
+    /// A complete sender document embedded in a thread without leaking styles into other replies.
+    public static func threadFragment(_ html: String, className: String) -> String {
+        let (css, fragment) = scopedParts(clean(html), className: className)
+        return css + "<div class=\"" + escape(className) + "\">" + fragment + "</div>"
+    }
+
+    private static func scopedParts(_ body: String, className: String) -> (String, String) {
         var css = ""
         if let regex = try? NSRegularExpression(pattern: #"(?is)<style\b[^>]*>(.*?)</style\s*>"#) {
             for match in regex.matches(in: body, range: NSRange(body.startIndex..., in: body)) {
@@ -106,6 +117,6 @@ public enum MailHTML {
             .replacingOccurrences(of: #"(?is)<body\b([^>]*)>"#, with: "<div$1>", options: .regularExpression)
             .replacingOccurrences(of: #"(?is)</body\s*>"#, with: "</div>", options: .regularExpression)
             .replacingOccurrences(of: "(?is)<!doctype[^>]*>|</?html\\b[^>]*>|<head\\b[^>]*>.*?</head>|<style\\b[^>]*>.*?</style\\s*>", with: "", options: .regularExpression)
-        return (css.isEmpty ? "" : "<style>" + css + "</style>", className, fragment)
+        return (css.isEmpty ? "" : "<style>" + css + "</style>", fragment)
     }
 }

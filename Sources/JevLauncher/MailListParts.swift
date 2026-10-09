@@ -12,24 +12,28 @@ struct MailMessageList: View {
     var onDoubleClick: ((Int64) -> Void)?
 
     var body: some View {
-        ScrollViewReader { proxy in
+        let groups = model.conversationGroups
+        let activeRow = groups.first { $0.messages.contains { $0.summary.rowID == model.selectedID } }?.latest.summary.rowID
+        return ScrollViewReader { proxy in
             List(selection: selection) {
-                ForEach(model.conversationGroups) { conversation in
-                    if conversation.messages.count > 1 {
-                        MailConversationSummaryRow(conversation: conversation,
-                                                   expanded: model.expandedConversationIDs.contains(conversation.id),
-                                                   isVIP: conversation.messages.contains { model.isVIP($0.summary) },
-                                                   toggle: { model.toggleConversation(conversation) })
-                            .listRowSeparator(.hidden)
-                        if model.expandedConversationIDs.contains(conversation.id) {
-                            ForEach(conversation.messages, id: \.summary.rowID) { item in
-                                messageRow(item.summary)
-                                    .padding(.leading, 15)
+                ForEach(groups) { conversation in
+                    MailConversationSummaryRow(conversation: conversation,
+                        isVIP: conversation.messages.contains { model.isVIP($0.summary) },
+                        delete: { model.delete(conversation.latest.summary.rowID) })
+                        .tag(conversation.latest.summary.rowID).id(conversation.latest.summary.rowID)
+                        .listRowBackground(activeRow == conversation.latest.summary.rowID
+                            ? Color.accentColor.opacity(0.22) : Color.clear)
+                        .onDrag { NSItemProvider(object: NSString(string: String(conversation.latest.summary.rowID))) }
+                        .onAppear {
+                            if conversation.messages.contains(where: { $0.summary.rowID == model.pageTriggerID }) { model.loadNextPage() }
+                        }
+                        .contextMenu {
+                            Button("Delete", role: .destructive) { model.delete(conversation.latest.summary.rowID) }
+                            Button("Delete All from " + conversation.latest.summary.sender, role: .destructive) {
+                                model.select(conversation.latest.summary.rowID, byUser: false)
+                                model.deleteAllFromSender()
                             }
                         }
-                    } else if let item = conversation.messages.first {
-                        messageRow(item.summary)
-                    }
                 }
                 if model.hasMore {
                     ProgressView().controlSize(.small).frame(maxWidth: .infinity)
@@ -67,27 +71,18 @@ struct MailMessageList: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .onChange(of: model.selectedID) { _, id in if scrollsToSelection, let id { proxy.scrollTo(id) } }
+            .onChange(of: model.selectedConversationRowID) { _, id in if scrollsToSelection, let id { proxy.scrollTo(id) } }
             // The list comes back after a reply in the panel, scrolled to the message it left.
             .onAppear {
-                guard scrollsToSelection, let id = model.selectedID else { return }
+                guard scrollsToSelection, let id = model.selectedConversationRowID else { return }
                 DispatchQueue.main.async { proxy.scrollTo(id) }
             }
         }
     }
 
-    private func messageRow(_ message: MailSummary) -> some View {
-        MailRow(message: message, isVIP: model.isVIP(message), delete: { model.delete(message.rowID) },
-                deleteAll: { model.select(message.rowID, byUser: false); model.deleteAllFromSender() })
-            .equatable()
-            .tag(message.rowID).id(message.rowID)
-            .onDrag { NSItemProvider(object: NSString(string: String(message.rowID))) }
-            .onAppear { if message.rowID == model.pageTriggerID { model.loadNextPage() } }
-    }
-
     private var selection: Binding<Set<Int64>> {
-        Binding(get: { model.selectedMessageIDs }, set: { ids in
-            model.setSelectedMessageIDs(ids)
+        Binding(get: { model.selectedConversationRowIDs }, set: { ids in
+            model.selectConversationRows(ids)
             // A single click also gives the page draft/reader handling. Multi-selection stays
             // in the list so the page's one-message selection cannot collapse the set.
             if ids.count <= 1, let id = ids.sorted().last, let pick { pick(id) }

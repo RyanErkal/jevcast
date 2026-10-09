@@ -13,6 +13,9 @@ enum MailSnapshots {
             ("mail-reply", AnyView(reply()), NSSize(width: 820, height: 760)),
             panel("mail-outbox", outbox()),
             panel("mail-workspace", MailPage(mail: workspace())),
+            panel("mail-thread", thread()),
+            panel("mail-thread-compact", thread(), width: 980),
+            panel("mail-keyboard-selection", keyboardSelection()),
             panel("mail-workspace-light", MailPage(mail: workspace())),
             panel("mail-workspace-folders-expanded", MailPage(mail: workspace(providerFoldersExpanded: true))),
             panel("mail-workspace-compact", MailPage(mail: workspace()), width: 980),
@@ -194,7 +197,7 @@ enum MailSnapshots {
         let messages = subjects.enumerated().map { offset, subject in
             MailSummary(rowID: Int64(offset + 1), mailbox: 1, subject: subject, senderName: people[offset],
                         senderAddress: "sender\(offset)@example.com", snippet: "", date: Date().addingTimeInterval(Double(-offset * 3600)),
-                        read: offset > 1, flagged: offset == 1, conversation: 0)
+                        read: offset > 1, flagged: offset == 1, conversation: Int64(offset + 1))
         }
         var message = OutgoingMessage(from: .init(name: "Sam Lee", address: "sam@example.com"), to: [.init(address: "alex@example.com")],
                                       subject: "Friday's Plan", body: "Hi Alex,\n\nFriday at 10 works well. Please find the agenda attached.\n\nSee you then,\nSam")
@@ -215,6 +218,34 @@ enum MailSnapshots {
             model.serverSearch = .more
         }
         return model
+    }
+
+    static func thread() -> MailPage {
+        let model = workspace()
+        let first = model.messages[0]
+        let replies = (0..<4).map { offset in
+            MailSummary(rowID: Int64(100 + offset), mailbox: 1, subject: "Re: Friday's Plan",
+                senderName: offset % 2 == 0 ? "Sam Lee" : "Alex Morgan", senderAddress: offset % 2 == 0 ? "sam@example.com" : "alex@example.com",
+                snippet: "", date: first.date.addingTimeInterval(Double(-offset * 3600)), read: offset > 0,
+                flagged: false, conversation: 900)
+        }
+        model.messages = replies + model.messages.dropFirst()
+        for (index, message) in replies.enumerated() {
+            let text = ["Confirmed. See you Friday at 10!", "Thanks Sam. Could we start at 10?", "Friday works. Shall we meet at the studio?", "Are you free to review the designs this week?"][index]
+            let raw = "From: \(message.senderAddress)\r\nTo: alex@example.com\r\nSubject: Friday's Plan\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<p>" + text + "</p><div class=\"gmail_quote\">On Thursday, someone wrote:<blockquote>Earlier message repeated here.</blockquote></div>"
+            if let detail = MIMEMessage.parse(Data(raw.utf8)) { model.installDemoBody(detail, rowID: message.rowID) }
+        }
+        model.select(replies[0].rowID, byUser: true)
+        var account = NativeMailAccount.preset(.gmail, name: "Alex", email: "alex@example.com")!
+        account.id = "demo"
+        let center = NativeMailCenter(backend: .jevcast, accounts: [account], defaults: nil)
+        return MailPage(mail: model, accountCenter: center)
+    }
+
+    static func keyboardSelection() -> MailPage {
+        let page = thread()
+        page.mail?.moveSelection(1)
+        return page
     }
 
     /// A draft whose server copy is blocked, open in the panel beside the list.

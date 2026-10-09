@@ -37,41 +37,7 @@ struct MailSetupView: View {
     }
 }
 
-/// Sender, subject, and date: no preview, so the inbox reads at a glance. Hovering shows Delete.
-/// Rows compare by message only, so a list update redraws just the rows that changed.
-struct MailRow: View, Equatable {
-    static func == (a: MailRow, b: MailRow) -> Bool { a.message == b.message && a.isVIP == b.isVIP }
-    let message: MailSummary
-    var isVIP = false
-    var delete: () -> Void = {}
-    var deleteAll: () -> Void = {}
-    @State private var hovering = false
-    var body: some View {
-        HStack(alignment: .center, spacing: 8) {
-            Circle().fill(message.read ? Color.clear : Color.accentColor).frame(width: 7, height: 7)
-                .accessibilityLabel(message.read ? "" : "Unread")
-            VStack(alignment: .leading, spacing: 1) {
-                Text(message.sender).font(.system(size: 13, weight: message.read ? .regular : .semibold)).lineLimit(1)
-                Text(message.subject.isEmpty ? "No subject" : message.subject).font(.system(size: 12))
-                    .foregroundStyle(message.read ? .secondary : .primary).lineLimit(1)
-            }
-            Spacer(minLength: 6)
-            if isVIP { Image(systemName: "star.fill").foregroundStyle(.yellow).font(.caption).accessibilityLabel("VIP sender") }
-            if message.flagged { Image(systemName: "flag.fill").foregroundStyle(.orange).font(.caption) }
-            if hovering {
-                Button(action: delete) { Image(systemName: "trash") }.buttonStyle(.borderless).help("Delete (⌫)")
-            } else {
-                Text(Self.date(message.date)).font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .padding(.vertical, 3)
-        .contentShape(Rectangle())
-        .onHover { hovering = $0 }
-        .contextMenu {
-            Button("Delete", role: .destructive, action: delete)
-            Button("Delete All from \(message.sender)", role: .destructive, action: deleteAll)
-        }
-    }
+enum MailRow {
     static func date(_ date: Date) -> String {
         Calendar.current.isDateInToday(date) ? date.formatted(date: .omitted, time: .shortened)
             : Calendar.current.isDate(date, equalTo: Date(), toGranularity: .year) ? date.formatted(.dateTime.day().month(.abbreviated))
@@ -106,18 +72,23 @@ struct MailReader: View {
         if let shown {
             VStack(alignment: .leading, spacing: 0) {
                 actionBar(shown.message)
-                if !composing, let conversation = model.selectedConversation {
-                    MailConversationReader(model: model, conversation: conversation)
+                Divider()
+                if composing || (model.selectedConversation?.messages.count ?? 0) <= 1 {
+                    header(shown)
+                    Divider()
+                } else if let detail = shown.detail, !detail.attachments.isEmpty {
+                    MailReceivedAttachments(model: model, message: shown.message, detail: detail).padding(10)
                 }
-                Divider()
-                header(shown)
-                Divider()
                 if !composing, let summary = model.summary {
                     GroupBox { Text(summary).font(.system(size: 12)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
                         label: { Label("AI summary", systemImage: "sparkles") }
                         .padding(12)
                 }
-                body(shown)
+                if !composing, let conversation = model.selectedConversation, conversation.messages.count > 1 {
+                    MailConversationReader(model: model, conversation: conversation,
+                        zoom: MailReading.clampZoom(zoom), fitsWidth: fitsWidth, prefersPlain: prefersPlain)
+                        .id(conversation.id)
+                } else { body(shown) }
             }
         } else {
             Text("Select a message").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)

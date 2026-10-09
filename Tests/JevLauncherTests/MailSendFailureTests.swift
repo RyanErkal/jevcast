@@ -41,12 +41,21 @@ final class MailSendFailureTests: XCTestCase {
     }
 
     /// `CommandRunner` writes the time-limit text; a real stopped process shows that both agree.
+    @MainActor
     func testTheTimeLimitOfARealProcessMayHaveSent() async {
-        do {
-            _ = try await CommandRunner.capture(["/bin/sleep", "5"], timeout: 0.2)
-            XCTFail("The time limit stops the process")
-        } catch {
-            XCTAssertTrue(MailActions.sendFailure(error) is MailMaybeSentError, error.localizedDescription)
+        let finished = expectation(description: "The timed process reports its result")
+        let work = Task { @MainActor in
+            defer { finished.fulfill() }
+            do {
+                _ = try await CommandRunner.capture(["/bin/sleep", "5"], timeout: 0.2)
+                XCTFail("The time limit stops the process")
+            } catch {
+                XCTAssertTrue(MailActions.sendFailure(error) is MailMaybeSentError, error.localizedDescription)
+            }
         }
+        // Match the app-actor context of the other CommandRunner checks. Keep this test
+        // bounded even if the subprocess bridge stops returning its continuation.
+        await fulfillment(of: [finished], timeout: 10)
+        work.cancel()
     }
 }

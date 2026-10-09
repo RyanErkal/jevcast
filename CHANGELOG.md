@@ -2,6 +2,12 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.21.1] - 2026-10-09
+
+### Fixed
+
+- **Source builds on Xcode 26.** Split the Mail account sidebar into smaller view expressions so the hosted Swift compiler can check it. Mail behavior and layout are unchanged.
+
 ## [1.21.0] - 2026-10-09
 
 ### Added

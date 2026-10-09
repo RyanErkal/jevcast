@@ -74,3 +74,13 @@ After installation, all six configured accounts passed live IMAP and SMTP
 sign-in checks. The diagnostic listed folders and read Inbox counts. It did
 not send, move, delete, or mark messages read. Live delivery and cross-device
 draft acceptance remain untested.
+
+### Xcode 26 source-build correction
+
+GitHub's Xcode 26 compiler timed out on the Mail sidebar in 1.21.0. Version
+1.21.1 splits that view into smaller expressions. The full local suite again
+passed with 1,184 tests, three skipped, zero failures, and all 35 demo renders
+completed. The account sidebar retained its controls and layout.
+
+The 1.21.1 universal build also passed strict signature verification. GitHub's
+hosted compiler and tests are checked separately from these local results.

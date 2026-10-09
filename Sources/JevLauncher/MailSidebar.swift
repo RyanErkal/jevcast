@@ -56,49 +56,67 @@ struct MailSidebar: View {
     }
 
     private func accountSection(_ account: String) -> some View {
-        let expanded = expanded("account:" + account)
+        let isExpanded = expanded("account:" + account)
         let folders = MailSidebarFolders(model.mailboxes.filter { $0.accountID == account })
-        let state = center.backend == .jevcast ? center.states[account] : nil
-        let label = accountLabels[account] ?? account
+        let state: MailAccountSync.State? = center.backend == .jevcast ? center.states[account] : nil
         return VStack(alignment: .leading, spacing: 0) {
-            Button { expanded.wrappedValue.toggle() } label: {
-                HStack(spacing: 6) {
-                    Circle().fill(statusColor(state)).frame(width: 6, height: 6)
-                    Text(label).font(.system(size: 11, weight: .semibold)).lineLimit(1)
-                    Spacer(minLength: 4)
-                    Image(systemName: expanded.wrappedValue ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                }
-                .foregroundStyle(.secondary).padding(.horizontal, 8)
-                .frame(height: 24).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(accountTitle(account) + " · " + status(state))
-            .accessibilityLabel(label + ", " + accountTitle(account))
-            .accessibilityValue(status(state) + ", " + (expanded.wrappedValue ? "Expanded" : "Collapsed"))
+            accountHeader(account, state: state, isExpanded: isExpanded)
             if center.backend == .jevcast, center.accounts.contains(where: { $0.id == account }) {
-                Button { showAccount(account) } label: {
-                    HStack(spacing: 4) {
-                        Text(status(state))
-                        Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
-                    }.contentShape(Rectangle())
-                }
-                    .buttonStyle(.plain).font(.system(size: 11))
-                    .foregroundStyle(statusColor(state))
-                    .padding(.horizontal, 8).padding(.bottom, 4)
-                    .help("View connection details for " + accountTitle(account))
+                accountConnection(account, state: state)
             }
-            if expanded.wrappedValue {
-                ForEach(folders.primary) { node in
-                    MailFolderNode(node: node, title: folders.title(node), model: model)
-                }
-                ForEach(folders.providerFolders) { node in
-                    MailProviderFolders(node: node, model: model)
-                }
-                ForEach(folders.folders) { node in
-                    MailFolderNode(node: node, title: node.title, model: model)
-                }
-            }
+            if isExpanded.wrappedValue { accountFolders(folders) }
+        }
+    }
+
+    private func accountHeader(_ account: String, state: MailAccountSync.State?, isExpanded: Binding<Bool>) -> some View {
+        let label = accountLabels[account] ?? account
+        let title = accountTitle(account)
+        let stateLabel = status(state)
+        let accessibilityLabel = label + ", " + title
+        let accessibilityValue = stateLabel + ", " + (isExpanded.wrappedValue ? "Expanded" : "Collapsed")
+        return Button { isExpanded.wrappedValue.toggle() } label: {
+            accountHeaderLabel(label, state: state, isExpanded: isExpanded.wrappedValue)
+        }
+        .buttonStyle(.plain)
+        .help(title + " · " + stateLabel)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue(accessibilityValue)
+    }
+
+    private func accountHeaderLabel(_ label: String, state: MailAccountSync.State?, isExpanded: Bool) -> some View {
+        HStack(spacing: 6) {
+            Circle().fill(statusColor(state)).frame(width: 6, height: 6)
+            Text(label).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+            Spacer(minLength: 4)
+            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                .font(.system(size: 9, weight: .semibold))
+        }
+        .foregroundStyle(.secondary).padding(.horizontal, 8)
+        .frame(height: 24).contentShape(Rectangle())
+    }
+
+    private func accountConnection(_ account: String, state: MailAccountSync.State?) -> some View {
+        Button { showAccount(account) } label: {
+            HStack(spacing: 4) {
+                Text(status(state))
+                Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+            }.contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).font(.system(size: 11))
+        .foregroundStyle(statusColor(state))
+        .padding(.horizontal, 8).padding(.bottom, 4)
+        .help("View connection details for " + accountTitle(account))
+    }
+
+    @ViewBuilder private func accountFolders(_ folders: MailSidebarFolders) -> some View {
+        ForEach(folders.primary) { node in
+            MailFolderNode(node: node, title: folders.title(node), model: model)
+        }
+        ForEach(folders.providerFolders) { node in
+            MailProviderFolders(node: node, model: model)
+        }
+        ForEach(folders.folders) { node in
+            MailFolderNode(node: node, title: node.title, model: model)
         }
     }
 

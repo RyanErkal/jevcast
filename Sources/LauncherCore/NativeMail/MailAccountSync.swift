@@ -141,8 +141,10 @@ public actor MailAccountSync {
             }
             if visible { await refreshServerCounts() }
             let more = try await prefetchBodies()
+            let offlineMore = try await runOfflineWork()
+            await replayOfflineActions()
             if case .ready = state, !visible {} else { setState(.ready(Date())) }
-            return .done(more: more)
+            return .done(more: more || offlineMore)
         } catch is CancellationError {
             return .cancelled
         } catch MailError.uidValidityChanged {
@@ -205,6 +207,7 @@ public actor MailAccountSync {
     /// New mail, then flag changes, then removed messages. Only new mail costs a download.
     func sync(_ original: NativeMailStore.Mailbox, full: Bool) async throws {
         var box = original
+        let offlineStorage = try await store.offlinePolicy(for: account.id)
         let info: IMAPClient.MailboxInfo
         do { info = try await syncClient.select(box.name) } catch MailError.commandFailed(_, .no, _) {
             // The mailbox went away or cannot be opened; the next listing decides.
@@ -225,12 +228,15 @@ public actor MailAccountSync {
 
         if firstSync {
             if info.exists > 0 {
-                let count = box.role == .inbox ? policy.firstInbox : policy.firstOther
-                let newest = try await newestUIDs(count, below: info.uidNext ?? .max, above: 0, in: box.name, validity: validity, client: syncClient)
-                try await fetchHeaders(newest.uids, into: box, validity: validity, items: items, client: syncClient)
-                box.complete = newest.reachedFloor && !newest.limited
-                if let floor = newest.uids.min() { box.historyFloorUID = floor }
-                else if newest.reachedFloor { box.historyFloorUID = 1 }
+                let baseCount = box.role == .inbox ? policy.firstInbox : policy.firstOther
+                let count = offlineStorage.mode == .recent ? min(baseCount, offlineStorage.recentMessageLimit) : baseCount
+                if count > 0 {
+                    let newest = try await newestUIDs(count, below: info.uidNext ?? .max, above: 0, in: box.name, validity: validity, client: syncClient)
+                    try await fetchHeaders(newest.uids, into: box, validity: validity, items: items, client: syncClient)
+                    box.complete = newest.reachedFloor && !newest.limited
+                    if let floor = newest.uids.min() { box.historyFloorUID = floor }
+                    else if newest.reachedFloor { box.historyFloorUID = 1 }
+                }
             } else {
                 box.complete = true
                 box.historyFloorUID = 1
@@ -432,23 +438,39 @@ public actor MailAccountSync {
     /// Bodies of the newest inbox messages, one batch per step, so new mail opens at once.
     private func prefetchBodies() async throws -> Bool {
         guard policy.prefetchInbox > 0 else { return false }
+        let offline = try await store.offlinePolicy(for: account.id)
+        guard !offline.paused, offline.indexBodies || offline.downloadAttachments else { return false }
         for box in mailboxes where box.role == .inbox {
             guard let validity = box.uidValidity else { continue }
-            let missing = try await store.missingBodies(in: box.rowID, within: policy.prefetchInbox, limit: policy.bodyBatch, maxSize: policy.prefetchMaxSize)
+            let within = offline.mode == .recent ? min(policy.prefetchInbox, offline.recentMessageLimit) : policy.prefetchInbox
+            guard within > 0 else { continue }
+            let missing = try await store.missingBodies(in: box.rowID, within: within, limit: policy.bodyBatch, maxSize: policy.prefetchMaxSize, requireRaw: offline.downloadAttachments, requireIndex: offline.indexBodies)
             guard !missing.isEmpty else { continue }
-            try await fetchBodies(missing, in: box, validity: validity, client: syncClient)
+            try await fetchBodies(missing, in: box, validity: validity, client: syncClient, storeRaw: offline.downloadAttachments, indexText: offline.indexBodies)
             return true
         }
         return false
     }
 
-    func fetchBodies(_ rows: [(rowID: Int64, uid: UInt32)], in box: NativeMailStore.Mailbox, validity: UInt32, client: IMAPClient) async throws {
-        let fetched = try await client.fetch(uids: IMAPSequenceSet(rows.map(\.uid)), items: "(UID BODY.PEEK[])", in: box.name, validity: validity)
-        var rowFor: [UInt32: Int64] = [:]
-        for row in rows { rowFor[row.uid] = row.rowID }
-        for data in fetched {
-            guard let uid = data.uid, let rowID = rowFor[uid], let raw = data.message else { continue }
-            try await store.saveBody(rowID, raw: raw)
+    func fetchBodies(_ rows: [(rowID: Int64, uid: UInt32)], in box: NativeMailStore.Mailbox, validity: UInt32, client: IMAPClient, storeRaw: Bool = true, indexText: Bool = true) async throws {
+        var uncached: [(rowID: Int64, uid: UInt32)] = []
+        for row in rows {
+            if indexText, let raw = try await store.storedBody(row.rowID), let message = MIMEMessage.parse(raw) {
+                try await store.saveIndexedBodyText(row.rowID, text: message.readableText)
+            } else { uncached.append(row) }
+        }
+        let rows = uncached
+        let advertised = await client.messageLimit ?? rows.count
+        let size = max(1, min(rows.count, advertised))
+        for chunk in IMAPSequenceSet(rows.map(\.uid)).chunked(maxCount: size) {
+            let fetched = try await client.fetch(uids: chunk, items: "(UID BODY.PEEK[])", in: box.name, validity: validity)
+            var rowFor: [UInt32: Int64] = [:]
+            for row in rows where chunk.numbers.contains(row.uid) { rowFor[row.uid] = row.rowID }
+            for data in fetched {
+                guard let uid = data.uid, let rowID = rowFor[uid], let raw = data.message else { continue }
+                if storeRaw { try await store.saveBody(rowID, raw: raw, indexText: indexText) }
+                else if let text = MIMEMessage.parse(raw)?.readableText { try await store.saveIndexedBodyText(rowID, text: text) }
+            }
         }
         await announce()
     }

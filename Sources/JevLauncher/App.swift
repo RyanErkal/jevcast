@@ -26,6 +26,12 @@ struct JevLauncherApp {
         if CommandLine.arguments.contains("--diagnose-mail") { Diagnostics.mail(); return }
         if CommandLine.arguments.contains("--diagnose-native-mail") { Diagnostics.nativeMail(); return }
         if CommandLine.arguments.contains("--diagnose-mail-setup") { Diagnostics.mailSetup(); return }
+        if let index = CommandLine.arguments.firstIndex(of: "--diagnose-mail-reconnect") {
+            guard CommandLine.arguments.count == index + 2 else {
+                print("Usage: --diagnose-mail-reconnect <configured-email>"); return
+            }
+            Diagnostics.reconnectMail(email: CommandLine.arguments[index + 1]); return
+        }
         if CommandLine.arguments.contains("--cleanup") { Diagnostics.cleanup(apply: CommandLine.arguments.contains("--apply")); return }
         if let index = CommandLine.arguments.firstIndex(of: "--diagnose-source"), CommandLine.arguments.indices.contains(index + 1) {
             Diagnostics.source(CommandLine.arguments[index + 1]); return
@@ -218,6 +224,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         if CommandLine.arguments.contains("--turn-on-runner") { automations.turnOnRunner() }
         updates.start()
         NativeMailCenter.shared.start()
+        MailFeatureCenter.shared.openMessage = { [weak self] in self?.showMail(select: $0) }
+        MailFeatureCenter.shared.start(model: mailModel)
         // The runner opened the app for an alert: AutomationCenter shows it; nothing else opens.
         if alertLaunch { return }
         if CommandLine.arguments.contains("--terminal") { showView(.terminal, fromHyper: true) }
@@ -530,9 +538,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         automations.alertSettings = { [weak self] in self?.preferences.automationAlertSettings ?? AlertSettings() }
         automations.openWindow = { [weak self] automationID, runID in self?.showAutomations(automationID: automationID, runID: runID) }
         automations.openSettings = { [weak self] in self?.showSettings(tab: .automations) }
-        NotchAlertController.shared.stillApplies = { [weak self] alert in self?.automations.alertStillApplies(alert) ?? false }
+        NotchAlertController.shared.stillApplies = { [weak self] alert in
+            alert.id.hasPrefix(MailNotificationCenter.alertPrefix) || (self?.automations.alertStillApplies(alert) ?? false)
+        }
         NotchAlertController.shared.onPresented = { [weak self] alert in self?.automations.alertPresented(alert) }
         NotchAlertController.shared.onAction = { [weak self] alert, action in
+            if MailFeatureCenter.shared.notifications.handle(alert: alert, action: action) { return }
             let id = alert.id
             guard let self, !self.automations.handleAlertAction(id, action, approval: alert.approvalManifest) else { return }
             guard id.hasPrefix("brief:"), action == "open" else { return }
@@ -680,6 +691,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         // A message in its undo time goes to Mail now, and quitting waits for it: 90 s at most, longer
         // than the 30 s limit of one Mail script.
         let sends = madeMailModel.flatMap { $0.sending ? $0 : nil }
+        let scheduled = !MailFeatureCenter.shared.schedules.dispatching.isEmpty
+        MailFeatureCenter.shared.stop()
         quitting = true
         sends?.sendPendingNow()
         var replied = false
@@ -692,9 +705,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         Task { @MainActor in
             await model.clipboard.prepareForQuit()
             await sends?.finishSends()
+            await MailFeatureCenter.shared.schedules.waitForDispatches()
             RunLoop.main.perform(inModes: modes) { MainActor.assumeIsolated { reply() } }
         }
-        let timer = Timer(timeInterval: sends == nil ? 2 : 90, repeats: false) { _ in MainActor.assumeIsolated { reply() } }
+        let timer = Timer(timeInterval: sends == nil && !scheduled ? 2 : 90, repeats: false) { _ in MainActor.assumeIsolated { reply() } }
         for mode in modes { RunLoop.main.add(timer, forMode: mode) }
         return .terminateLater
     }

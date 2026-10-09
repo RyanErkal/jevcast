@@ -16,6 +16,10 @@ extension MailModel {
         var messageID = "<\(UUID().uuidString.lowercased())@jevcast.local>"
         var fromAccountID: String?
         var fromAddress: String?
+        /// The exact display identity selected when this draft was imported or composed.
+        /// Optional so older local snapshots continue to decode.
+        var fromName: String?
+        var fromIdentityID: String?
         var senderWasChosen = false
         var ownAddresses: [String] = []
         var richText: Data?
@@ -39,6 +43,9 @@ extension MailModel {
         var serverDraftReferences: [String]?
         var serverDraftHTML: String?
         var serverDraftHTMLBody: String?
+        /// A server message discovered on another device is read-only until the user edits it.
+        /// This prevents opening Drafts from replacing an unknown version in the background.
+        var serverDraftImported: Bool?
         var mode: Mode = .new
         var to = ""
         var cc = ""
@@ -122,6 +129,8 @@ extension MailModel {
             let messageID: String
             let fromAccountID: String?
             let fromAddress: String?
+            let fromName: String?
+            let fromIdentityID: String?
             let senderWasChosen: Bool
             let mode: Mode
             let to: String
@@ -147,6 +156,8 @@ extension MailModel {
                 messageID = draft.messageID
                 fromAccountID = draft.fromAccountID
                 fromAddress = draft.fromAddress
+                fromName = draft.fromName
+                fromIdentityID = draft.fromIdentityID
                 senderWasChosen = draft.senderWasChosen
                 mode = draft.mode
                 to = draft.to

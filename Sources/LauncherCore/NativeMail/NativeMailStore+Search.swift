@@ -98,11 +98,12 @@ extension NativeMailStore {
         guard let row = try db.rows("""
             SELECT m.mailbox, COALESCE(s.subject, ''),
                    TRIM(COALESCE(a.comment, '') || ' ' || COALESCE(a.address, '')),
-                   COALESCE(b.summary, '')
+                   COALESCE(bt.text, b.summary, '')
             FROM messages m
             LEFT JOIN subjects s ON s.ROWID = m.subject
             LEFT JOIN addresses a ON a.ROWID = m.sender
             LEFT JOIN summaries b ON b.ROWID = m.summary
+            LEFT JOIN message_body_text bt ON bt.message_rowid = m.ROWID
             WHERE m.ROWID = ?
             """, [.int(rowID)]).first, row.count == 4 else { return }
         try db.run("DELETE FROM messages_fts WHERE rowid = ?", [.int(rowID)])

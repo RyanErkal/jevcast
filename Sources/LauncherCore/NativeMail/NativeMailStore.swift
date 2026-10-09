@@ -17,10 +17,11 @@ public actor NativeMailStore {
         self.root = root
         try Self.makeFolder(root)
         try Self.makeFolder(root.appendingPathComponent("MailData"))
+        chmod(root.path, 0o700)
+        chmod(root.appendingPathComponent("MailData").path, 0o700)
         let path = Self.indexPath(root: root)
-        let isNew = !FileManager.default.fileExists(atPath: path)
         db = try MailDatabase(path: path)
-        if isNew { chmod(path, 0o600) }
+        chmod(path, 0o600)
         try Self.migrate(db)
     }
 
@@ -89,7 +90,38 @@ public actor NativeMailStore {
             tokenize = 'unicode61 remove_diacritics 2');
         CREATE TRIGGER IF NOT EXISTS messages_fts_cleanup AFTER DELETE ON messages
             BEGIN DELETE FROM messages_fts WHERE rowid = old.ROWID; END;
-        PRAGMA user_version=3;
+        CREATE TABLE IF NOT EXISTS message_body_text (
+            message_rowid INTEGER PRIMARY KEY,
+            text TEXT NOT NULL);
+        CREATE TRIGGER IF NOT EXISTS message_body_text_cleanup AFTER DELETE ON messages
+            BEGIN DELETE FROM message_body_text WHERE message_rowid = old.ROWID; END;
+        CREATE TABLE IF NOT EXISTS offline_policies (
+            account TEXT PRIMARY KEY,
+            mode TEXT NOT NULL DEFAULT 'recent',
+            recent_limit INTEGER NOT NULL DEFAULT 500,
+            selected_folders TEXT NOT NULL DEFAULT '[]',
+            download_attachments INTEGER NOT NULL DEFAULT 0,
+            index_bodies INTEGER NOT NULL DEFAULT 1,
+            paused INTEGER NOT NULL DEFAULT 0,
+            updated_at REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS offline_actions (
+            id TEXT PRIMARY KEY,
+            account TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            mailbox_name TEXT NOT NULL,
+            uid_validity INTEGER NOT NULL,
+            uid INTEGER NOT NULL,
+            message_id TEXT,
+            destination_mailbox_name TEXT,
+            destination_uid_validity INTEGER,
+            desired_value INTEGER,
+            state TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL);
+        CREATE INDEX IF NOT EXISTS offline_actions_account_state ON offline_actions(account, state, updated_at);
+        PRAGMA user_version=4;
         """)
         // Stores made before the FTS table existed are populated once. The indexed copy is
         // Jevcast-owned data only; Apple Mail's Envelope Index is never opened for writing here.
@@ -99,11 +131,12 @@ public actor NativeMailStore {
                 INSERT INTO messages_fts (rowid, row_id, mailbox, subject, sender, body)
                 SELECT m.ROWID, m.ROWID, m.mailbox, COALESCE(s.subject, ''),
                        TRIM(COALESCE(a.comment, '') || ' ' || COALESCE(a.address, '')),
-                       COALESCE(b.summary, '')
+                       COALESCE(bt.text, b.summary, '')
                 FROM messages m
                 LEFT JOIN subjects s ON s.ROWID = m.subject
                 LEFT JOIN addresses a ON a.ROWID = m.sender
                 LEFT JOIN summaries b ON b.ROWID = m.summary
+                LEFT JOIN message_body_text bt ON bt.message_rowid = m.ROWID
                 """)
         }
         // The server's own counts, which cover mail that is not on this Mac. Added to older stores.
@@ -114,7 +147,11 @@ public actor NativeMailStore {
         if !columns.contains("history_floor_uid") {
             try db.exec("ALTER TABLE mailboxes ADD COLUMN history_floor_uid INTEGER;")
         }
+        try db.exec("CREATE INDEX IF NOT EXISTS offline_actions_identity ON offline_actions(account, mailbox_name, uid_validity, uid, kind);")
     }
+
+    /// Upgrades bodies written by the previous summary-only index without downloading anything.
+    /// This runs once per row that lacks the full-text source and leaves a malformed body alone.
 
     /// Records the server's message and unread counts, by mailbox row.
     public func setServerCounts(_ counts: [Int64: (total: Int, unread: Int)]) throws {
@@ -226,6 +263,14 @@ public actor NativeMailStore {
                    history_floor_uid, total_count, server_total, server_unread
             FROM mailboxes WHERE ROWID = ?
             """, [.int(rowID)]).first.flatMap(Self.mailbox)
+    }
+
+    public func mailbox(account: String, name: String) throws -> Mailbox? {
+        try db.rows("""
+            SELECT ROWID, account, name, delimiter, role, uid_validity, uid_next, highest_modseq, complete, last_full_check, url,
+                   history_floor_uid, total_count, server_total, server_unread
+            FROM mailboxes WHERE account = ? AND name = ? LIMIT 1
+            """, [.text(account), .text(name)]).first.flatMap(Self.mailbox)
     }
 
     static func mailbox(_ row: [MailDatabase.Value]) -> Mailbox? {

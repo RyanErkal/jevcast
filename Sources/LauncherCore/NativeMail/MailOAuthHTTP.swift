@@ -36,9 +36,27 @@ public struct MailOAuthHTTP: Sendable {
         request.httpMethod = "POST"; request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.httpBody = Data(Self.form(form).utf8)
         let (data, response) = try await self.request(request)
-        guard response.url == client.provider.tokenURL, data.count <= 128 * 1024 else { throw MailOAuthError.invalidToken }
+        guard response.url == client.provider.tokenURL else { throw MailOAuthError.invalidToken }
+        if (300...399).contains(response.statusCode) { throw MailOAuthError.refused }
+        if response.statusCode == 408 || response.statusCode == 429 || (500...599).contains(response.statusCode) {
+            throw MailOAuthError.temporarilyUnavailable
+        }
+        guard data.count <= 128 * 1024 else { throw MailOAuthError.invalidToken }
         guard response.statusCode == 200 else {
-            throw response.statusCode == 400 || response.statusCode == 401 ? MailOAuthError.signInRequired : MailOAuthError.refused
+            struct ErrorPayload: Decodable { let error: String? }
+            let code = (try? JSONDecoder().decode(ErrorPayload.self, from: data))?.error?.lowercased()
+            switch code {
+            case "server_error", "temporarily_unavailable":
+                throw MailOAuthError.temporarilyUnavailable
+            case "invalid_grant", "access_denied", "login_required", "interaction_required":
+                throw MailOAuthError.signInRequired
+            case "invalid_client":
+                throw MailOAuthError.invalidClient
+            case "invalid_request", "unsupported_grant_type", "unauthorized_client", "invalid_scope":
+                throw MailOAuthError.refused
+            default:
+                throw response.statusCode == 400 || response.statusCode == 401 ? MailOAuthError.signInRequired : MailOAuthError.refused
+            }
         }
         struct Payload: Decodable { let access_token: String; let refresh_token: String?; let expires_in: Int; let token_type: String; let scope: String? }
         guard let payload = try? JSONDecoder().decode(Payload.self, from: data),

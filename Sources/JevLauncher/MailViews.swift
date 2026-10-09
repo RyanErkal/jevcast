@@ -40,8 +40,9 @@ struct MailSetupView: View {
 /// Sender, subject, and date: no preview, so the inbox reads at a glance. Hovering shows Delete.
 /// Rows compare by message only, so a list update redraws just the rows that changed.
 struct MailRow: View, Equatable {
-    static func == (a: MailRow, b: MailRow) -> Bool { a.message == b.message }
+    static func == (a: MailRow, b: MailRow) -> Bool { a.message == b.message && a.isVIP == b.isVIP }
     let message: MailSummary
+    var isVIP = false
     var delete: () -> Void = {}
     var deleteAll: () -> Void = {}
     @State private var hovering = false
@@ -55,6 +56,7 @@ struct MailRow: View, Equatable {
                     .foregroundStyle(message.read ? .secondary : .primary).lineLimit(1)
             }
             Spacer(minLength: 6)
+            if isVIP { Image(systemName: "star.fill").foregroundStyle(.yellow).font(.caption).accessibilityLabel("VIP sender") }
             if message.flagged { Image(systemName: "flag.fill").foregroundStyle(.orange).font(.caption) }
             if hovering {
                 Button(action: delete) { Image(systemName: "trash") }.buttonStyle(.borderless).help("Delete (⌫)")
@@ -104,6 +106,9 @@ struct MailReader: View {
         if let shown {
             VStack(alignment: .leading, spacing: 0) {
                 actionBar(shown.message)
+                if !composing, let conversation = model.selectedConversation {
+                    MailConversationReader(model: model, conversation: conversation)
+                }
                 Divider()
                 header(shown)
                 Divider()

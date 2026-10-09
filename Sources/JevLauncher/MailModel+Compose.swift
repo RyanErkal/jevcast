@@ -101,6 +101,7 @@ extension MailModel {
     }
 
     private func refusal(_ draft: Draft) -> String? {
+        if scheduledDraftIsProtected(draft.id) { return "This draft is held in Scheduled. Review or cancel it there before sending." }
         if aiWritingBusy { return "Wait until AI writing finishes." }
         if let problem = draft.sendProblem { return problem }
         if let persistenceProblem { return "Nothing was sent. " + persistenceProblem }
@@ -109,7 +110,12 @@ extension MailModel {
             return "Wait until the original attachments have loaded."
         }
         if draft.backend != MailBackend.current.rawValue { return "This draft uses another mail source. Select its source in Settings › Mail before sending." }
-        guard senders.contains(where: { $0.accountID == draft.fromAccountID && $0.address == draft.fromAddress }) else { return "Select an available sending account." }
+        guard let sender = senders.first(where: { $0.accountID == draft.fromAccountID && $0.address.caseInsensitiveCompare(draft.fromAddress ?? "") == .orderedSame }) else {
+            return "Select an available sending account."
+        }
+        guard sender.canSend(backend: MailBackend.current) else {
+            return "This provider alias is no longer authorized. Choose the account address or a confirmed provider-authorized alias."
+        }
         // Jevcast's own accounts answer from the copy kept with the draft, so a message archived
         // during the undo time still gets its reply. Apple Mail needs the message in its mailbox.
         if draft.mode != .new, draft.backend != MailBackend.jevcast.rawValue, draft.original.flatMap(actionBox) == nil {
@@ -207,6 +213,27 @@ extension MailModel {
         try MailIOPolicy.requireOnline()
         guard draft.backend == MailBackend.current.rawValue else { throw LauncherError("The mail source changed. Nothing was sent.") }
         guard let accountID = draft.fromAccountID, let address = draft.fromAddress else { throw LauncherError("Select a sending account.") }
+        let identity: MailSendingIdentity
+        if MailBackend.current == .appleMail {
+            let available = try await MailSendingIdentity.load(backend: .appleMail)
+            guard let selected = available.first(where: { $0.accountID == accountID
+                && $0.address.caseInsensitiveCompare(address) == .orderedSame }) else {
+                throw LauncherError("The selected sending identity changed. Choose it again before sending.")
+            }
+            identity = selected
+        } else {
+            // Drafts are only a snapshot. Read the current account and authorized aliases at the
+            // delivery boundary so a removed or revoked alias cannot be used by an old draft.
+            let available = try await MailSendingIdentity.load(backend: .jevcast)
+            guard let selected = available.first(where: { $0.accountID == accountID
+                && $0.address.caseInsensitiveCompare(address) == .orderedSame }) else {
+                throw LauncherError("The selected sending identity changed. Choose it again before sending.")
+            }
+            identity = selected
+        }
+        guard identity.canSend(backend: MailBackend.current) else {
+            throw LauncherError("This provider alias is no longer authorized. Choose the account address or a confirmed provider-authorized alias.")
+        }
         guard draft.body.utf8.count <= 1024 * 1024, draft.attachments.reduce(0, { $0 + $1.data.count }) <= MailComposeAttachments.byteLimit else {
             throw LauncherError("This message is too large. Reduce its text or attachments.")
         }
@@ -218,9 +245,11 @@ extension MailModel {
         }
         if NativeMailCenter.isActive {
             guard let engine = NativeMailCenter.activeEngine else { throw LauncherError("Add a mail account in Settings › Mail first.") }
-            guard await engine.accounts.contains(where: { $0.id == accountID && $0.email == address }) else {
+            guard let account = await engine.accounts.first(where: { $0.id == accountID
+                && $0.email.caseInsensitiveCompare(identity.accountAddress ?? "") == .orderedSame }) else {
                 throw LauncherError("The selected sending account changed. Nothing was sent.")
             }
+            let sender = try identity.nativeSender(for: account)
             // The fields as you left them, with names, go out; nothing is worked out again at send time.
             let recipients = NativeMailEngine.Recipients(to: try MailActions.contacts(draft.to), cc: try MailActions.contacts(draft.cc),
                                                          bcc: try MailActions.contacts(draft.bcc))
@@ -229,19 +258,19 @@ extension MailModel {
             case .new:
                 receipt = try await engine.send(from: accountID, to: [], cc: [], subject: draft.subject, body: draft.body, html: html,
                                       attachments: draft.attachments, messageID: draft.sendingMessageID, recipients: recipients,
-                                      inReplyTo: draft.serverDraftInReplyTo, references: draft.serverDraftReferences ?? [])
+                                      inReplyTo: draft.serverDraftInReplyTo, references: draft.serverDraftReferences ?? [], sender: sender)
             case .reply(let all):
                 guard let original = draft.original, let source = draft.source else { throw LauncherError("Wait until the original message has loaded.") }
                 receipt = try await engine.reply(to: original.rowID, text: draft.body, all: all, from: accountID, html: html, attachments: draft.attachments,
                                        messageID: draft.sendingMessageID, expectedMessageID: source.message.header("Message-ID"),
                                        recipients: recipients, subject: draft.subject, quote: draft.includesQuote,
-                                       saved: source.message, savedDate: original.date)
+                                       saved: source.message, savedDate: original.date, sender: sender)
             case .forward:
                 guard let original = draft.original, let source = draft.source else { throw LauncherError("Wait until the original message has loaded.") }
                 receipt = try await engine.forward(original.rowID, text: draft.body, to: [], from: accountID, html: html, attachments: draft.attachments,
                                          messageID: draft.sendingMessageID, expectedMessageID: source.message.header("Message-ID"),
                                          recipients: recipients, subject: draft.subject, saved: source.message, savedDate: original.date,
-                                         savedAttachments: source.forwardAttachments)
+                                         savedAttachments: source.forwardAttachments, sender: sender)
             }
             return .serverAccepted(receipt)
         }

@@ -209,9 +209,9 @@ extension NativeMailStore {
         (try db.rows("SELECT has_body FROM messages WHERE ROWID = ?", [.int(rowID)]).first?.first?.int ?? 0) != 0
     }
 
-    /// Writes the message as an `.emlx` file (a byte count line, then the message) and keeps a
-    /// plain-text summary for the list preview and body search.
-    public func saveBody(_ rowID: Int64, raw: Data) throws {
+    /// Writes the message as an `.emlx` file (a byte count line, then the message), keeps a
+    /// bounded plain-text preview, and stores the full readable text in the private FTS source.
+    public func saveBody(_ rowID: Int64, raw: Data, indexText: Bool = true) throws {
         guard let url = try bodyURL(rowID) else { return }
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         var file = Data("\(raw.count)\n".utf8)
@@ -219,12 +219,34 @@ extension NativeMailStore {
         guard FileManager.default.createFile(atPath: url.path, contents: file, attributes: [.posixPermissions: 0o600]) else {
             throw MailDatabase.Failure(text: "Could not save a message body.")
         }
-        let text = MIMEMessage.parse(raw).map { Self.summary($0.readableText) } ?? ""
+        let bodyText = MIMEMessage.parse(raw)?.readableText ?? ""
+        let text = indexText ? Self.summary(bodyText) : ""
         try db.transaction {
             let old = try db.rows("SELECT summary FROM messages WHERE ROWID = ?", [.int(rowID)]).first?.first?.int
             if let old { try db.run("DELETE FROM summaries WHERE ROWID = ?", [.int(old)]) }
             try db.run("INSERT INTO summaries (summary) VALUES (?)", [.text(text)])
-            try db.run("UPDATE messages SET summary = ?, has_body = 1 WHERE ROWID = ?", [.int(db.lastInsertID), .int(rowID)])
+            let summaryID = db.lastInsertID
+            if indexText { try db.run("INSERT INTO message_body_text (message_rowid, text) VALUES (?, ?) ON CONFLICT(message_rowid) DO UPDATE SET text = excluded.text",
+                       [.int(rowID), .text(bodyText)]) }
+            try db.run("UPDATE messages SET summary = ?, has_body = 1 WHERE ROWID = ?", [.int(summaryID), .int(rowID)])
+            try updateSearchIndex(rowID)
+        }
+        touched()
+    }
+
+    /// Saves full readable text for background search without retaining MIME attachment bytes.
+    /// The message remains body-missing for the reader and can be fetched in full when opened.
+    public func saveIndexedBodyText(_ rowID: Int64, text bodyText: String) throws {
+        guard try bodyURL(rowID) != nil else { return }
+        let preview = Self.summary(bodyText)
+        try db.transaction {
+            let old = try db.rows("SELECT summary FROM messages WHERE ROWID = ?", [.int(rowID)]).first?.first?.int
+            if let old { try db.run("DELETE FROM summaries WHERE ROWID = ?", [.int(old)]) }
+            try db.run("INSERT INTO summaries (summary) VALUES (?)", [.text(preview)])
+            let summaryID = db.lastInsertID
+            try db.run("INSERT INTO message_body_text (message_rowid, text) VALUES (?, ?) ON CONFLICT(message_rowid) DO UPDATE SET text = excluded.text",
+                       [.int(rowID), .text(bodyText)])
+            try db.run("UPDATE messages SET summary = ? WHERE ROWID = ?", [.int(summaryID), .int(rowID)])
             try updateSearchIndex(rowID)
         }
         touched()
@@ -236,15 +258,32 @@ extension NativeMailStore {
         return String(collapsed.prefix(4000))
     }
 
-    /// Messages without a body among the newest `within` of a mailbox, up to `limit`, newest
-    /// first, skipping ones over `maxSize`.
-    public func missingBodies(in mailbox: Int64, within: Int, limit: Int, maxSize: Int64) throws -> [(rowID: Int64, uid: UInt32)] {
-        try db.rows("""
+    /// Messages without a body, up to `limit`, newest first, skipping ones over `maxSize`.
+    /// When `within` is set, only that recent window is eligible. A nil window searches the
+    /// complete local history while the result remains bounded by `limit`.
+    public func missingBodies(in mailbox: Int64, within: Int? = nil, limit: Int, maxSize: Int64, requireRaw: Bool = false, requireIndex: Bool = true) throws -> [(rowID: Int64, uid: UInt32)] {
+        let rows: [[MailDatabase.Value]]
+        if let within {
+            rows = try db.rows("""
             SELECT ROWID, remote_uid FROM (
-                SELECT ROWID, remote_uid, has_body, size, date_received FROM messages WHERE mailbox = ? AND deleted = 0
+                SELECT m.ROWID, m.remote_uid, m.has_body, m.size, m.date_received,
+                       EXISTS (SELECT 1 FROM message_body_text bt WHERE bt.message_rowid = m.ROWID) AS body_indexed
+                FROM messages m WHERE m.mailbox = ? AND m.deleted = 0
                 ORDER BY date_received DESC LIMIT ?)
-            WHERE has_body = 0 AND COALESCE(size, 0) <= ? ORDER BY date_received DESC LIMIT ?
-            """, [.int(mailbox), .int(Int64(within)), .int(maxSize), .int(Int64(limit))]).compactMap { row in
+            WHERE ((\(requireRaw ? 1 : 0) = 1 AND has_body = 0) OR (\(requireIndex ? 1 : 0) = 1 AND body_indexed = 0))
+              AND COALESCE(size, 0) <= ? ORDER BY date_received DESC LIMIT ?
+            """, [.int(mailbox), .int(Int64(max(0, within))), .int(maxSize), .int(Int64(max(0, limit)))])
+        } else {
+            rows = try db.rows("""
+                SELECT m.ROWID, m.remote_uid
+                FROM messages m
+                WHERE m.mailbox = ? AND m.deleted = 0
+                  AND ((\(requireRaw ? 1 : 0) = 1 AND m.has_body = 0) OR (\(requireIndex ? 1 : 0) = 1 AND NOT EXISTS (SELECT 1 FROM message_body_text bt WHERE bt.message_rowid = m.ROWID)))
+                  AND COALESCE(m.size, 0) <= ?
+                ORDER BY m.date_received DESC LIMIT ?
+                """, [.int(mailbox), .int(maxSize), .int(Int64(max(0, limit)))])
+        }
+        return rows.compactMap { row in
             guard row.count == 2, let id = row[0].int, let uid = row[1].int.flatMap(UInt32.init(exactly:)) else { return nil }
             return (id, uid)
         }

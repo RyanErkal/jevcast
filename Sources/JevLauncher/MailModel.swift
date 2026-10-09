@@ -15,11 +15,20 @@ final class MailModel: ObservableObject {
     @Published var favoriteMailboxKeys: Set<String> = []
     @Published var collapsedMailboxKeys: Set<String> = []
     @Published var expandedSidebarGroupKeys: Set<String> = []
+    /// Account-scoped message keys that rules have snoozed. Root applies this set to Inbox and
+    /// Unread pagination; the messages remain available in their own mailbox and All Mail.
+    @Published var snoozedMessageKeys: Set<String> = [] {
+        didSet { if oldValue != snoozedMessageKeys, place == .inbox || place == .unread { reload(keepSelection: true) } }
+    }
+    /// Sender addresses marked VIP. Values are normalized lowercase addresses.
+    @Published var vipAddresses: Set<String> = []
     let mailDefaults: UserDefaults?
     @Published private(set) var status: MailStore.Status = .noMail
-    @Published private(set) var mailboxes: [MailMailbox] = []
+    @Published var mailboxes: [MailMailbox] = []
     @Published var place: Place = .inbox { didSet { if oldValue != place { selectedID = nil; reload(); syncPlace() } } }
     @Published var search = "" { didSet { if oldValue != search { reloadSoon() } } }
+    /// Structured filters are applied to the complete source range before the visible page.
+    @Published var filter = MailFilter() { didSet { if oldValue != filter { reloadSoon() } } }
     /// Web images in HTML mail. On by default; the ⋯ menu turns them off.
     @Published var loadsImages = UserDefaults.standard.object(forKey: "mailLoadsImages") as? Bool ?? true {
         didSet { UserDefaults.standard.set(loadsImages, forKey: "mailLoadsImages") }
@@ -28,13 +37,13 @@ final class MailModel: ObservableObject {
     /// Coming back to Mail counts the message on screen.
     var windowIsKey = false { didSet { if windowIsKey != oldValue { armRead() } } }
     private var readTimer: Task<Void, Never>?
-    @Published private(set) var messages: [MailSummary] = [] {
+    @Published var messages: [MailSummary] = [] {
         didSet { pageTriggerID = messages.count > 30 ? messages[messages.count - 30].rowID : messages.last?.rowID }
     }
     /// The row that asks for the next page when it appears: 30 rows before the end.
     private(set) var pageTriggerID: Int64?
     /// True while an older page may exist below the list.
-    @Published private(set) var hasMore = false
+    @Published var hasMore = false
     /// Empty Trash or Junk: the mailbox and exactly the messages counted, waiting for your yes.
     struct EmptyRequest: Identifiable {
         let mailbox: MailMailbox
@@ -61,6 +70,16 @@ final class MailModel: ObservableObject {
             armRead(searchPick: selectingQuietly && !search.isEmpty)
         }
     }
+    /// Multi-selection is separate from the reader's one-message selection. The set is always
+    /// limited to rows currently loaded in the launcher, making Select All an explicit scope.
+    @Published var selectedMessageIDs: Set<Int64> = []
+    var selectionAnchorID: Int64?
+    @Published var bulkResult: MailBulkResult?
+    @Published var bulkBusy = false
+    @Published var bulkUndoAvailable = false
+    /// Scheduling owns the persisted duplicate check. The default keeps existing callers safe
+    /// until the schedule center installs its lookup.
+    var scheduledDraftIsProtected: (UUID) -> Bool = { _ in false }
     private var selectingQuietly = false
     /// The message you marked unread while it is on screen. It stays unread until you move away.
     private var keptUnread: Int64?
@@ -138,23 +157,23 @@ final class MailModel: ObservableObject {
     var serverSearchCursors: [Int64: UInt32] = [:]
     var serverSearchValidities: [Int64: UInt32] = [:]
     var serverSearchRows: [MailSummary] = []
-    private var fingerprint = ""
+    var fingerprint = ""
     private var poll: Task<Void, Never>?
     private var isDemo = false
     private var searchWork: Task<Void, Never>?
-    private var loadWork: Task<Void, Never>?
+    var loadWork: Task<Void, Never>?
     /// The newest and oldest cursors for the current list.
-    private var top: MailStore.Cursor?
-    @Published private(set) var bottom: MailStore.Cursor?
-    private var loadingMore = false
+    var top: MailStore.Cursor?
+    @Published var bottom: MailStore.Cursor?
+    var loadingMore = false
     var isLoading: Bool { reloading || loadingMore || refreshing || bodySearch == .running || serverSearch == .running }
     /// The body phase of a search: off without a search, `more` when rows remain unread.
     enum BodySearch: Equatable { case off, running, more, done }
-    @Published private(set) var bodySearch = BodySearch.off
+    @Published var bodySearch = BodySearch.off
     /// Where the body phase goes on: the oldest row it read.
-    private var bodyCursor: MailStore.Cursor?
-    private var reloading = false
-    private var refreshing = false
+    var bodyCursor: MailStore.Cursor?
+    var reloading = false
+    var refreshing = false
     private let statusProvider: @Sendable () -> MailStore.Status
     private var statusWork: Task<Void, Never>?
     private var indexIdentity: MailStore.FileIdentity?
@@ -162,7 +181,7 @@ final class MailModel: ObservableObject {
     /// Changes with every full reload, so late results for an older list are dropped.
     var generation = 0
     /// Stops the SQL of a list that a newer reload replaced.
-    private var listStop = StopFlag()
+    var listStop = StopFlag()
     /// The selected HTML body with its inline images already in place, prepared off the main thread.
     @Published private(set) var detailHTML: String?
     /// Parsed and prepared bodies of recent messages, most recently used last, so moving back
@@ -177,6 +196,19 @@ final class MailModel: ObservableObject {
     private var removing: [Int64: Date] = [:]
     /// Mail actions run one after another, so quick deletes never race each other.
     private var actionChain: Task<Void, Never>?
+    /// Header metadata learned while reading a message. It is enough to refine a fallback
+    /// conversation without making a network or account request.
+    var conversationHeaders: [Int64: MailConversationHeader] = [:]
+    var conversationAttachments: Set<Int64> = []
+    /// Full filtered results are cached only while a structured filter is active. Pagination
+    /// slices this cache, so older matches are not lost behind the first index page.
+    var activeFilterRows: [MailSummary]?
+    var activeFilterMetadata: [Int64: MailFilterMessageMetadata] = [:]
+    var activeFilterMetadataUnknownRows: Set<Int64> = []
+    var activeFilterRecipientMetadataUnknownRows: Set<Int64> = []
+    var activeFilterAttachmentMetadataUnknownRows: Set<Int64> = []
+    var activeFilterOffset = 0
+    var expandedConversationIDs: Set<MailConversationID> = []
 
     init(aiWriting: @escaping (AIWritingRequest) async throws -> AIWritingReply, aiWritingAllowed: @escaping () -> Bool, statusProvider: @escaping @Sendable () -> MailStore.Status = { MailStore.status() },
          setRead: @escaping (Bool, MailSummary, MailMailbox, MailMailbox?) async throws -> Void = { try await MailActions.setRead($0, $1, in: $2, fallback: $3) },
@@ -249,6 +281,27 @@ final class MailModel: ObservableObject {
     /// The account's address for headings, such as in the mailbox picker; its ID when unknown.
     func accountTitle(_ account: String) -> String {
         senders.first { $0.accountID == account }?.address ?? account
+    }
+
+    static func normalizedVIPAddress(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    func isVIP(_ message: MailSummary) -> Bool {
+        vipAddresses.contains(Self.normalizedVIPAddress(message.senderAddress))
+    }
+
+    /// A stable account-scoped key for snooze storage. An unresolved mailbox is deliberately
+    /// kept in its own empty account scope until the index supplies the account ID.
+    func snoozeKey(for message: MailSummary) -> String {
+        let account = mailbox(message.mailbox)?.accountID
+            ?? mailboxes.first { message.labels.contains($0.rowID) }?.accountID
+            ?? ""
+        return account + ":" + message.messageKey
+    }
+
+    func isSnoozed(_ message: MailSummary) -> Bool {
+        snoozedMessageKeys.contains(snoozeKey(for: message))
     }
     var unreadInInbox: Int { inboxes.map { $0.serverUnread ?? $0.unread }.reduce(0, +) }
     var canUseAIWriting: Bool { aiWritingAllowed() }
@@ -344,11 +397,15 @@ final class MailModel: ObservableObject {
             if self.status != status {
                 self.listStop.stop(); self.generation += 1
                 self.bodies.removeAll(); self.bodyOrder.removeAll()
+                self.conversationHeaders.removeAll(); self.conversationAttachments.removeAll()
                 self.select(nil, byUser: false)
             }
             self.status = status
             guard let root = self.root else {
                 self.mailboxes = []; self.messages = []; self.hasMore = false
+                self.activeFilterRows = nil; self.activeFilterMetadata.removeAll(); self.activeFilterMetadataUnknownRows.removeAll()
+                self.activeFilterRecipientMetadataUnknownRows.removeAll(); self.activeFilterAttachmentMetadataUnknownRows.removeAll()
+                self.activeFilterOffset = 0
                 self.pendingOpen = nil
                 self.loadingMore = false; self.refreshing = false; self.reloading = false
                 return
@@ -364,6 +421,12 @@ final class MailModel: ObservableObject {
         guard !isDemo else { return }
         searchWork?.cancel()
         resetServerSearch()
+        activeFilterRows = nil
+        activeFilterMetadata.removeAll()
+        activeFilterMetadataUnknownRows.removeAll()
+        activeFilterRecipientMetadataUnknownRows.removeAll()
+        activeFilterAttachmentMetadataUnknownRows.removeAll()
+        activeFilterOffset = 0
         // A newer search stops the older one's query at once, then waits for typing to pause.
         listStop.stop()
         generation += 1
@@ -380,6 +443,16 @@ final class MailModel: ObservableObject {
     func reload(keepSelection: Bool = false) {
         guard !isDemo else { return }
         guard let root else { return }
+        if !filter.isEmpty {
+            reloadFiltered(keepSelection: keepSelection, root: root)
+            return
+        }
+        activeFilterRows = nil
+        activeFilterMetadata.removeAll()
+        activeFilterMetadataUnknownRows.removeAll()
+        activeFilterRecipientMetadataUnknownRows.removeAll()
+        activeFilterAttachmentMetadataUnknownRows.removeAll()
+        activeFilterOffset = 0
         if !keepSelection { resetServerSearch() }
         let place = self.queryPlace, search = self.search
         let keptIDs = keepSelection ? messages.map(\.rowID) : []
@@ -412,6 +485,7 @@ final class MailModel: ObservableObject {
             }
             if self.indexIdentity != identity {
                 self.bodies.removeAll(); self.bodyOrder.removeAll()
+                self.conversationHeaders.removeAll(); self.conversationAttachments.removeAll()
                 self.detail = nil; self.detailHTML = nil; self.detailMissing = false; self.loadingID = nil
             }
             self.indexIdentity = identity
@@ -457,6 +531,10 @@ final class MailModel: ObservableObject {
 
     /// Reads the next older page and adds it below the list. Called as the list nears its end.
     func loadNextPage() {
+        if !filter.isEmpty {
+            loadNextFilteredPage()
+            return
+        }
         guard let root, hasMore, !loadingMore, !reloading, !listStop.isStopped, let bottom else { return }
         loadingMore = true
         var query = Self.query(queryPlace, search, mailboxes)
@@ -541,6 +619,7 @@ final class MailModel: ObservableObject {
     @discardableResult
     func refresh() -> Bool {
         guard !reloading, !refreshing, bodySearch != .running, serverSearch != .running, !listStop.isStopped else { return false }
+        if !filter.isEmpty { reload(keepSelection: true); return true }
         guard let root, let top, !messages.isEmpty else { reload(keepSelection: true); return true }
         refreshing = true
         let place = self.queryPlace, search = self.search, generation = self.generation
@@ -625,8 +704,10 @@ final class MailModel: ObservableObject {
 
     func install(_ fresh: [MailSummary]) {
         let old = selected
-        let rows = withReadChanges(fresh)
+        let rows = withReadChanges(fresh).filter { !(place == .inbox || place == .unread) || !isSnoozed($0) }
         if messages != rows { messages = rows }
+        selectedMessageIDs.formIntersection(Set(rows.map(\.rowID)))
+        if selectionAnchorID.map(selectedMessageIDs.contains) != true { selectionAnchorID = selectedMessageIDs.first }
         if let selectedID, let current = rows.first(where: { $0.rowID == selectedID }) {
             if old?.mailbox != current.mailbox || (detail == nil && !detailMissing && loadingID != selectedID) { loadSelected() }
             return
@@ -672,8 +753,12 @@ final class MailModel: ObservableObject {
     func select(_ rowID: Int64?, byUser: Bool) {
         let unchanged = rowID == selectedID
         selectingQuietly = !byUser
+        if byUser { selectedMessageIDs = rowID.map { [$0] } ?? [] }
         selectedID = rowID
         selectingQuietly = false
+        if let rowID, let conversation = conversationGroups.first(where: { $0.messages.contains { $0.summary.rowID == rowID } }), conversation.messages.count > 1 {
+            expandedConversationIDs.insert(conversation.id)
+        }
         guard unchanged else { return }
         // The same row again, such as a message the list just inserted, still needs its body.
         if detail == nil, !detailMissing { loadSelected() }
@@ -718,6 +803,7 @@ final class MailModel: ObservableObject {
         loadingID = rowID
         if let cached = bodies[rowID] {
             remember(cached, for: rowID)
+            rememberConversationMetadata(message, detail: cached.message)
             detail = cached.message; detailHTML = cached.html; detailMissing = false
             captureSource(rowID)
             prefetchNeighbours(of: rowID, root: root)
@@ -731,7 +817,10 @@ final class MailModel: ObservableObject {
                 loaded = await Task.detached(priority: .userInitiated) { Self.loadBody(root: root, box: box, rowID: rowID) }.value
             }
             guard let self, self.root == root, self.indexIdentity == identity else { return }
-            if let loaded { self.remember(loaded, for: rowID) }
+            if let loaded {
+                self.remember(loaded, for: rowID)
+                self.rememberConversationMetadata(message, detail: loaded.message)
+            }
             guard self.selectedID == rowID, self.loadingID == rowID else { return }
             self.detail = loaded?.message
             self.detailHTML = loaded?.html
@@ -786,6 +875,8 @@ final class MailModel: ObservableObject {
         self.mailboxes = mailboxes; self.messages = messages
         if let first = messages.first, let detail {
             bodies[first.rowID] = Body(message: detail, html: detail.html)
+            rememberConversationMetadata(first, detail: detail)
+            selectedMessageIDs = [first.rowID]
             selectedID = first.rowID
         }
     }

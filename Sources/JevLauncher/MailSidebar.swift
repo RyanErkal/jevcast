@@ -4,7 +4,8 @@ import LauncherCore
 /// Unified views, favourites, and account folders, all inside the launcher panel.
 struct MailSidebar: View {
     @ObservedObject var model: MailModel
-    @ObservedObject private var center = NativeMailCenter.shared
+    @ObservedObject var center: NativeMailCenter
+    let showAccount: (String) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -28,7 +29,7 @@ struct MailSidebar: View {
                             }
                         }
                     }
-                    ForEach(model.accounts, id: \.self) { account in
+                    ForEach(accountIDs, id: \.self) { account in
                         accountSection(account)
                     }
                 }
@@ -42,13 +43,22 @@ struct MailSidebar: View {
     }
 
     private var accountLabels: [String: String] {
-        MailSidebarAccounts.labels(model.accounts.map { (id: $0, address: model.accountTitle($0)) })
+        MailSidebarAccounts.labels(accountIDs.map { (id: $0, address: accountTitle($0)) })
+    }
+
+    private var accountIDs: [String] {
+        MailSidebarAccounts.ids(mailboxAccounts: model.accounts, configured: center.backend == .jevcast ? center.accounts : [])
+            .sorted { accountTitle($0).localizedStandardCompare(accountTitle($1)) == .orderedAscending }
+    }
+
+    private func accountTitle(_ id: String) -> String {
+        center.accounts.first { $0.id == id }?.email ?? model.accountTitle(id)
     }
 
     private func accountSection(_ account: String) -> some View {
         let expanded = expanded("account:" + account)
         let folders = MailSidebarFolders(model.mailboxes.filter { $0.accountID == account })
-        let state = center.states[account]
+        let state = center.backend == .jevcast ? center.states[account] : nil
         let label = accountLabels[account] ?? account
         return VStack(alignment: .leading, spacing: 0) {
             Button { expanded.wrappedValue.toggle() } label: {
@@ -63,12 +73,20 @@ struct MailSidebar: View {
                 .frame(height: 24).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(model.accountTitle(account) + " · " + status(state))
-            .accessibilityLabel(label + ", " + model.accountTitle(account))
+            .help(accountTitle(account) + " · " + status(state))
+            .accessibilityLabel(label + ", " + accountTitle(account))
             .accessibilityValue(status(state) + ", " + (expanded.wrappedValue ? "Expanded" : "Collapsed"))
-            if case .failed = state {
-                Text(status(state)).font(.system(size: 11)).foregroundStyle(.orange)
+            if center.backend == .jevcast, center.accounts.contains(where: { $0.id == account }) {
+                Button { showAccount(account) } label: {
+                    HStack(spacing: 4) {
+                        Text(status(state))
+                        Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+                    }.contentShape(Rectangle())
+                }
+                    .buttonStyle(.plain).font(.system(size: 11))
+                    .foregroundStyle(statusColor(state))
                     .padding(.horizontal, 8).padding(.bottom, 4)
+                    .help("View connection details for " + accountTitle(account))
             }
             if expanded.wrappedValue {
                 ForEach(folders.primary) { node in
@@ -102,13 +120,7 @@ struct MailSidebar: View {
     }
 
     private func status(_ state: MailAccountSync.State?) -> String {
-        switch state {
-        case .starting: return "Starting"
-        case .syncing: return "Syncing…"
-        case .ready: return "Up to date"
-        case .failed(_, let signIn): return signIn ? "Sign in required" : "Sync needs attention"
-        case nil: return "Status unavailable"
-        }
+        MailAccountConnectionStatus(state: state).title
     }
 }
 

@@ -39,7 +39,7 @@ public struct MailOAuthClient: Codable, Equatable, Sendable {
 }
 
 public enum MailOAuthError: Error, LocalizedError, Equatable {
-    case invalidClient, invalidCallback, cancelled, expired, invalidToken, signInRequired, refused
+    case invalidClient, invalidCallback, cancelled, expired, invalidToken, signInRequired, refused, temporarilyUnavailable
     public var errorDescription: String? {
         switch self {
         case .invalidClient: return "Enter the provider's OAuth app client ID in Settings › Mail."
@@ -49,6 +49,7 @@ public enum MailOAuthError: Error, LocalizedError, Equatable {
         case .invalidToken: return "The provider did not return a usable mail token. Check the app permissions and sign in again."
         case .signInRequired: return "This mail account needs you to sign in again."
         case .refused: return "The provider refused sign-in. Check the OAuth app setup and account permissions."
+        case .temporarilyUnavailable: return "The mail provider is temporarily unavailable. Try again shortly."
         }
     }
 }

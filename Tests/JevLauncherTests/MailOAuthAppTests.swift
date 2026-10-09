@@ -7,6 +7,7 @@ final class MailOAuthAppTests: XCTestCase {
     private actor Requests {
         private(set) var count = 0
         func add() { count += 1 }
+        func next() -> Int { count += 1; return count }
     }
 
     func testConcurrentRefreshSharesOneRequestAndPersistsRotatedToken() async throws {
@@ -34,6 +35,80 @@ final class MailOAuthAppTests: XCTestCase {
         XCTAssertEqual(count, 1)
         XCTAssertEqual(saved.tokens.count, 1)
         XCTAssertEqual(saved.tokens[0].refreshToken, "new-refresh")
+    }
+
+    func testTransientRefreshStaysRetryableAndLaterRetryUsesSavedToken() async throws {
+        let client = try MailOAuthClient(provider: .google, clientID: "fixture.apps.googleusercontent.com")
+        let original = MailOAuthToken(accessToken: "old-access", refreshToken: "old-refresh", expiresAt: .distantPast, clientID: client.clientID)
+        let encoded = String(decoding: try JSONEncoder().encode(original), as: UTF8.self)
+        let requests = Requests(), reads = ReadCounter(), saved = SavedTokens()
+        let http = MailOAuthHTTP { request in
+            let call = await requests.next()
+            if call == 1 {
+                let body = Data(#"{"error":"temporarily_unavailable","error_description":"fixture detail"}"#.utf8)
+                return (body, HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!)
+            }
+            let body = Data(#"{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600,"token_type":"Bearer"}"#.utf8)
+            return (body, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+        let credentials = MailOAuthCredentials(read: { _ in reads.add(); return encoded }, persist: { token, id in saved.save(token, id) },
+                                              client: { _ in client }, secret: { nil }, http: http)
+        var account = NativeMailAccount.preset(.gmail, name: "Fixture", email: "me@example.com")!; account.authentication = .oauth
+
+        do {
+            _ = try await credentials.credential(for: account)
+            XCTFail("A temporary OAuth failure must be retryable")
+        } catch let error as MailOAuthError {
+            XCTAssertEqual(error, .temporarilyUnavailable)
+        } catch let error as MailError {
+            XCTFail("A temporary OAuth failure must not become \(error)")
+        }
+
+        let fresh = try await credentials.credential(for: account)
+        XCTAssertEqual(fresh, .oauth2(accessToken: "new-access"))
+        let requestCount = await requests.count
+        XCTAssertEqual(requestCount, 2)
+        XCTAssertEqual(reads.count, 2, "The original saved token must remain available for retry")
+        XCTAssertEqual(saved.tokens.count, 1)
+        XCTAssertEqual(saved.tokens[0].refreshToken, "new-refresh")
+    }
+
+    func testKeychainFailureUsesSafeMailError() async throws {
+        let client = try MailOAuthClient(provider: .google, clientID: "fixture.apps.googleusercontent.com")
+        let credentials = MailOAuthCredentials(read: { _ in throw KeychainStoreError.unreadable(-25308) },
+                                              client: { _ in client })
+        var account = NativeMailAccount.preset(.gmail, name: "Fixture", email: "me@example.com")!; account.authentication = .oauth
+        do {
+            _ = try await credentials.credential(for: account)
+            XCTFail("A Keychain read failure must fail")
+        } catch let error as MailError {
+            guard case .notFound(let text) = error else { return XCTFail("Unexpected mail error: \(error)") }
+            XCTAssertTrue(text.contains("saved mail sign-in could not be accessed"))
+            XCTAssertTrue(text.contains("Unlock Keychain"))
+            XCTAssertFalse(text.contains("Jev key"))
+        }
+    }
+
+    func testKeychainPersistFailureUsesSafeMailError() async throws {
+        let client = try MailOAuthClient(provider: .google, clientID: "fixture.apps.googleusercontent.com")
+        let original = MailOAuthToken(accessToken: "old-access", refreshToken: "old-refresh", expiresAt: .distantPast, clientID: client.clientID)
+        let encoded = String(decoding: try JSONEncoder().encode(original), as: UTF8.self)
+        let http = MailOAuthHTTP { request in
+            let body = Data(#"{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600,"token_type":"Bearer"}"#.utf8)
+            return (body, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+        let credentials = MailOAuthCredentials(read: { _ in encoded }, persist: { _, _ in throw KeychainStoreError.unreadable(-25308) },
+                                              client: { _ in client }, secret: { nil }, http: http)
+        var account = NativeMailAccount.preset(.gmail, name: "Fixture", email: "me@example.com")!; account.authentication = .oauth
+        do {
+            _ = try await credentials.credential(for: account)
+            XCTFail("A Keychain persist failure must fail")
+        } catch let error as MailError {
+            guard case .notFound(let text) = error else { return XCTFail("Unexpected mail error: \(error)") }
+            XCTAssertTrue(text.contains("saved mail sign-in could not be accessed"))
+            XCTAssertTrue(text.contains("Unlock Keychain"))
+            XCTAssertFalse(text.contains("Jev key"))
+        }
     }
 
     func testCallbackParserRejectsOtherHostDuplicateHostAndNonGet() throws {
@@ -113,4 +188,11 @@ private final class SavedTokens: @unchecked Sendable {
     private var values: [MailOAuthToken] = []
     func save(_ token: MailOAuthToken, _ id: String) { lock.withLock { values.append(token) } }
     var tokens: [MailOAuthToken] { lock.withLock { values } }
+}
+
+private final class ReadCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    func add() { lock.withLock { value += 1 } }
+    var count: Int { lock.withLock { value } }
 }

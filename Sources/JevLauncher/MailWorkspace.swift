@@ -23,11 +23,14 @@ struct MailWorkspace: View {
         GeometryReader { geo in
             let sidebar = MailPanelLayout.sidebarWidth(geo.size.width)
             HStack(spacing: 0) {
-                if reading {
+                if let tool = page.tool, let features = page.features {
+                    MailToolsView(tool: tool, page: page, center: features)
+                } else if reading {
                     detail
                 } else {
                     if page.showsSidebar {
-                        MailSidebar(model: mail).frame(width: sidebar)
+                        MailSidebar(model: mail, center: page.accountCenter) { page.accountDetailsID = $0 }
+                            .frame(width: sidebar)
                         Divider()
                     }
                     if outboxFills {
@@ -44,14 +47,23 @@ struct MailWorkspace: View {
     }
 
     /// The selected message alone, after Space, Return, or a double click. A draft keeps the columns.
-    private var reading: Bool { page.expanded && !page.composing && mail.selected != nil }
+    private var reading: Bool { page.accountDetailsID == nil && page.expanded && !page.composing && mail.selected != nil }
     /// Outbox has no message to read, so it takes the list's and the reader's room unless a draft is open.
-    private var outboxFills: Bool { mail.place == .outbox && !page.composing }
+    private var outboxFills: Bool { page.accountDetailsID == nil && mail.place == .outbox && !page.composing }
 
     private var detail: some View {
         Group {
-            if page.composing { ComposeView(model: mail).id(mail.draft?.id) }
-            else { MailReader(model: mail, expanded: $page.expanded) }
+            if let id = page.accountDetailsID {
+                MailAccountConnectionView(center: page.accountCenter, recovery: page.accountCenter.recovery, accountID: id) {
+                    page.accountDetailsID = nil
+                }.id(id)
+            } else if page.composing { ComposeView(model: mail, schedules: page.features?.schedules).id(mail.draft?.id) }
+            else {
+                VStack(spacing: 0) {
+                    if let features = page.features { MailMessageTools(model: mail, features: features) }
+                    MailReader(model: mail, expanded: $page.expanded)
+                }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -91,11 +103,19 @@ struct MailPanelList: View {
                 }
                 MailEmptyButton(model: mail)
                 Spacer(minLength: 4)
+                if page.features != nil {
+                    Menu {
+                        ForEach(MailTool.allCases) { tool in
+                            Button(tool.rawValue) { page.tool = tool; page.features?.refresh(full: true) }
+                        }
+                    } label: { Image(systemName: "ellipsis.circle") }.help("Mail tools")
+                }
                 Button { mail.checkMail() } label: { Image(systemName: "arrow.clockwise") }.help("Check for new mail")
                 Button { mail.compose() } label: { Image(systemName: "square.and.pencil") }.help("New message (⌘N)")
             }
             .buttonStyle(.borderless)
             MailClosedNote(model: mail)
+            if mail.place != .outbox { MailListTools(model: mail) }
             // The launcher's field is the search; this picks where it looks.
             if !mail.search.isEmpty, mail.place != .outbox {
                 Picker("Search in", selection: $mail.searchScope) {

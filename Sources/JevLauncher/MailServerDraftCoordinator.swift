@@ -33,6 +33,8 @@ final class MailServerDraftCoordinator: ObservableObject {
             blockedReason = draft.serverDraftBlockedReason
             blockKind = blockedReason == nil ? nil : draft.serverDraftBlockKind
             uncertain = draft.serverDraftAcknowledgementUncertain == true
+            // Importing a server Drafts row is read-only until a user edit changes its fields.
+            lastFields = draft.serverDraftImported == true ? draft.fields : nil
         }
 
         /// Sets or clears the block. Only a caller that knows the exact cause may name a kind, so
@@ -273,6 +275,9 @@ final class MailServerDraftCoordinator: ObservableObject {
     /// Mail queueing. Cleanup failures are reported and journaled, but never change acceptance.
     func completedSend(_ draft: MailModel.Draft) async {
         guard draft.backend == MailBackend.jevcast.rawValue else { return }
+        // A Drafts row imported from another device is not Jevcast-owned. Sending its contents is
+        // explicit, but cleanup must not delete the other device's copy without an ownership proof.
+        if draft.serverDraftImported == true { return }
         let slot = slot(for: draft)
         slot.stopped = true
         slot.debounce?.cancel(); slot.debounce = nil
@@ -294,6 +299,9 @@ final class MailServerDraftCoordinator: ObservableObject {
     /// Explicit discard path. The local checkpoint is admitted before any exact server removal;
     /// ambiguous failures stay in the cleanup journal and are never retried automatically.
     func discard(_ draft: MailModel.Draft) {
+        // Opening a cross-device server draft never grants delete authority. An edited copy becomes
+        // owned only after the coordinator successfully replaces the exact reference.
+        if draft.serverDraftImported == true { return }
         let slot = slot(for: draft)
         slot.stopped = true
         slot.debounce?.cancel(); slot.debounce = nil

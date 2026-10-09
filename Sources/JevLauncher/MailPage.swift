@@ -16,6 +16,10 @@ final class MailPage: ObservableObject, LauncherPage {
     let mail: MailModel?
     /// Gives the keys back to the filter field, such as after the composer closes.
     let focusFilter: (() -> Void)?
+    let accountCenter: NativeMailCenter
+    let features: MailFeatureCenter?
+    @Published var tool: MailTool?
+    @Published var accountDetailsID: String?
     /// A kept draft stays in the model but steps aside while another message shows.
     @Published var draftHidden = false
     /// The message fills the panel and the sidebar and list hide. Escape shows them again first.
@@ -27,20 +31,22 @@ final class MailPage: ObservableObject, LauncherPage {
 
     private var draftWatch: AnyCancellable?
 
-    init(mail: MailModel?, focusFilter: (() -> Void)? = nil) {
+    init(mail: MailModel?, focusFilter: (() -> Void)? = nil, accountCenter: NativeMailCenter? = nil, features: MailFeatureCenter? = nil) {
         self.mail = mail; self.focusFilter = focusFilter
+        self.features = features
+        self.accountCenter = accountCenter ?? (UISnapshots.directory == nil ? .shared : NativeMailCenter(backend: .jevcast, defaults: nil))
         // A new draft, such as from the reader's Reply button, shows at once. So does the open
         // draft when a new one was refused or the open one was picked again.
         guard let mail else { return }
         let newDraft = mail.$draft.map { $0?.id }.removeDuplicates().dropFirst().map { _ in () }
         draftWatch = newDraft.merge(with: mail.$draftNudge.dropFirst().map { _ in () })
-            .sink { [weak self] in MainActor.assumeIsolated { self?.draftHidden = false } }
+            .sink { [weak self] in MainActor.assumeIsolated { self?.tool = nil; self?.accountDetailsID = nil; self?.draftHidden = false } }
     }
 
     private var model: MailModel { mail ?? empty }
-    var isTyping: Bool { composing }
+    var isTyping: Bool { composing || accountDetailsID != nil || tool != nil }
     /// True while the composer is on screen.
-    var composing: Bool { mail?.draft != nil && !draftHidden }
+    var composing: Bool { tool == nil && accountDetailsID == nil && mail?.draft != nil && !draftHidden }
     var openTitle: String { mail?.place != .outbox && mail?.selected != nil ? "Read" : "" }
 
     func opened() {
@@ -67,12 +73,14 @@ final class MailPage: ObservableObject, LauncherPage {
     /// The message counts as read only once it loads and is selected, not the one selected before.
     func show(_ rowID: Int64) {
         guard let mail, mail.open(rowID) else { return }
+        tool = nil
         mail.windowIsKey = true
         keepDraft()
     }
 
     /// A message clicked in the list. An open draft steps aside and is kept; Escape brings it back.
     func pick(_ rowID: Int64) {
+        accountDetailsID = nil
         guard let mail else { return }
         mail.select(rowID, byUser: true)
         keepDraft()
@@ -104,6 +112,7 @@ final class MailPage: ObservableObject, LauncherPage {
     }
 
     func handle(_ key: PageKey) -> Bool {
+        guard accountDetailsID == nil, tool == nil else { return false }
         guard let mail else { return true }
         switch key {
         case .down: mail.moveSelection(1)
@@ -139,11 +148,12 @@ final class MailPage: ObservableObject, LauncherPage {
     }
 
     var footerHints: [(title: String, key: String)] {
+        if accountDetailsID != nil || tool != nil { return [] }
         if isTyping { return [("Send", "⌘↩")] }
         guard mail?.place != .outbox, mail?.selected != nil else { return [("New", "⌘N")] }
         return [("Reply", "⌘R"), ("Forward", "⇧⌘F"), (expanded ? "List" : "Expand", "Space"), ("New", "⌘N")]
     }
-    var backTitle: String? { isTyping ? "Discard" : nil }
+    var backTitle: String? { accountDetailsID != nil || tool != nil ? "Mail" : isTyping ? "Discard" : nil }
     var footerChanges: AnyPublisher<Void, Never> {
         let own = objectWillChange.map { _ in () }
         guard let mail else { return own.eraseToAnyPublisher() }
@@ -153,6 +163,8 @@ final class MailPage: ObservableObject, LauncherPage {
     /// Escape: discards the open draft (twice when it has text), then shows a kept one, then
     /// leaves the expanded message.
     func back() -> Bool {
+        if tool != nil { tool = nil; return true }
+        if accountDetailsID != nil { accountDetailsID = nil; return true }
         if let mail, mail.draft != nil, !draftHidden {
             mail.discardDraft()
             return true
@@ -162,12 +174,13 @@ final class MailPage: ObservableObject, LauncherPage {
         return false
     }
 
-    func content() -> AnyView { AnyView(MailPageView(page: self, mail: model, snapshot: mail == nil)) }
+    func content() -> AnyView { AnyView(MailPageView(page: self, mail: model, center: accountCenter, snapshot: mail == nil)) }
 }
 
 private struct MailPageView: View {
     @ObservedObject var page: MailPage
     @ObservedObject var mail: MailModel
+    @ObservedObject var center: NativeMailCenter
     let snapshot: Bool
 
     var body: some View {
@@ -176,11 +189,18 @@ private struct MailPageView: View {
         }
         // The filter takes the keys again once the composer closes or steps aside, or a mailbox is picked.
         .onChange(of: page.composing) { _, now in if !now { DispatchQueue.main.async { page.focusFilter?() } } }
-        .onChange(of: mail.place) { _, _ in if !page.composing { DispatchQueue.main.async { page.focusFilter?() } } }
+        .onChange(of: mail.place) { _, _ in
+            page.accountDetailsID = nil
+            if !page.composing { DispatchQueue.main.async { page.focusFilter?() } }
+        }
         // Above the composer's footer while one is open, so the note never covers Send.
         .overlay(alignment: .bottom) { MailBanner(model: mail).padding(.bottom, page.composing ? 58 : 12) }
     }
 
-    private var ready: Bool { if snapshot { return true }; if case .ready = mail.status { return true }; return false }
+    private var ready: Bool {
+        if snapshot || (center.backend == .jevcast && !center.accounts.isEmpty) { return true }
+        if case .ready = mail.status { return true }
+        return false
+    }
     private var needsAccess: Bool { if case .needsFullDiskAccess = mail.status { return true }; return false }
 }

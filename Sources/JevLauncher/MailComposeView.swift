@@ -7,9 +7,9 @@ import LauncherCore
 /// dimmed until the draft can go; pressing it then says what is missing.
 struct ComposeView: View {
     @ObservedObject var model: MailModel
+    var schedules: MailScheduleCenter? = nil
     /// A reply starts in its text, so typing goes there and not to a search or filter field.
     @FocusState private var bodyFocused: Bool
-    @FocusState private var toFocused: Bool
     @StateObject private var editorCommands = MailEditorCommands()
     @State private var showsLink = false
     @State private var link = ""
@@ -55,7 +55,7 @@ struct ComposeView: View {
             .onAppear {
                 // A reply starts in its text; a new message or a forward starts in To.
                 let reply = { if case .reply = current.mode { return true }; return false }()
-                DispatchQueue.main.async { if reply { bodyFocused = true } else { toFocused = true } }
+                if reply { DispatchQueue.main.async { bodyFocused = true } }
             }
         }
     }
@@ -79,12 +79,12 @@ struct ComposeView: View {
                         .help((line?.detail ?? draft.to) + "\nApple Mail sets the final list when it sends.")
                 }
             } else {
-                row("To:") { field("Addresses, separated by commas", text: binding.to).focused($toFocused) }
+                row("To:") { recipientField(value: binding.to, placeholder: "Name or email address") }
                 Divider().padding(.leading, Self.gutter)
-                row("Cc:") { field("", text: binding.cc) }
+                row("Cc:") { recipientField(value: binding.cc, placeholder: "Optional") }
                 if native(draft) {
                     Divider().padding(.leading, Self.gutter)
-                    row("Bcc:") { field("", text: binding.bcc) }
+                    row("Bcc:") { recipientField(value: binding.bcc, placeholder: "Optional") }
                 }
                 if native(draft) || draft.mode == .new {
                     Divider().padding(.leading, Self.gutter)
@@ -125,6 +125,14 @@ struct ComposeView: View {
 
     private func field(_ prompt: String, text: Binding<String>) -> some View {
         TextField("", text: text, prompt: Text(prompt)).textFieldStyle(.plain)
+    }
+
+    private func recipientField(value: Binding<String>, placeholder: String) -> some View {
+        MailRecipientChipField(placeholder, value: value,
+                               suggestions: { model.recipientSuggestions(for: $0) },
+                               requestContacts: { query in
+                                   await MailContactsSuggestionSource.requestAndSuggest(query: query)
+                               })
     }
 
     private func aiWritingRow(_ binding: Binding<MailModel.Draft>) -> some View {
@@ -247,6 +255,11 @@ struct ComposeView: View {
                 Text(note).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
             Spacer(minLength: 8)
+            if let schedules, native(draft), let id = draft.fromAccountID, let address = draft.fromAddress {
+                MailScheduleButton(draft: draft, account: .init(accountID: id, address: address), center: schedules) { entry in
+                    model.didSchedule(entry)
+                }.disabled(model.aiWritingBusy || !draft.canSend)
+            }
             Button("Discard") { model.discardDraft() }
             .keyboardShortcut(.cancelAction)
             .help("Discard (Escape)")

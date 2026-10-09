@@ -3,11 +3,13 @@ import LauncherCore
 
 enum MailServerDraftRenderError: Error, LocalizedError, Equatable {
     case senderMissing
+    case senderMismatch
     case forwardAttachmentsUnavailable
 
     var errorDescription: String? {
         switch self {
         case .senderMissing: return "Select a sending account before saving this server draft."
+        case .senderMismatch: return "The selected sending identity changed. Choose it again before saving this draft."
         case .forwardAttachmentsUnavailable:
             return "The original forward attachments are not available yet. Open the original message again before saving this draft."
         }
@@ -21,6 +23,11 @@ enum MailServerDraftRenderer {
     static func render(_ draft: MailModel.Draft, sender: MailSendingIdentity?) throws -> Data {
         guard let address = draft.fromAddress?.trimmingCharacters(in: .whitespacesAndNewlines), !address.isEmpty else {
             throw MailServerDraftRenderError.senderMissing
+        }
+        guard let sender, sender.accountID == draft.fromAccountID,
+              sender.address.caseInsensitiveCompare(address) == .orderedSame,
+              sender.providerAuthorized else {
+            throw MailServerDraftRenderError.senderMismatch
         }
 
         let source = draft.source
@@ -71,7 +78,7 @@ enum MailServerDraftRenderer {
                 + "\" alt=\"" + MailHTML.escape(image.filename) + "\"></p>"
         }
 
-        var message = OutgoingMessage(from: MailContact(name: sender?.name ?? "", address: address),
+        var message = OutgoingMessage(from: MailContact(name: sender.name, address: address),
                                       to: contacts(draft.to), subject: draft.subject, body: body)
         message.cc = contacts(draft.cc)
         message.bcc = contacts(draft.bcc)

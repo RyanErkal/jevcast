@@ -50,7 +50,19 @@ extension MailAccountSync {
     /// Sends through SMTP, then files a copy in Sent when the server does not do that itself. A
     /// copy that cannot be filed does not undo the send; it is reported as a notice.
     @discardableResult
-    public func send(_ message: OutgoingMessage) async throws -> MailSendReceipt {
+    public func send(_ message: OutgoingMessage, verifiedSender: NativeMailSender? = nil) async throws -> MailSendReceipt {
+        let sender: NativeMailSender
+        if let verifiedSender {
+            guard message.from.address.caseInsensitiveCompare(verifiedSender.address) == .orderedSame else {
+                throw MailError.notFound("The selected sending identity changed before delivery.")
+            }
+            sender = try verifiedSender.validated(for: account)
+        } else {
+            guard message.from.address.caseInsensitiveCompare(account.email) == .orderedSame else {
+                throw MailError.notFound("A native message must use the account address or a verified provider alias.")
+            }
+            sender = .canonical(for: account)
+        }
         let data = MailComposer.render(message)
         try await smtp.send(from: account.email, recipients: message.recipients, message: data)
         func pending(_ note: String, sent: NativeMailStore.Mailbox? = nil,
@@ -58,12 +70,13 @@ extension MailAccountSync {
             .init(accountID: account.id, messageID: message.messageID, sentCopy: .pending, note: note, message: data,
                   date: message.date,
                   sentMailbox: sent?.name, sentUIDValidity: info?.uidValidity, sentUIDNext: info?.uidNext,
-                  filingAttempted: attempted)
+                  filingAttempted: attempted, sender: sender)
         }
         guard account.savesSentCopy else {
             let sentIDs = Set(mailboxes.filter { $0.role == .sent }.map(\.rowID))
             if !sentIDs.isEmpty { await signal.post(MailSyncRequest(mailboxes: sentIDs)) }
-            return .init(accountID: account.id, messageID: message.messageID, sentCopy: .serverManaged, date: message.date)
+            return .init(accountID: account.id, messageID: message.messageID, sentCopy: .serverManaged,
+                         date: message.date, sender: sender)
         }
         let candidates: [NativeMailStore.Mailbox]
         do {
@@ -101,7 +114,7 @@ extension MailAccountSync {
             return .init(accountID: account.id, messageID: message.messageID, sentCopy: .saved,
                          date: message.date,
                          sentMailbox: sent.name, sentUIDValidity: baseline.uidValidity,
-                         sentUIDNext: baseline.uidNext, filingAttempted: true)
+                         sentUIDNext: baseline.uidNext, filingAttempted: true, sender: sender)
         } catch {
             let note = "Sent, but the copy in Sent could not be saved: " + error.localizedDescription
             notice(account.id, note)

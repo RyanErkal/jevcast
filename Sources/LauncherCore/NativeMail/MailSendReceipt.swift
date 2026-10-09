@@ -18,13 +18,16 @@ public struct MailSendReceipt: Codable, Sendable, Equatable {
     /// False means SMTP was accepted but no APPEND was attempted, such as missing or ambiguous
     /// Sent mapping. Nil is retained for older receipts and server-managed copies.
     public let filingAttempted: Bool?
+    /// The sender identity accepted by the native boundary. Nil is retained for older receipts
+    /// and receipts created directly by lower-level tests or integrations.
+    public let sender: NativeMailSender?
 
     public init(accountID: String, messageID: String, sentCopy: SentCopy, note: String? = nil, message: Data? = nil,
                 date: Date = Date(), sentMailbox: String? = nil, sentUIDValidity: UInt32? = nil,
-                sentUIDNext: UInt32? = nil, filingAttempted: Bool? = nil) {
+                sentUIDNext: UInt32? = nil, filingAttempted: Bool? = nil, sender: NativeMailSender? = nil) {
         self.accountID = accountID; self.messageID = messageID; self.sentCopy = sentCopy
         self.note = note; self.message = message; self.sentMailbox = sentMailbox
         self.sentUIDValidity = sentUIDValidity; self.sentUIDNext = sentUIDNext
-        self.filingAttempted = filingAttempted; self.date = date
+        self.filingAttempted = filingAttempted; self.sender = sender; self.date = date
     }
 }

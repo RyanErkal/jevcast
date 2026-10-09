@@ -21,8 +21,52 @@ enum MailSnapshots {
             panel("mail-workspace-sidebar-hidden", sidebarHidden(), width: 980),
             panel("mail-workspace-drafts", MailPage(mail: workspace(drafts: true))),
             panel("mail-workspace-search", MailPage(mail: workspace(search: true))),
+            panel("mail-account-signin", accountConnection(signIn: true), width: 980),
+            panel("mail-account-retry", accountConnection(signIn: false), width: 980),
+            panel("mail-account-password", accountConnection(signIn: true, password: true), width: 980),
             ("mail-add-account", AnyView(AddMailAccountSheet(demo: true)), NSSize(width: 520, height: 640))
-        ]
+        ] + toolWindows
+    }
+
+    static var toolWindows: [(String, AnyView, NSSize)] {
+        MailTool.allCases.flatMap { tool in
+            [panel("mail-tools-" + String(describing: tool), toolPage(tool)),
+             panel("mail-tools-" + String(describing: tool) + "-compact", toolPage(tool), width: 860)]
+        } + [panel("mail-compose-scheduled", toolPage(nil, composing: true), width: 980)]
+    }
+
+    static func toolPage(_ tool: MailTool?, composing: Bool = false) -> MailPage {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("jevcast-mail-demo-" + UUID().uuidString)
+        var account = NativeMailAccount.preset(.gmail, name: "Alex Morgan", email: "alex@example.com")!
+        account.id = "demo"
+        let features = MailFeatureCenter(directory: directory, defaults: nil, accounts: [account])
+        let model = workspace(drafts: composing)
+        let native = NativeMailCenter(backend: .jevcast, accounts: [account], defaults: nil)
+        let page = MailPage(mail: model, accountCenter: native, features: features)
+        if tool == .rules {
+            features.rules.save(.init(name: "Flag client updates", predicate: .init(from: "client@example.com"), actions: [.markFlagged(true)]))
+        }
+        if tool == .smart {
+            features.smart.saveMailbox(.init(name: "Client updates", predicate: .init(subject: "Update")))
+            features.smart.setVIP("sam@example.com", enabled: true)
+        }
+        if tool == .snoozed, let message = model.messages.first {
+            _ = try? features.snoozes.snooze(message: message, account: .init(account), messageID: "<demo@example.com>", until: Date().addingTimeInterval(3600))
+        }
+        if tool == .scheduled {
+            let draft = MailModel.Draft(backend: MailBackend.jevcast.rawValue, fromAccountID: account.id,
+                fromAddress: account.email, mode: .new, to: "sam@example.com", subject: "Friday's Plan", body: "Friday at 10 works. See you then.")
+            _ = try? features.schedules.schedule(draft, account: .init(account), at: Date().addingTimeInterval(3600))
+        }
+        if tool == .archive {
+            let source = directory.appendingPathComponent("example.eml")
+            let raw = "From: Sam <sam@example.com>\r\nTo: alex@example.com\r\nSubject: Archived project notes\r\nDate: Fri, 9 Oct 2026 09:00:00 +0100\r\nMessage-ID: <archive-demo@example.com>\r\n\r\nThe project notes are ready for review.\r\n"
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try? Data(raw.utf8).write(to: source)
+            if let archive = try? features.archive() { _ = try? archive.importArchive(url: source) }
+        }
+        page.tool = tool
+        return page
     }
 
     /// The panel's Mail view as the launcher shows it below the search field: the page's own
@@ -114,6 +158,22 @@ enum MailSnapshots {
     static func sidebarHidden() -> MailPage {
         let page = MailPage(mail: workspace())
         page.showsSidebar = false
+        return page
+    }
+
+    static func accountConnection(signIn: Bool, password: Bool = false) -> MailPage {
+        var account = NativeMailAccount.preset(password ? .yahoo : .gmail, name: "Alex Morgan", email: "alex@example.com")!
+        account.id = "demo"; account.authentication = password ? .password : .oauth
+        var personal = NativeMailAccount.preset(.gmail, name: "Alex", email: "alex@gmail.com")!
+        personal.id = "personal"; personal.authentication = .oauth
+        var pending = personal; pending.id = "new-account"; pending.email = "alex@new.example"
+        let center = NativeMailCenter(backend: .jevcast, accounts: [account, personal, pending], defaults: nil)
+        center.recordState(account.id, .ready(Date(timeIntervalSince1970: 1_791_532_800)))
+        center.recordState(account.id, .failed(signIn ? "This account needs you to sign in again." : "The mail provider is temporarily unavailable.", signIn: signIn))
+        center.recordState(personal.id, .ready(Date(timeIntervalSince1970: 1_791_532_800)))
+        center.recordState(pending.id, .failed("No saved sign-in was found for this account.", signIn: true))
+        let page = MailPage(mail: workspace(), accountCenter: center)
+        page.accountDetailsID = account.id
         return page
     }
 

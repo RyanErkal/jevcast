@@ -7,11 +7,11 @@ public actor NativeMailEngine {
     private let policy: MailSyncPolicy
     private let credential: @Sendable (NativeMailAccount) async throws -> MailCredential
     private let transport: IMAPClient.TransportFactory
-    private let changed: @Sendable () -> Void
+    let changed: @Sendable () -> Void
     private let report: @Sendable (String, MailAccountSync.State) -> Void
     private let notice: @Sendable (String, String) -> Void
     public private(set) var accounts: [NativeMailAccount] = []
-    private var syncs: [String: MailAccountSync] = [:]
+    var syncs: [String: MailAccountSync] = [:]
 
     public init(store: NativeMailStore, policy: MailSyncPolicy = MailSyncPolicy(),
                 credential: @escaping @Sendable (NativeMailAccount) async throws -> MailCredential,
@@ -86,6 +86,11 @@ public actor NativeMailEngine {
         for sync in syncs.values { await sync.request(request) }
     }
 
+    /// Wakes the existing retry loop without replacing connections or other accounts.
+    public func syncAccount(_ id: String) async {
+        await syncs[id]?.request(.everything)
+    }
+
     /// Reads one older batch of a mailbox when its list reaches the end of what this Mac has.
     /// Returns whether the server holds older mail still.
     public func loadOlder(_ mailboxRowID: Int64) async throws -> Bool {
@@ -108,6 +113,7 @@ public actor NativeMailEngine {
         try await store.setLocal(rowID, read: read)
         changed()
         do { try await sync.setFlag("\\Seen", read, at: location) } catch {
+            if await queueOfflineAction(for: location, kind: .read, desiredValue: read, error: error) { return }
             try? await store.setLocal(rowID, read: location.read)
             changed()
             throw error
@@ -119,6 +125,7 @@ public actor NativeMailEngine {
         try await store.setLocal(rowID, flagged: flagged)
         changed()
         do { try await sync.setFlag("\\Flagged", flagged, at: location) } catch {
+            if await queueOfflineAction(for: location, kind: .flag, desiredValue: flagged, error: error) { return }
             try? await store.setLocal(rowID, flagged: location.flagged)
             changed()
             throw error
@@ -132,7 +139,8 @@ public actor NativeMailEngine {
             throw MailError.notFound("Messages move only within one account.")
         }
         if destination.rowID == location.mailbox.rowID { return }
-        try await hide(location, movingTo: destination) { try await sync.move(location, to: destination) }
+        let action = offlineAction(for: location, kind: .move, destination: destination)
+        try await hide(location, movingTo: destination, offlineAction: action) { try await sync.move(location, to: destination) }
     }
 
     /// Delete moves a message to its account's one Trash. A message already in Trash is removed for
@@ -148,7 +156,8 @@ public actor NativeMailEngine {
             try await hide(location) { try await sync.deletePermanently(location) }
             return
         }
-        try await hide(location, movingTo: trash) { try await sync.move(location, to: trash) }
+        let action = offlineAction(for: location, kind: .move, destination: trash)
+        try await hide(location, movingTo: trash, offlineAction: action) { try await sync.move(location, to: trash) }
     }
 
     /// What Empty would remove from a Trash or Junk mailbox now, for the confirmation's count.
@@ -177,6 +186,7 @@ public actor NativeMailEngine {
     /// Hides the row at once and drops it after the server's change; shows it again on failure.
     /// A move counts the message into its destination's server counts.
     private func hide(_ location: NativeMailStore.Location, movingTo destination: NativeMailStore.Mailbox? = nil,
+                      offlineAction: MailOfflineAction? = nil,
                       _ change: () async throws -> Void) async throws {
         try await store.setHidden(location.rowID, true)
         changed()
@@ -186,6 +196,11 @@ public actor NativeMailEngine {
             try await store.remove(uids: [location.uid], from: location.mailbox.rowID)
             changed()
         } catch {
+            if let offlineAction, await queueOfflineAction(offlineAction, error: error) {
+                // Keep the row hidden while the durable action waits. A reconnect either removes
+                // it after a confirmed move or leaves it in review for an explicit user choice.
+                return
+            }
             try? await store.setHidden(location.rowID, false)
             changed()
             throw error
@@ -228,16 +243,17 @@ public actor NativeMailEngine {
     public func send(from accountID: String, to: [String], cc: [String], subject: String, body: String,
                      html: String? = nil, attachments: [OutgoingMessage.Attachment] = [], messageID: String? = nil,
                      recipients: Recipients? = nil, inReplyTo: String? = nil,
-                     references: [String] = []) async throws -> MailSendReceipt {
+                     references: [String] = [], sender: NativeMailSender? = nil) async throws -> MailSendReceipt {
         let sync = try sendingSync(accountID)
         let account = sync.account
+        let verifiedSender = try (sender ?? .canonical(for: account)).validated(for: account)
         let chosen = recipients ?? Recipients(to: to.map { MailContact(address: $0) }, cc: cc.map { MailContact(address: $0) })
-        var message = OutgoingMessage(from: account.sender, to: chosen.to, subject: subject, body: body)
+        var message = OutgoingMessage(from: verifiedSender.contact, to: chosen.to, subject: subject, body: body)
         message.cc = chosen.cc; message.bcc = chosen.bcc
         message.html = html; message.attachments = attachments
         message.inReplyTo = inReplyTo; message.references = references
         if let messageID { message.messageID = messageID }
-        return try await sync.send(message)
+        return try await sync.send(message, verifiedSender: verifiedSender)
     }
 
     /// A reply. The composer's `recipients` and `subject` win over the ones worked out from the
@@ -247,16 +263,21 @@ public actor NativeMailEngine {
     public func reply(to rowID: Int64, text: String, all: Bool, from accountID: String, html: String? = nil,
                       attachments: [OutgoingMessage.Attachment] = [], messageID: String? = nil, expectedMessageID: String? = nil,
                       recipients: Recipients? = nil, subject: String? = nil, quote: Bool = true,
-                      saved: MIMEMessage? = nil, savedDate: Date? = nil) async throws -> MailSendReceipt {
+                      saved: MIMEMessage? = nil, savedDate: Date? = nil,
+                      sender: NativeMailSender? = nil) async throws -> MailSendReceipt {
         let sending = try sendingSync(accountID)
+        let verifiedSender = try (sender ?? .canonical(for: sending.account)).validated(for: sending.account)
         let answered = try await answered(rowID, expectedMessageID: expectedMessageID, saved: saved, savedDate: savedDate, verb: "replying")
         let original = answered.message
-        let worked = MailReplies.recipients(of: original, all: all, own: Set(accounts.map(\.email)))
+        // Treat the explicitly verified alias as one of this account's own addresses for Reply
+        // All. Do not reject it by comparing the selected address to the canonical account email.
+        let own = Set(accounts.map(\.email) + [verifiedSender.address])
+        let worked = MailReplies.recipients(of: original, all: all, own: own)
         let chosen = recipients ?? Recipients(to: worked.to, cc: worked.cc)
         guard !chosen.to.isEmpty else { throw MailError.notFound("This message has no address to reply to.") }
         let sender = original.header("From") ?? ""
         let threading = MailReplies.references(of: original)
-        var message = OutgoingMessage(from: sending.account.sender, to: chosen.to, subject: subject ?? MailReplies.replySubject(original.header("Subject") ?? ""),
+        var message = OutgoingMessage(from: verifiedSender.contact, to: chosen.to, subject: subject ?? MailReplies.replySubject(original.header("Subject") ?? ""),
                                       body: MailReplies.replyBody(text, original: original, sender: sender, date: answered.date, quote: quote))
         message.cc = chosen.cc; message.bcc = chosen.bcc
         message.inReplyTo = threading.inReplyTo
@@ -265,7 +286,7 @@ public actor NativeMailEngine {
             + (quote ? MailHTML.quoted(original, attribution: MailReplies.replyAttribution(date: answered.date, sender: sender)) : "")
         message.attachments = attachments + (quote ? Self.inlineAttachments(original) : [])
         if let messageID { message.messageID = messageID }
-        let receipt = try await sending.send(message)
+        let receipt = try await sending.send(message, verifiedSender: verifiedSender)
         if let location = answered.location, let sync = answered.sync { try? await sync.setFlag("\\Answered", true, at: location) }
         return receipt
     }
@@ -275,8 +296,10 @@ public actor NativeMailEngine {
     public func forward(_ rowID: Int64, text: String, to: [String], from accountID: String, html: String? = nil,
                         attachments: [OutgoingMessage.Attachment] = [], messageID: String? = nil, expectedMessageID: String? = nil,
                         recipients: Recipients? = nil, subject: String? = nil, saved: MIMEMessage? = nil, savedDate: Date? = nil,
-                        savedAttachments: [OutgoingMessage.Attachment]? = nil) async throws -> MailSendReceipt {
+                        savedAttachments: [OutgoingMessage.Attachment]? = nil,
+                        sender: NativeMailSender? = nil) async throws -> MailSendReceipt {
         let sending = try sendingSync(accountID)
+        let verifiedSender = try (sender ?? .canonical(for: sending.account)).validated(for: sending.account)
         let answered = try await answered(rowID, expectedMessageID: expectedMessageID, saved: saved, savedDate: savedDate, verb: "forwarding")
         let original = answered.message
         let chosen = recipients ?? Recipients(to: to.map { MailContact(address: $0) })
@@ -287,14 +310,14 @@ public actor NativeMailEngine {
         guard files.count >= original.attachments.count else {
             throw MailError.notFound("The original message moved before it could be forwarded with its attachments. Open it again and forward it.")
         }
-        var message = OutgoingMessage(from: sending.account.sender, to: chosen.to, subject: subject ?? MailReplies.forwardSubject(original.header("Subject") ?? ""),
+        var message = OutgoingMessage(from: verifiedSender.contact, to: chosen.to, subject: subject ?? MailReplies.forwardSubject(original.header("Subject") ?? ""),
                                       body: MailReplies.forwardBody(text, original: original, date: answered.date))
         message.cc = chosen.cc; message.bcc = chosen.bcc
         message.html = (html ?? MailHTML.plain(text)) + MailHTML.forwarded(original, date: MailReplies.attribution(answered.date))
         message.attachments = attachments + Self.inlineAttachments(original)
             + files
         if let messageID { message.messageID = messageID }
-        return try await sending.send(message)
+        return try await sending.send(message, verifiedSender: verifiedSender)
     }
 
     /// The message being answered: from this Mac and its server, or, once it left this Mac, the copy

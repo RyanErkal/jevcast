@@ -50,6 +50,10 @@ struct MailSidebarFolders {
 }
 
 enum MailSidebarAccounts {
+    /// An account with no downloaded folders still needs a visible recovery action.
+    static func ids(mailboxAccounts: [String], configured: [NativeMailAccount]) -> [String] {
+        Array(Set(mailboxAccounts).union(configured.map(\.id)))
+    }
     /// Short labels come from addresses, never the sender's display name.
     static func labels(_ accounts: [(id: String, address: String)]) -> [String: String] {
         var labels: [String: String] = [:]

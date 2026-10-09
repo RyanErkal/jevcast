@@ -59,6 +59,97 @@ final class MailOAuthTests: XCTestCase {
         XCTAssertFalse(fresh.needsRefresh)
     }
 
+    func testTransientTokenRepliesAreRetryableAndRedacted() async throws {
+        let client = try MailOAuthClient(provider: .google, clientID: "fixture.apps.googleusercontent.com")
+        let secret = "fixture provider detail must never be reported"
+        for status in [408, 429, 500, 503] {
+            let http = MailOAuthHTTP { request in
+                (Data("{\"error_description\":\"\(secret)\"}".utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
+            }
+            do {
+                _ = try await http.exchange(code: "code", authorization: authorization, redirect: redirect, client: client)
+                XCTFail("HTTP \(status) must be retryable")
+            } catch let error as MailOAuthError {
+                XCTAssertEqual(error, .temporarilyUnavailable)
+                XCTAssertFalse(error.localizedDescription.contains(secret))
+            }
+        }
+
+        for code in ["server_error", "temporarily_unavailable"] {
+            let http = MailOAuthHTTP { request in
+                let body = Data("{\"error\":\"\(code)\",\"error_description\":\"\(secret)\"}".utf8)
+                return (body, HTTPURLResponse(url: request.url!, statusCode: 400, httpVersion: nil, headerFields: nil)!)
+            }
+            do {
+                _ = try await http.exchange(code: "code", authorization: authorization, redirect: redirect, client: client)
+                XCTFail("OAuth \(code) must be retryable")
+            } catch let error as MailOAuthError {
+                XCTAssertEqual(error, .temporarilyUnavailable)
+                XCTAssertFalse(error.localizedDescription.contains(secret))
+            }
+        }
+    }
+
+    func testInvalidGrantAndOAuthSetupErrorsRemainActionable() async throws {
+        let client = try MailOAuthClient(provider: .google, clientID: "fixture.apps.googleusercontent.com")
+        let cases: [(String, MailOAuthError)] = [
+            ("invalid_grant", .signInRequired),
+            ("access_denied", .signInRequired),
+            ("invalid_client", .invalidClient),
+            ("invalid_request", .refused),
+            ("unauthorized_client", .refused),
+            ("invalid_scope", .refused)
+        ]
+        for (code, expected) in cases {
+            let http = MailOAuthHTTP { request in
+                let body = Data("{\"error\":\"\(code)\",\"error_description\":\"fixture secret\"}".utf8)
+                return (body, HTTPURLResponse(url: request.url!, statusCode: 400, httpVersion: nil, headerFields: nil)!)
+            }
+            do {
+                _ = try await http.exchange(code: "code", authorization: authorization, redirect: redirect, client: client)
+                XCTFail("OAuth \(code) must fail")
+            } catch let error as MailOAuthError {
+                XCTAssertEqual(error, expected)
+                XCTAssertFalse(error.localizedDescription.contains("fixture secret"))
+            }
+        }
+    }
+
+    func testMalformedAndRedirectedTokenRepliesStayInvalid() async throws {
+        let client = try MailOAuthClient(provider: .google, clientID: "fixture.apps.googleusercontent.com")
+        let malformed = MailOAuthHTTP { request in
+            (Data("not-json".utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+        do {
+            _ = try await malformed.exchange(code: "code", authorization: authorization, redirect: redirect, client: client)
+            XCTFail("Malformed token replies must fail")
+        } catch let error as MailOAuthError {
+            XCTAssertEqual(error, .invalidToken)
+        }
+
+        let redirected = MailOAuthHTTP { request in
+            let url = URL(string: "https://example.com/redirected")!
+            return (Data(#"{"access_token":"fixture"}"#.utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+        do {
+            _ = try await redirected.exchange(code: "code", authorization: authorization, redirect: redirect, client: client)
+            XCTFail("Redirected token replies must fail")
+        } catch let error as MailOAuthError {
+            XCTAssertEqual(error, .invalidToken)
+        }
+
+        let redirectResponse = MailOAuthHTTP { request in
+            let body = Data(#"{"error":"temporarily_unavailable"}"#.utf8)
+            return (body, HTTPURLResponse(url: request.url!, statusCode: 302, httpVersion: nil, headerFields: nil)!)
+        }
+        do {
+            _ = try await redirectResponse.exchange(code: "code", authorization: authorization, redirect: redirect, client: client)
+            XCTFail("Redirect responses must fail")
+        } catch let error as MailOAuthError {
+            XCTAssertEqual(error, .refused)
+        }
+    }
+
     func testTokenResponseCannotRedirectOrExposeProviderError() async throws {
         let client = try MailOAuthClient(provider: .google, clientID: "fixture.apps.googleusercontent.com")
         for status in [302, 400, 500] {

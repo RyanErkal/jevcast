@@ -14,12 +14,22 @@ struct MailMessageList: View {
     var body: some View {
         ScrollViewReader { proxy in
             List(selection: selection) {
-                ForEach(model.messages) { message in
-                    MailRow(message: message, delete: { model.delete(message.rowID) },
-                            deleteAll: { model.select(message.rowID, byUser: false); model.deleteAllFromSender() })
-                        .equatable()
-                        .tag(message.rowID).id(message.rowID)
-                        .onAppear { if message.rowID == model.pageTriggerID { model.loadNextPage() } }
+                ForEach(model.conversationGroups) { conversation in
+                    if conversation.messages.count > 1 {
+                        MailConversationSummaryRow(conversation: conversation,
+                                                   expanded: model.expandedConversationIDs.contains(conversation.id),
+                                                   isVIP: conversation.messages.contains { model.isVIP($0.summary) },
+                                                   toggle: { model.toggleConversation(conversation) })
+                            .listRowSeparator(.hidden)
+                        if model.expandedConversationIDs.contains(conversation.id) {
+                            ForEach(conversation.messages, id: \.summary.rowID) { item in
+                                messageRow(item.summary)
+                                    .padding(.leading, 15)
+                            }
+                        }
+                    } else if let item = conversation.messages.first {
+                        messageRow(item.summary)
+                    }
                 }
                 if model.hasMore {
                     ProgressView().controlSize(.small).frame(maxWidth: .infinity)
@@ -66,9 +76,21 @@ struct MailMessageList: View {
         }
     }
 
-    private var selection: Binding<Int64?> {
-        Binding(get: { model.selectedID }, set: { id in
-            if let id, let pick { pick(id) } else { model.selectedID = id }
+    private func messageRow(_ message: MailSummary) -> some View {
+        MailRow(message: message, isVIP: model.isVIP(message), delete: { model.delete(message.rowID) },
+                deleteAll: { model.select(message.rowID, byUser: false); model.deleteAllFromSender() })
+            .equatable()
+            .tag(message.rowID).id(message.rowID)
+            .onDrag { NSItemProvider(object: NSString(string: String(message.rowID))) }
+            .onAppear { if message.rowID == model.pageTriggerID { model.loadNextPage() } }
+    }
+
+    private var selection: Binding<Set<Int64>> {
+        Binding(get: { model.selectedMessageIDs }, set: { ids in
+            model.setSelectedMessageIDs(ids)
+            // A single click also gives the page draft/reader handling. Multi-selection stays
+            // in the list so the page's one-message selection cannot collapse the set.
+            if ids.count <= 1, let id = ids.sorted().last, let pick { pick(id) }
         })
     }
 

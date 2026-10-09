@@ -2,6 +2,17 @@ import Foundation
 import LauncherCore
 
 extension MailModel {
+    /// Server-draft rows already discovered by the local sync. The list is read-only; importing
+    /// one remains an explicit user action, so another device's draft is never changed merely by
+    /// opening the Drafts mailbox.
+    var discoveredServerDrafts: [MailSummary] {
+        guard MailBackend.current == .jevcast, NativeMailCenter.isActive else { return [] }
+        return messages.filter { message in
+            guard let mailbox = mailbox(message.mailbox) else { return false }
+            return mailbox.role == .drafts && mailbox.serverRole == .drafts
+        }
+    }
+
     /// The first visible holder of a local draft's server state. The same ID can also be present
     /// in a delivery record while a send result is being filed.
     func serverDraft(for id: UUID) -> Draft? {
@@ -51,6 +62,7 @@ extension MailModel {
             active.serverDraftBlockedReason = blockedReason
             active.serverDraftBlockKind = blockKind
             active.serverDraftAcknowledgementUncertain = acknowledgementUncertain ? true : nil
+            if reference != nil { active.serverDraftImported = nil }
             draft = active
             found = true
         }
@@ -60,6 +72,7 @@ extension MailModel {
             pending.serverDraftBlockedReason = blockedReason
             pending.serverDraftBlockKind = blockKind
             pending.serverDraftAcknowledgementUncertain = acknowledgementUncertain ? true : nil
+            if reference != nil { pending.serverDraftImported = nil }
             pendingSend = pending
             found = true
         }
@@ -70,6 +83,7 @@ extension MailModel {
             changed.serverDraftBlockedReason = blockedReason
             changed.serverDraftBlockKind = blockKind
             changed.serverDraftAcknowledgementUncertain = acknowledgementUncertain ? true : nil
+            if reference != nil { changed.serverDraftImported = nil }
             item = Unsent(draft: changed, reason: item.reason)
             unsent[index] = item
             found = true
@@ -81,6 +95,7 @@ extension MailModel {
             deliveryDraft.serverDraftBlockedReason = blockedReason
             deliveryDraft.serverDraftBlockKind = blockKind
             deliveryDraft.serverDraftAcknowledgementUncertain = acknowledgementUncertain ? true : nil
+            if reference != nil { deliveryDraft.serverDraftImported = nil }
             deliveries[index].draft = deliveryDraft
             found = true
         }
@@ -91,6 +106,18 @@ extension MailModel {
     /// it never searches Drafts or turns every server row into a local draft.
     @discardableResult
     func editSelectedServerDraft() async throws -> Bool {
+        switch try await importSelectedServerDraft() {
+        case .imported, .alreadyOpen: return true
+        case .conflict: return false
+        }
+    }
+
+    /// Fetches one discovered server Drafts message and opens it as an editable local draft. If a
+    /// local version is already being edited, both versions remain available and no server UID is
+    /// replaced or removed. The coordinator remains the only path that saves or cleans a server
+    /// draft after the user edits the imported value.
+    @discardableResult
+    func importSelectedServerDraft() async throws -> MailDraftImportResult {
         guard MailBackend.current == .jevcast, NativeMailCenter.isActive else {
             throw LauncherError("Select Jevcast accounts as the mail source before editing a server draft.")
         }
@@ -118,33 +145,23 @@ extension MailModel {
             throw LauncherError("The selected server draft's sending account is not available.")
         }
 
-        let plain = message.plainText ?? message.html.map(HTMLText.plain) ?? ""
-        let files = MIMEMessage.files(loaded.raw).map {
-            OutgoingMessage.Attachment(filename: $0.name, mimeType: $0.mimeType, data: $0.data)
+        let remote = MailDraftImportBuilder.build(raw: loaded.raw, message: message,
+                                                    reference: loaded.reference, identity: identity,
+                                                    senders: senders)
+        if let local = draft, local.hasContent {
+            if local.serverDraftReference == remote.serverDraftReference {
+                if local.fields == remote.fields { return .alreadyOpen(local) }
+                // Keep the local edits open and put the server version beside it for explicit
+                // review. No coordinator call is made for the unknown other-device version.
+                unsent.append(.init(draft: remote, reason: "A newer server Drafts version is available. Review both versions before choosing one."))
+                composeNote = "Both local and server versions are kept in Drafts and Outbox."
+                return .conflict(local: local, remote: remote)
+            }
+            // A different local draft must not be silently discarded when a server draft opens.
+            unsent.append(.init(draft: local, reason: "Kept while opening a server Drafts message."))
+            self.draft = nil
         }
-        let inline = loaded.message.inlineImages.sorted { $0.key < $1.key }.map {
-            OutgoingMessage.Attachment(filename: "inline-image", mimeType: $0.value.mimeType,
-                                       data: $0.value.data, contentID: $0.key)
-        }
-        var draft = Draft()
-        draft.backend = MailBackend.jevcast.rawValue
-        draft.messageID = loaded.reference.messageID
-        draft.fromAccountID = identity.accountID
-        draft.fromAddress = identity.address
-        draft.senderWasChosen = true
-        draft.ownAddresses = senders.map(\ .address)
-        draft.to = message.header("To") ?? ""
-        draft.cc = message.header("Cc") ?? ""
-        draft.bcc = message.header("Bcc") ?? ""
-        draft.subject = subject
-        draft.body = plain
-        draft.attachments = inline + files
-        draft.serverDraftReference = loaded.reference
-        draft.serverDraftInReplyTo = message.header("In-Reply-To")
-        draft.serverDraftReferences = MailReplies.messageIDs(message.header("References") ?? "")
-        draft.serverDraftHTML = message.html
-        draft.serverDraftHTMLBody = plain
-        guard startDraft(draft) else { return false }
-        return true
+        guard startDraft(remote) else { return .conflict(local: draft ?? remote, remote: remote) }
+        return .imported(remote)
     }
 }

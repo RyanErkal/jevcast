@@ -19,7 +19,15 @@ extension MailAccountSync {
             throw MailError.notFound("The saved Sent copy does not belong to this account.")
         }
         let senders = MailAddress.list(parsed.header("From") ?? "")
-        guard senders.count == 1, senders[0].address.caseInsensitiveCompare(account.email) == .orderedSame else {
+        guard senders.count == 1 else { throw MailError.notFound("The saved Sent copy does not belong to this account.") }
+        if let sender = receipt.sender {
+            guard (try? sender.validated(for: account)) != nil,
+                  senders[0].address.caseInsensitiveCompare(sender.address) == .orderedSame else {
+                throw MailError.notFound("The saved Sent copy does not belong to this account.")
+            }
+        } else if senders[0].address.caseInsensitiveCompare(account.email) != .orderedSame {
+            // Older receipts did not carry the verified sender contract, so retain their
+            // canonical-address boundary rather than guessing that an arbitrary alias is safe.
             throw MailError.notFound("The saved Sent copy does not belong to this account.")
         }
 

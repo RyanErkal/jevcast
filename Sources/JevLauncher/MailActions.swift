@@ -12,7 +12,6 @@ enum MailActions {
 
     /// The engine for Jevcast accounts, or nil when Apple Mail is the mail source.
     private static func native(_ mailbox: MailMailbox? = nil) throws -> NativeMailEngine? {
-        try MailIOPolicy.requireOnline()
         if let mailbox, (mailbox.serverRole != nil) != NativeMailCenter.isActive {
             throw LauncherError("The mail source changed. Nothing was changed or sent.")
         }

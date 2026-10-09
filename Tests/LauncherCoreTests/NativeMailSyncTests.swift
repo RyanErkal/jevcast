@@ -359,6 +359,25 @@ final class NativeMailSyncTests: XCTestCase {
         await sync.stop()
     }
 
+    func testTemporaryCredentialFailureAllowsNextSyncPass() async throws {
+        actor Credentials {
+            var calls = 0
+            func read() throws -> MailCredential {
+                calls += 1
+                if calls == 1 { throw MailOAuthError.temporarilyUnavailable }
+                return .password("app-password")
+            }
+        }
+        let credentials = Credentials()
+        server.deliver(to: "INBOX", subject: "After provider recovery")
+        let sync = MailAccountSync(account: account, store: store, credential: { try await credentials.read() }, transport: transport)
+        guard case .failed = await sync.pass(.everything) else { return XCTFail("A temporary failure must remain retryable") }
+        guard case .failed(_, signIn: false) = await sync.state else { return XCTFail("Do not ask the user to sign in again") }
+        await pass(sync, .everything)
+        XCTAssertEqual(try subjects("INBOX"), ["After provider recovery"])
+        await sync.stop()
+    }
+
     func testIdleBringsNewMailWithoutAsking() async throws {
         server.deliver(to: "INBOX", subject: "First")
         let engine = makeEngine()

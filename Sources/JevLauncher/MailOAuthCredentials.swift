@@ -1,6 +1,8 @@
 import AppKit
 import LauncherCore
 
+private let mailOAuthKeychainUnavailableMessage = "The saved mail sign-in could not be accessed. Unlock Keychain and try again."
+
 enum MailOAuthSetup {
     static func client(_ provider: MailOAuthProvider) throws -> MailOAuthClient {
         try MailOAuthClient(provider: provider, clientID: UserDefaults.standard.string(forKey: key(provider)) ?? "")
@@ -41,7 +43,12 @@ actor MailOAuthCredentials {
 
     func credential(for account: NativeMailAccount) async throws -> MailCredential {
         do { return try await readCredential(for: account) }
-        catch let error as MailOAuthError { throw MailError.signInFailed(error.localizedDescription) }
+        catch let error as MailOAuthError {
+            if error == .temporarilyUnavailable { throw error }
+            throw MailError.signInFailed(error.localizedDescription)
+        } catch is KeychainStoreError {
+            throw MailError.notFound(mailOAuthKeychainUnavailableMessage)
+        }
     }
 
     func cancelRefresh(_ id: String) {
@@ -70,7 +77,11 @@ actor MailOAuthCredentials {
 
     static func save(_ token: MailOAuthToken, accountID: String) throws {
         let data = try JSONEncoder().encode(token)
-        try KeychainStore.save(String(decoding: data, as: UTF8.self), account: key(accountID))
+        do {
+            try KeychainStore.save(String(decoding: data, as: UTF8.self), account: key(accountID))
+        } catch is KeychainStoreError {
+            throw MailError.notFound(mailOAuthKeychainUnavailableMessage)
+        }
     }
 }
 
@@ -88,7 +99,12 @@ enum MailOAuthSignIn {
         guard NSWorkspace.shared.open(url) else { throw MailOAuthError.cancelled }
         let callback = try await server.wait()
         let code = try authorization.code(from: callback, redirect: redirect)
-        let secret = provider == .google ? try KeychainStore.read(account: MailOAuthSetup.googleSecretKey) : nil
+        let secret: String?
+        do {
+            secret = provider == .google ? try KeychainStore.read(account: MailOAuthSetup.googleSecretKey) : nil
+        } catch is KeychainStoreError {
+            throw MailError.notFound(mailOAuthKeychainUnavailableMessage)
+        }
         return try await MailOAuthHTTP().exchange(code: code, authorization: authorization, redirect: redirect, client: client, secret: secret)
     }
 }

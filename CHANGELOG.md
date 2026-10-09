@@ -2,7 +2,22 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [1.21.0] - 2026-10-09
+
+### Added
+
+- **Offline mail controls.** Choose recent mail, selected folders, or all history. View download coverage and local storage. Read, flag, archive, and move changes have a durable queue with identity checks and review for uncertain moves.
+- **Mail organisation.** Conversation groups use provider IDs and message references. Filters cover sender, recipient, dates, accounts, folders, flags, and attachments. Multiple selection supports bulk changes, undo, and drag filing. Missing body metadata is shown as incomplete coverage.
+- **Composition.** Recipient chips, local suggestions, opt-in Contacts, provider-authorized aliases, identity signatures, and explicit editing of server drafts. Conflicting drafts remain available for review.
+- **Rules and notices.** Preview rules before applying them to existing mail. New Inbox arrivals can run enabled rules. Save smart mailboxes, mark VIP senders, block senders into Junk, and configure per-account notch notices and quiet hours.
+- **Snooze and Send Later.** Local snooze returns messages to Inbox and Unread. Scheduled messages retain their body and attachments. Jevcast must be running and the Mac awake; missed and uncertain dispatches require review.
+- **Local archives.** Import `.eml` and `.mbox` into a separate local archive, inspect counts, search, save attachments, and export original message bytes. The source archive and Apple Mail data are preserved.
+
+### Verification limits
+
+- Offline tests and demo renders do not prove real delivery, cross-device conflict handling, provider alias acceptance, physical input, or a week of daily use.
+- Google OAuth projects in Testing can still issue refresh tokens that expire after seven days. Production consent configuration remains a provider setup step.
+
 
 ### Changed
 

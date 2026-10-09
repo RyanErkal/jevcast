@@ -34,6 +34,14 @@ an action fails. Queued sends and changes stop if their source changes.
 - Google and Microsoft sign-in use PKCE, a random state, a loopback callback, and
   fixed HTTPS token endpoints. Concurrent connections share a token refresh.
   Passwords, optional Google desktop secrets, and tokens stay in the Keychain.
+- Temporary OAuth outages and rate limits leave sync able to retry. Rejected
+  sign-in still stops background attempts. Keychain access failures explain
+  how to unlock and retry without calling them a rejected account password.
+- Clicking an account's connection status opens details in the launcher's
+  reader area. Its last successful sync stays visible after a failure or
+  restart; that saved date is not proof of a current connection. Reconnect
+  checks IMAP and SMTP without sending mail. Browser sign-in continues if the
+  launcher closes and can be cancelled from the account details.
 - The composer works like Apple Mail's, inside the reading pane of the
   launcher panel's Mail view, not in a separate window. It has To, Cc, Bcc,
   Subject, and From fields, a signature button, and a formatting bar: font,
@@ -171,3 +179,17 @@ accounts with Google Sign-In and a Yahoo account with an app password have
 synced and been read with this code. Sending, permanent delete, and Empty
 were tested offline only. Microsoft sign-in has not been tried with a real
 account. Apple Mail reply and forward through Mail's scripting are not proven.
+
+On 2026-10-09, five existing Google accounts were reconnected through Chrome
+using the signed app's `--diagnose-mail-reconnect` command. Each passed IMAP
+and SMTP authentication before its token was saved in Keychain. After the
+installed app restarted, all five Google accounts and the Yahoo account
+recorded successful syncs. A separate installed-app diagnostic confirmed
+IMAP/SMTP sign-in and Inbox counts for all six. No mail was sent or deleted.
+Google showed its testing-app notice. Native UI control was unavailable, so
+the launcher reconnect buttons were not exercised in this live check.
+
+The signed universal build passed. The 20 focused OAuth and recovery tests
+passed. The full offline suite reported two assertions in the existing
+`PanelScrollTests.testScrollWheelMovesListsInsideThePanel`; the same test
+failed when rerun in isolation from the full suite.

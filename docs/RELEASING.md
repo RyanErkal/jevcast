@@ -67,7 +67,7 @@ Unit tests cannot prove these. Do them on a Mac with a real keyboard, and record
 - [ ] `scheduled tasks` lists your agents with plain-words schedules. Turn Off and Turn On change a test agent, and the row updates.
 - [ ] `calendar` and `reminders` ask for access once, then list items. Join Call opens a meeting link. Complete removes a reminder.
 - [ ] `remind me to test in 2 minutes` makes a reminder that notifies. `add event test tomorrow 3pm` adds an event.
-- [ ] `contact <name>` lists a person. Email opens the Jevcast compose window.
+- [ ] `contact <name>` lists a person. Email opens composition inside the Jevcast launcher.
 - [ ] `tabs` in Safari and Chrome asks for Automation once, lists tabs, and Switch to Tab and Close Tab act on the right tab.
 - [ ] With a page open, `copy link` copies it. Opening the launcher over a browser without typing shows no Automation prompt.
 - [ ] With AI writing on and an OpenRouter key: `ask what is 2+2` answers. With Selected text on, Fix Spelling replaces a selection in TextEdit. With it off, no selected-text request is sent, and Settings › AI › Writing logs each request.

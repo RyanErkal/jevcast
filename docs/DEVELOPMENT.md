@@ -71,7 +71,7 @@ updates the sign-in. A queued action refuses a changed mail source.
 Demo snapshots include `mail-workspace` (the panel at 1320 points), `mail-workspace-compact` (980 points), `mail-workspace-sidebar-hidden`, `mail-workspace-drafts`, `mail-workspace-search`, `mail-outbox`, `mail-compose`, `mail-reply`, and `mail-add-account`, and the Automations window at its normal size, at 980 points wide, and at its minimum size (`automations-*`).
 They contain invented addresses and content, without account or credential reads.
 AppleScript compilation and these renders are separate from live Mail proof.
-Add `--mail-only` to `--snapshot-ui <dir> --demo` to render only the fifteen Mail
+Add `--mail-only` to `--snapshot-ui <dir> --demo` to render only the eighteen Mail
 fixtures. The `mail-workspace*`, `mail-outbox`, and `mail-draft-*` fixtures render `MailPage` content and its footer at the panel's view size, with an invented model. This path does not start a launcher session or read desktop context.
 `mail-workspace-light` checks the light appearance. `mail-workspace-folders-expanded`
 shows Gmail's extra folders beside the flat main folders. Sidebar demo counts include
@@ -155,6 +155,7 @@ Run the executable inside the app bundle, for example `"dist/Jevcast.app/Content
 | `--diagnose-mail`                          | Checks that Apple Mail can be read. Prints column names, counts per mailbox kind, inbox and All Mail totals, whether Mail runs, and page and search timings. Never subjects or addresses.                                                                                             |
 | `--diagnose-native-mail`                   | For each Jevcast mail account, signs in to IMAP and SMTP with the saved password and prints capabilities, mailbox roles and counts, and timings. Changes nothing. Never mailbox names, subjects, or addresses. |
 | `--diagnose-mail-setup`                    | Checks local OAuth client IDs and whether the signed app can read its Google desktop secret. No network requests, mailbox access, or Apple Events. Never prints credentials. |
+| `--diagnose-mail-reconnect <configured-email>` | Explicitly reconnects one existing OAuth account through the provider browser flow. Verifies IMAP and SMTP before saving to Keychain. No messages are fetched or sent. Restart the app to resume sync. |
 | `--diagnose-jev 'request' …`               | Runs each request through the launcher with the stored TypeSafe key and prints the pick, the top row, and the tokens used. Billed, and counted in Settings › AI › Usage.                                                                                                              |
 | `echo KEY \| … --store-jev-key`            | Saves a TypeSafe or OpenRouter key in the Keychain from standard input, as Settings › AI › Jev does. The key is never an argument or printed.                                                                                                                                         |
 | `--hyper-led-test`                         | Turns the Caps Lock light on for two seconds, then off. Prints whether each step worked and quits. Changes no key mapping.                                                                                                                                                            |

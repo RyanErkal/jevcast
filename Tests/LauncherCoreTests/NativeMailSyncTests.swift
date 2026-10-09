@@ -284,6 +284,60 @@ final class NativeMailSyncTests: XCTestCase {
         await engine.stopAll()
     }
 
+    func testMoveDoesNotAllowAStaleHeaderFetchToReinsertTheSourceRow() async throws {
+        let uid = server.deliver(to: "INBOX", subject: "Delete during sync")
+        let engine = makeEngine()
+        await engine.setAccounts([account])
+        try await waitUntil("the first sync") { try self.subjects("INBOX") == ["Delete during sync"] }
+        let candidate = await engine.syncs[account.id]
+        let sync = try XCTUnwrap(candidate)
+        let inbox = try XCTUnwrap(value("SELECT ROWID FROM mailboxes WHERE name = 'INBOX'"))
+        let rowID = try row("Delete during sync")
+        let validity = try XCTUnwrap(value("SELECT uid_validity FROM mailboxes WHERE name = 'INBOX'"))
+
+        let previousFetches = server.commands("UID FETCH")
+        server.holdNextFetchResponse()
+        defer { server.releaseFetchResponses() }
+        let staleFetch = Task {
+            let fetched = try await sync.syncClient.fetch(uids: IMAPSequenceSet([uid]),
+                                                          items: SyncedMessage.fetchItems(gmail: false),
+                                                          in: "INBOX", validity: UInt32(validity))
+            let messages = fetched.compactMap(SyncedMessage.init(fetch:))
+            try await store.upsert(messages, into: inbox, uidValidity: UInt32(validity))
+            return messages
+        }
+        try await waitUntil("the stale header fetch") { self.server.commands("UID FETCH") > previousFetches }
+
+        try await engine.delete(rowID)
+        XCTAssertEqual(server.mailbox("INBOX")!.messages.count, 0)
+        XCTAssertEqual(try subjects("INBOX"), [])
+        server.releaseFetchResponses()
+
+        let fetched = try await staleFetch.value
+        XCTAssertEqual(try subjects("INBOX"), [], "A stale sync response must not resurrect a moved message")
+        await engine.stopAll()
+        let reopened = try NativeMailStore(root: root)
+        try await reopened.upsert(fetched, into: inbox, uidValidity: UInt32(validity))
+        let reopenedRow = try await reopened.rowID(uid: uid, in: inbox)
+        XCTAssertNil(reopenedRow, "The deletion guard must survive a store reopen")
+        let beforeResetValue = try await reopened.mailbox(inbox)
+        let beforeReset = try XCTUnwrap(beforeResetValue)
+        _ = try await reopened.reset(beforeReset, uidValidity: UInt32(validity) + 1)
+        do {
+            try await reopened.upsert(fetched, into: inbox, uidValidity: UInt32(validity))
+            XCTFail("An old-identity response must not populate the reset mailbox")
+        } catch MailError.uidValidityChanged { }
+        try await reopened.upsert(fetched, into: inbox, uidValidity: UInt32(validity) + 1)
+        let newIdentityRow = try await reopened.rowID(uid: uid, in: inbox)
+        XCTAssertNotNil(newIdentityRow, "A new UIDVALIDITY must not inherit an old deletion guard")
+        do {
+            try await reopened.remove(uids: [uid], from: inbox, protectFromStaleSync: true, uidValidity: UInt32(validity))
+            XCTFail("An old action completion must not remove a new-identity row")
+        } catch MailError.uidValidityChanged { }
+        let retained = try await reopened.rowID(uid: uid, in: inbox)
+        XCTAssertEqual(retained, newIdentityRow)
+    }
+
     func testBodiesRepliesAndForwards() async throws {
         server.deliver(to: "INBOX", subject: "Question", from: "Sam <sam@example.com>", body: "Are you free?", messageID: "<q1@example.com>")
         let engine = makeEngine()

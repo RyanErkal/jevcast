@@ -14,17 +14,12 @@ struct MailMessageTools: View {
                     MailSnoozeButton(message: message, account: .init(accountID: account.id, address: account.title),
                         messageID: model.detail?.header("Message-ID"), center: features.snoozes)
                 }
-                if box.role == .drafts {
-                    Button("Edit Draft") { Task { do { _ = try await model.importSelectedServerDraft() } catch { model.banner = error.localizedDescription } } }
-                }
-                Spacer()
                 Menu {
                     Button("Message as .eml…") { export(messages: [message], format: .eml) }
                     Button("Selected as .mbox…") { export(messages: model.selectedMessages.isEmpty ? [message] : model.selectedMessages, format: .mbox) }
-                } label: { Label("Export", systemImage: "square.and.arrow.up") }.disabled(exporting)
+                } label: { Label("Export", systemImage: "square.and.arrow.up") }.menuIndicator(.hidden).help("Export message").disabled(exporting)
                 if exporting { ProgressView().controlSize(.small) }
-            }.buttonStyle(.borderless).font(.caption).padding(.horizontal, 12).padding(.vertical, 6)
-            Divider()
+            }.buttonStyle(.borderless).labelStyle(.iconOnly).fixedSize()
         }
     }
 

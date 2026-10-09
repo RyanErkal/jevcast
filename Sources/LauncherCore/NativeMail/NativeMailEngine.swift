@@ -170,7 +170,8 @@ public actor NativeMailEngine {
     public func empty(_ mailboxRowID: Int64, uids: [UInt32], validity: UInt32) async throws {
         let (box, sync) = try await emptiable(mailboxRowID)
         try await sync.empty(box, uids: uids, validity: validity)
-        try await store.remove(uids: uids, from: box.rowID, removedHere: true)
+        try await store.remove(uids: uids, from: box.rowID, removedHere: true,
+                               protectFromStaleSync: true, uidValidity: validity)
         changed()
         await sync.request(MailSyncRequest(mailboxes: [box.rowID]))
     }
@@ -193,7 +194,8 @@ public actor NativeMailEngine {
         do {
             try await change()
             if let destination { try? await store.adjustServerCounts(destination.rowID, total: 1, unread: location.read ? 0 : 1) }
-            try await store.remove(uids: [location.uid], from: location.mailbox.rowID)
+            try await store.remove(uids: [location.uid], from: location.mailbox.rowID,
+                                   protectFromStaleSync: true, uidValidity: location.mailbox.uidValidity)
             changed()
         } catch {
             if let offlineAction, await queueOfflineAction(offlineAction, error: error) {

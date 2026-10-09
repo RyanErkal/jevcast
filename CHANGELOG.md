@@ -2,6 +2,14 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.21.3] - 2026-10-09
+
+### Fixed
+
+- **Mail toolbars.** The mailbox header and reader each use one row. Filter, Snooze, and Export use compact icons; selection tools and unread totals remain in the mailbox menu.
+- **Conversation deletion.** Delete moves all loaded replies in a conversation to the account's Trash. A stale list refresh cannot put a pending removal back on screen. Failed changes return with an error. Permanent deletion in Trash still targets one message.
+- **Deletion sync.** A delayed sync response cannot reinsert a message after a confirmed server move or deletion. Account dots indicate queued changes and changes that need review.
+
 ## [1.21.2] - 2026-10-09
 
 ### Fixed

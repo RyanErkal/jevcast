@@ -52,6 +52,7 @@ struct MailReader: View {
     /// A reply or forward docked below. The reader shows the message it answers, even when the
     /// selection moved on, and keeps only the view controls: its actions would change the selection.
     var draft: MailModel.Draft? = nil
+    var features: MailFeatureCenter? = nil
     @AppStorage(MailReading.zoomKey) private var zoom = 1.0
     @AppStorage(MailReading.fitKey) private var fitsWidth = true
     @AppStorage(MailReading.plainKey) private var prefersPlain = false
@@ -166,7 +167,7 @@ struct MailReader: View {
     /// The few actions checking mail needs, as icons with their keys in the tooltips. While a draft
     /// is docked below, only the view controls stay.
     private func actionBar(_ message: MailSummary) -> some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 12) {
             if !composing {
                 Button { model.delete() } label: { Image(systemName: "trash") }.help("Delete (⌫)")
                 Button { model.archive() } label: { Image(systemName: "archivebox") }.help("Archive")
@@ -201,7 +202,8 @@ struct MailReader: View {
                 if !composing, !NativeMailCenter.isActive { Button("Open in Mail") { model.openInMail() } }
             } label: { Image(systemName: "ellipsis.circle") }
             .menuIndicator(.hidden).fixedSize()
-            Spacer()
+            if !composing, let features { MailMessageTools(model: model, features: features) }
+            Spacer(minLength: 4)
             zoomControl
             if let expanded {
                 Button { expanded.wrappedValue.toggle() } label: {

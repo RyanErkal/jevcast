@@ -196,6 +196,7 @@ final class MailModel: ObservableObject {
     private var removing: [Int64: Date] = [:]
     /// Mail actions run one after another, so quick deletes never race each other.
     private var actionChain: Task<Void, Never>?
+    private let deleteAction: (MailSummary, MailMailbox, Bool) async throws -> Void
     /// Header metadata learned while reading a message. It is enough to refine a fallback
     /// conversation without making a network or account request.
     var conversationHeaders: [Int64: MailConversationHeader] = [:]
@@ -211,6 +212,7 @@ final class MailModel: ObservableObject {
 
     init(aiWriting: @escaping (AIWritingRequest) async throws -> AIWritingReply, aiWritingAllowed: @escaping () -> Bool, statusProvider: @escaping @Sendable () -> MailStore.Status = { MailStore.status() },
          setRead: @escaping (Bool, MailSummary, MailMailbox, MailMailbox?) async throws -> Void = { try await MailActions.setRead($0, $1, in: $2, fallback: $3) },
+         deleteMessage: @escaping (MailSummary, MailMailbox, Bool) async throws -> Void = { try await MailActions.delete($0, in: $1, permanently: $2) },
          sendDraft: ((Draft, MailMailbox?) async throws -> Void)? = nil,
          submitDraft: ((Draft, MailMailbox?) async throws -> MailSubmission)? = nil, undoDelay: TimeInterval = 5,
          draftStore: MailDraftStore? = MailDraftStore.standard,
@@ -222,6 +224,7 @@ final class MailModel: ObservableObject {
         self.draftStore = draftStore
         self.statusProvider = statusProvider
         self.setReadAction = setRead
+        self.deleteAction = deleteMessage
         self.sendDraft = sendDraft ?? { _ = try await MailModel.deliver($0, $1) }
         if let submitDraft { self.submitDraft = submitDraft }
         else if let sendDraft {
@@ -703,7 +706,10 @@ final class MailModel: ObservableObject {
 
     func install(_ fresh: [MailSummary]) {
         let old = selected
-        let rows = withReadChanges(fresh).filter { !(place == .inbox || place == .unread) || !isSnoozed($0) }
+        removing = removing.filter { Date().timeIntervalSince($0.value) < 120 }
+        let rows = withReadChanges(fresh).filter {
+            removing[$0.rowID] == nil && (!(place == .inbox || place == .unread) || !isSnoozed($0))
+        }
         if messages != rows { messages = rows }
         selectedMessageIDs.formIntersection(Set(rows.map(\.rowID)))
         if selectionAnchorID.map(selectedMessageIDs.contains) != true { selectionAnchorID = selectedMessageIDs.first }
@@ -931,15 +937,18 @@ final class MailModel: ObservableObject {
     // MARK: Actions
 
     /// Runs a Mail action. `update` changes the row at once; the index confirms it later.
-    private func perform(_ name: String, removes: Bool = false, _ action: @escaping () async throws -> Void, update: ((inout MailSummary) -> Void)? = nil) {
-        guard let message = selected else { return }
+    private func perform(_ name: String, message target: MailSummary? = nil, removes: Bool = false, _ action: @escaping () async throws -> Void, update: ((inout MailSummary) -> Void)? = nil) {
+        guard let message = target ?? selected else { return }
         if let account = mailbox(message.mailbox)?.accountID { changedAccounts.insert(account) }
         let index = messages.firstIndex { $0.rowID == message.rowID }
         if removes, let index {
             removing[message.rowID] = .distantFuture
             messages.remove(at: index)
             // The next message shows and counts as read, as in Mail.
-            select(messages.indices.contains(index) ? messages[index].rowID : messages.last?.rowID, byUser: false)
+            selectedMessageIDs.remove(message.rowID)
+            if selectedID == message.rowID {
+                select(messages.indices.contains(index) ? messages[index].rowID : messages.last?.rowID, byUser: false)
+            }
         } else if let index, let update { update(&messages[index]) }
         let backend = MailBackend.current
         let previous = actionChain
@@ -974,17 +983,51 @@ final class MailModel: ObservableObject {
         }
         perform("archive", removes: true) { try await MailActions.move(message, from: box, to: archive) }
     }
-    /// Deletes a message from the list, such as the one under the pointer, not only the selected one.
+    /// A list row represents its loaded conversation, so Delete moves every displayed reply.
     func delete(_ rowID: Int64) {
-        if selectedID != rowID { select(rowID, byUser: false) }
-        delete()
+        guard let message = messages.first(where: { $0.rowID == rowID }) else { return }
+        deleteMessages(deletionTargets(for: message))
     }
-    /// Delete moves a message to Trash. In the Trash of a Jevcast account it removes the message for good.
+
     func delete() {
-        guard let message = selected, let box = actionBox(message) else { return }
-        let permanently = box.role == .trash && NativeMailCenter.isActive
-        perform(permanently ? "delete permanently" : "delete", removes: true) { try await MailActions.delete(message, in: box, permanently: permanently) }
+        guard let message = selected else { return }
+        let targets = actionBox(message)?.role != .trash && selectedConversationRowIDs.count > 1
+            ? conversationGroups.filter { selectedConversationRowIDs.contains($0.latest.summary.rowID) }.flatMap { $0.messages.map(\.summary) }
+            : deletionTargets(for: message)
+        deleteMessages(targets)
     }
+
+    private func deletionTargets(for message: MailSummary) -> [MailSummary] {
+        // Permanent deletion stays limited to the selected message, never a hidden thread.
+        guard actionBox(message)?.role != .trash else { return [message] }
+        return conversationGroups.first { $0.messages.contains { $0.summary.rowID == message.rowID } }?.messages.map(\.summary) ?? [message]
+    }
+
+    private func deleteMessages(_ targets: [MailSummary]) {
+        let reviewed = targets.compactMap { message in actionBox(message).map { (message, $0) } }
+        guard reviewed.count == targets.count else {
+            banner = "A mailbox is no longer available. Refresh Mail before deleting these messages."
+            return
+        }
+        let ids = Set(targets.map(\.rowID))
+        if let selectedID, ids.contains(selectedID) {
+            let index = messages.firstIndex { $0.rowID == selectedID } ?? 0
+            let next = messages.dropFirst(index).first { !ids.contains($0.rowID) }
+                ?? messages.prefix(index).last { !ids.contains($0.rowID) }
+            select(next?.rowID, byUser: false)
+        }
+        for (message, box) in reviewed {
+            let permanently = box.role == .trash && NativeMailCenter.isActive
+            let action = deleteAction
+            perform(permanently ? "delete permanently" : "delete", message: message, removes: true) {
+                try await action(message, box, permanently)
+            }
+        }
+    }
+
+    /// Waits for submitted mail changes, including their failure handling.
+    func waitForActions() async { await actionChain?.value }
+
     /// Deletes every message in the list from the selected message's sender: for clearing out junk.
     func deleteAllFromSender() {
         if let message = selected, actionBox(message)?.role == .trash {
@@ -993,7 +1036,7 @@ final class MailModel: ObservableObject {
         }
         guard let sender = selected?.senderAddress, !sender.isEmpty else { return }
         let targets = messages.filter { $0.senderAddress.caseInsensitiveCompare(sender) == .orderedSame }
-        for message in targets { delete(message.rowID) }
+        deleteMessages(targets)
         banner = "Deleting \(targets.count) message" + (targets.count == 1 ? "" : "s") + " from \(sender)."
     }
     var selectedSender: String? { selected?.senderAddress }

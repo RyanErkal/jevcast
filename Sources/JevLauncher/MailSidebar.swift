@@ -68,12 +68,15 @@ struct MailSidebar: View {
     private func accountHeader(_ account: String, state: MailAccountSync.State?, isExpanded: Binding<Bool>) -> some View {
         let label = accountLabels[account] ?? account
         let title = accountTitle(account)
-        let stateLabel = status(state)
+        let queue = center.offlineQueueStatus[account]
+        let needsReview = (queue?.failed ?? 0) + (queue?.review ?? 0) > 0
+        let hasPending = (queue?.pending ?? 0) > 0
+        let stateLabel = needsReview ? "Mail changes need review" : hasPending ? "Mail changes waiting to sync" : status(state)
         let accessibilityLabel = label + ", " + title
         let accessibilityValue = stateLabel + ", " + (isExpanded.wrappedValue ? "Expanded" : "Collapsed")
         return HStack(spacing: 0) {
             Button { showAccount(account) } label: {
-                Circle().fill(statusColor(state)).frame(width: 6, height: 6)
+                Circle().fill(needsReview ? Color.orange : hasPending ? Color.accentColor : statusColor(state)).frame(width: 6, height: 6)
                     .frame(width: 22, height: 24).contentShape(Rectangle())
             }
             .buttonStyle(.plain)

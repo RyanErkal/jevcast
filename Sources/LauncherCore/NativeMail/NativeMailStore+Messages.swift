@@ -42,11 +42,28 @@ extension NativeMailStore {
     }
 
     /// Adds new messages, or updates the flags of ones already stored, in one transaction.
-    public func upsert(_ messages: [SyncedMessage], into mailbox: Int64) throws {
-        guard !messages.isEmpty else { return }
+    /// A supplied UIDVALIDITY keeps an old-identity response from crossing a mailbox reset.
+    public func upsert(_ messages: [SyncedMessage], into mailbox: Int64, uidValidity: UInt32? = nil) throws {
+        guard !messages.isEmpty, let box = try self.mailbox(mailbox) else { return }
+        if let uidValidity, let current = box.uidValidity, uidValidity != current {
+            throw MailError.uidValidityChanged(mailbox: box.name)
+        }
+        let identity = uidValidity ?? box.uidValidity ?? 0
+        var accepted = false
         try db.transaction {
+            // Check only the incoming batch, not every deletion ever made in this mailbox.
+            var tombstoned: Set<UInt32> = []
+            for start in stride(from: 0, to: messages.count, by: 500) {
+                let batch = messages[start..<min(start + 500, messages.count)]
+                let slots = batch.map { _ in "?" }.joined(separator: ",")
+                let arguments: [MailDatabase.Value] = [.int(mailbox), .int(Int64(identity))]
+                    + batch.map { .int(Int64($0.uid)) }
+                let rows = try db.rows("SELECT remote_uid FROM message_tombstones WHERE mailbox = ? AND uid_validity = ? AND remote_uid IN (\(slots))", arguments)
+                tombstoned.formUnion(rows.compactMap { $0.first?.int.flatMap(UInt32.init(exactly:)) })
+            }
             var subjects: [String: Int64] = [:], senders: [String: Int64] = [:]
-            for message in messages {
+            for message in messages where !tombstoned.contains(message.uid) {
+                accepted = true
                 let subject = try subjects[message.subject] ?? intern(subject: message.subject)
                 subjects[message.subject] = subject
                 let senderKey = message.senderAddress + "\u{0}" + message.senderName
@@ -67,9 +84,9 @@ extension NativeMailStore {
                     try updateSearchIndex(rowID)
                 }
             }
-            try refreshCounts(mailbox)
+            if accepted { try refreshCounts(mailbox) }
         }
-        touched()
+        if accepted { touched() }
     }
 
     private func intern(subject: String) throws -> Int64 {
@@ -105,14 +122,25 @@ extension NativeMailStore {
     /// Drops messages the server no longer has, with their bodies. `removedHere` means Jevcast just
     /// removed them on the server, such as by Empty, so the server's counts drop by the same. Rows
     /// a change in progress hid already dropped their count when they were hidden.
-    public func remove(uids: [UInt32], from mailbox: Int64, removedHere: Bool = false) throws {
+    public func remove(uids: [UInt32], from mailbox: Int64, removedHere: Bool = false,
+                       protectFromStaleSync: Bool = false, uidValidity: UInt32? = nil) throws {
         guard !uids.isEmpty, let box = try self.mailbox(mailbox) else { return }
+        if let uidValidity, let current = box.uidValidity, uidValidity != current {
+            throw MailError.uidValidityChanged(mailbox: box.name)
+        }
         try db.transaction {
             var hidden = 0, unread = 0
             for start in stride(from: 0, to: uids.count, by: 500) {
                 let chunk = uids[start..<min(start + 500, uids.count)]
                 let list = chunk.map { _ in "?" }.joined(separator: ",")
                 let arguments: [MailDatabase.Value] = [.int(mailbox)] + chunk.map { .int(Int64($0)) }
+                if protectFromStaleSync {
+                    let tombstoneValidity = uidValidity ?? box.uidValidity ?? 0
+                    for uid in chunk {
+                        try db.run("INSERT OR IGNORE INTO message_tombstones (mailbox, remote_uid, uid_validity) VALUES (?, ?, ?)",
+                                   [.int(mailbox), .int(Int64(uid)), .int(Int64(tombstoneValidity))])
+                    }
+                }
                 for row in try db.rows("SELECT ROWID, pending_hide, read FROM messages WHERE mailbox = ? AND remote_uid IN (\(list))", arguments) where row.count == 3 {
                     if let id = row[0].int { removeBody(id, mailboxRowID: mailbox, url: box.url) }
                     if (row[1].int ?? 0) != 0 { hidden += 1 } else if (row[2].int ?? 0) == 0 { unread += 1 }

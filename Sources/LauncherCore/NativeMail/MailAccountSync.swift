@@ -252,7 +252,7 @@ public actor MailAccountSync {
                 }
             } else if priorUIDNext > 0 {
                 let fetched = try await syncClient.fetch(from: priorUIDNext, items: items, in: box.name, validity: validity)
-                try await store.upsert(fetched.compactMap(SyncedMessage.init(fetch:)), into: box.rowID)
+                try await store.upsert(fetched.compactMap(SyncedMessage.init(fetch:)), into: box.rowID, uidValidity: validity)
             }
         }
 
@@ -328,7 +328,7 @@ public actor MailAccountSync {
         let limitedView = !serverUsesUIDOnly && advertisedMessageLimit != nil
         if checkRemovals, !limitedView {
             let present = try await syncClient.search("UID \(range.description)", in: box.name, validity: validity)
-            try await store.remove(uids: Self.missing(run, from: present), from: box.rowID)
+            try await store.remove(uids: Self.missing(run, from: present), from: box.rowID, uidValidity: validity)
         }
     }
 
@@ -430,7 +430,7 @@ public actor MailAccountSync {
         for chunk in IMAPSequenceSet(uids).chunked(maxCount: size).reversed() {
             try Task.checkCancellation()
             let fetched = try await client.fetch(uids: chunk, items: items, in: box.name, validity: validity)
-            try await store.upsert(fetched.compactMap(SyncedMessage.init(fetch:)), into: box.rowID)
+            try await store.upsert(fetched.compactMap(SyncedMessage.init(fetch:)), into: box.rowID, uidValidity: validity)
             await announce()
         }
     }

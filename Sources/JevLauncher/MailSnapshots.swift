@@ -15,6 +15,7 @@ enum MailSnapshots {
             panel("mail-workspace", MailPage(mail: workspace())),
             panel("mail-thread", thread()),
             panel("mail-thread-compact", thread(), width: 980),
+            panel("mail-thread-smallest", thread(), width: 860),
             panel("mail-keyboard-selection", keyboardSelection()),
             panel("mail-workspace-light", MailPage(mail: workspace())),
             panel("mail-workspace-folders-expanded", MailPage(mail: workspace(providerFoldersExpanded: true))),
@@ -239,7 +240,9 @@ enum MailSnapshots {
         var account = NativeMailAccount.preset(.gmail, name: "Alex", email: "alex@example.com")!
         account.id = "demo"
         let center = NativeMailCenter(backend: .jevcast, accounts: [account], defaults: nil)
-        return MailPage(mail: model, accountCenter: center)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("jevcast-mail-demo-" + UUID().uuidString)
+        let features = MailFeatureCenter(directory: directory, defaults: nil, accounts: [account])
+        return MailPage(mail: model, accountCenter: center, features: features)
     }
 
     static func keyboardSelection() -> MailPage {

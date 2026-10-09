@@ -142,7 +142,8 @@ extension MailAccountSync {
                     try await actionClient.move(uids: IMAPSequenceSet([action.uid]), to: destination.name,
                                                 in: source.location.mailbox.name, validity: action.uidValidity)
                     try await store.adjustServerCounts(destination.rowID, total: 1, unread: source.location.read ? 0 : 1)
-                    try await store.remove(uids: [action.uid], from: source.location.mailbox.rowID)
+                    try await store.remove(uids: [action.uid], from: source.location.mailbox.rowID,
+                                            protectFromStaleSync: true, uidValidity: action.uidValidity)
                     await signal.post(MailSyncRequest(mailboxes: [destination.rowID]))
                     try await store.removeOfflineAction(action.id)
                 }

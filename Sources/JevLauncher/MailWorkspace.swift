@@ -59,10 +59,7 @@ struct MailWorkspace: View {
                 }.id(id)
             } else if page.composing { ComposeView(model: mail, schedules: page.features?.schedules).id(mail.draft?.id) }
             else {
-                VStack(spacing: 0) {
-                    if let features = page.features { MailMessageTools(model: mail, features: features) }
-                    MailReader(model: mail, expanded: $page.expanded)
-                }
+                MailReader(model: mail, expanded: $page.expanded, features: page.features)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -92,30 +89,31 @@ struct MailPanelList: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Button { page.showsSidebar.toggle() } label: { Image(systemName: "sidebar.left") }
                     .help(page.showsSidebar ? "Hide mailboxes" : "Show mailboxes")
                 // Without the sidebar, the title picks the mailbox.
                 if page.showsSidebar { Text(mail.placeTitle).font(.headline).lineLimit(1) }
                 else { MailPlacePicker(model: mail).font(.headline) }
-                if mail.place == .inbox, mail.unreadInInbox > 0 {
-                    Text("\(mail.unreadInInbox) unread").font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
                 MailEmptyButton(model: mail)
                 Spacer(minLength: 4)
-                if page.features != nil {
-                    Menu {
+                if mail.place != .outbox { MailFilterButton(model: mail).labelStyle(.iconOnly) }
+                Menu {
+                    if mail.place == .inbox { Text("\(mail.unreadInInbox) unread") }
+                    if mail.place != .outbox { MailListTools(model: mail) }
+                    if page.features != nil {
+                        Divider()
                         ForEach(MailTool.allCases) { tool in
                             Button(tool.rawValue) { page.tool = tool; page.features?.refresh(full: true) }
                         }
-                    } label: { Image(systemName: "ellipsis.circle") }.help("Mail tools")
-                }
+                    }
+                } label: { Image(systemName: "ellipsis.circle") }
+                .menuIndicator(.hidden).fixedSize().help("Mail tools and selection actions")
                 Button { mail.checkMail() } label: { Image(systemName: "arrow.clockwise") }.help("Check for new mail")
                 Button { mail.compose() } label: { Image(systemName: "square.and.pencil") }.help("New message (⌘N)")
             }
             .buttonStyle(.borderless)
             MailClosedNote(model: mail)
-            if mail.place != .outbox { MailListTools(model: mail) }
             // The launcher's field is the search; this picks where it looks.
             if !mail.search.isEmpty, mail.place != .outbox {
                 Picker("Search in", selection: $mail.searchScope) {

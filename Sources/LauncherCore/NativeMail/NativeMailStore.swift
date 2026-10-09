@@ -79,6 +79,11 @@ public actor NativeMailStore {
         CREATE INDEX IF NOT EXISTS messages_mailbox_date_received_index ON messages(mailbox, date_received);
         CREATE INDEX IF NOT EXISTS messages_global_message_id_index ON messages(global_message_id);
         CREATE INDEX IF NOT EXISTS messages_message_id_index ON messages(message_id);
+        CREATE TABLE IF NOT EXISTS message_tombstones (
+            mailbox INTEGER NOT NULL,
+            remote_uid INTEGER NOT NULL,
+            uid_validity INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY(mailbox, remote_uid, uid_validity));
         CREATE TRIGGER IF NOT EXISTS messages_summary_cleanup AFTER DELETE ON messages
             BEGIN DELETE FROM summaries WHERE ROWID = old.summary; END;
         CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
@@ -308,6 +313,8 @@ public actor NativeMailStore {
     /// The server renumbered the mailbox: every local copy is dropped, and sync reads it again.
     public func reset(_ mailbox: Mailbox, uidValidity: UInt32) throws -> Mailbox {
         try db.run("DELETE FROM messages WHERE mailbox = ?", [.int(mailbox.rowID)])
+        // Old-identity responses are rejected by upsert, so these guards no longer apply.
+        try db.run("DELETE FROM message_tombstones WHERE mailbox = ?", [.int(mailbox.rowID)])
         removeBodies(mailboxRowID: mailbox.rowID, url: mailbox.url)
         touched()
         var fresh = mailbox
@@ -322,6 +329,7 @@ public actor NativeMailStore {
             removeBodies(mailboxRowID: id, url: url)
         }
         try db.run("DELETE FROM messages WHERE mailbox = ?", [.int(id)])
+        try db.run("DELETE FROM message_tombstones WHERE mailbox = ?", [.int(id)])
         try db.run("DELETE FROM mailboxes WHERE ROWID = ?", [.int(id)])
     }
 
@@ -329,7 +337,10 @@ public actor NativeMailStore {
     public func removeAccount(_ account: String) throws {
         try db.transaction {
             for row in try db.rows("SELECT ROWID FROM mailboxes WHERE account = ?", [.text(account)]) {
-                if let id = row.first?.int { try db.run("DELETE FROM messages WHERE mailbox = ?", [.int(id)]) }
+                if let id = row.first?.int {
+                    try db.run("DELETE FROM messages WHERE mailbox = ?", [.int(id)])
+                    try db.run("DELETE FROM message_tombstones WHERE mailbox = ?", [.int(id)])
+                }
             }
             try db.run("DELETE FROM mailboxes WHERE account = ?", [.text(account)])
         }

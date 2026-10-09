@@ -3,55 +3,40 @@ import SwiftUI
 import UniformTypeIdentifiers
 import LauncherCore
 
-/// Header tools that the root workspace can place beside the mailbox title.
-/// It deliberately contains no window or panel management.
+/// Selection and filter details inside the mailbox's tools menu.
 struct MailListTools: View {
     @ObservedObject var model: MailModel
 
     var body: some View {
-        HStack(spacing: 8) {
-            MailFilterButton(model: model)
+        Group {
             if model.filterIsActive {
-                MailFilterCoverageText(filter: model.filter,
-                                       matchCount: model.filteredResultCount,
-                                       metadataUnknownCount: model.filterMetadataUnknownCount,
-                                       recipientUnknownCount: model.filterRecipientMetadataUnknownCount,
-                                       attachmentUnknownCount: model.filterAttachmentMetadataUnknownCount)
+                Text("\(model.filter.activeCount) active filters")
+                Button("Clear filters") { model.clearFilters() }
             }
             if model.conversationMetadataUnknownCount > 0 {
-                Text("\(model.conversationMetadataUnknownCount) loaded row\(model.conversationMetadataUnknownCount == 1 ? "" : "s") have no cached thread headers")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .help("Thread grouping uses provider IDs or downloaded Message-ID references. Rows without either stay separate.")
+                Text("\(model.conversationMetadataUnknownCount) messages have no downloaded thread headers")
             }
+            Button("Select all loaded") { model.selectAllLoaded() }
             if !model.selectedMessageIDs.isEmpty {
-                Text("\(model.selectedMessageIDs.count) selected").font(.caption).foregroundStyle(.secondary)
-                Menu {
-                    Button("Select all loaded") { model.selectAllLoaded() }
-                    Button("Clear selection") { model.clearSelection() }
-                    Divider()
-                    Button("Mark Read") { model.bulk(.markRead(true)) }
-                    Button("Mark Unread") { model.bulk(.markRead(false)) }
-                    Button("Flag") { model.bulk(.flag(true)) }
-                    Button("Unflag") { model.bulk(.flag(false)) }
-                    Button("Archive") { model.bulk(.archive) }
-                    if !model.bulkMoveDestinations.isEmpty {
-                        Menu("Move To") {
-                            ForEach(model.bulkMoveDestinations) { destination in
-                                Button(destination.path) { model.bulk(.move(mailboxID: destination.rowID)) }
-                            }
+                Text("\(model.selectedMessageIDs.count) selected")
+                Button("Clear selection") { model.clearSelection() }
+                Divider()
+                Button("Mark Read") { model.bulk(.markRead(true)) }
+                Button("Mark Unread") { model.bulk(.markRead(false)) }
+                Button("Flag") { model.bulk(.flag(true)) }
+                Button("Unflag") { model.bulk(.flag(false)) }
+                Button("Archive") { model.bulk(.archive) }
+                if !model.bulkMoveDestinations.isEmpty {
+                    Menu("Move To") {
+                        ForEach(model.bulkMoveDestinations) { destination in
+                            Button(destination.path) { model.bulk(.move(mailboxID: destination.rowID)) }
                         }
                     }
-                    Divider()
-                    Button("Move to Trash", role: .destructive) { model.bulk(.trash) }
-                    if model.bulkUndoAvailable { Divider(); Button("Undo last bulk change") { model.undoBulk() } }
-                } label: { Image(systemName: "ellipsis.circle") }
-                .menuIndicator(.hidden)
-            } else if model.bulkUndoAvailable {
-                Button("Undo") { model.undoBulk() }.buttonStyle(.link)
+                }
+                Button("Move to Trash", role: .destructive) { model.bulk(.trash) }
             }
-            if model.bulkBusy { ProgressView().controlSize(.small) }
-        }
-        .buttonStyle(.borderless)
+            if model.bulkUndoAvailable { Button("Undo last bulk change") { model.undoBulk() } }
+        }.disabled(model.bulkBusy)
     }
 }
 

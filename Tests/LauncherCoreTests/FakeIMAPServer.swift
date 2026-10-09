@@ -29,6 +29,8 @@ final class FakeIMAPServer: @unchecked Sendable {
     /// Command names in order, such as "UID FETCH", for asserting what the client did.
     private(set) var log: [String] = []
     private(set) var connections = 0
+    private var deferNextFetchResponse = false
+    private var deferredFetchResponses: [(FakeIMAPTransport, String)] = []
     private var live: [WeakTransport] = []
     struct WeakTransport { weak var transport: FakeIMAPTransport? }
 
@@ -104,6 +106,25 @@ final class FakeIMAPServer: @unchecked Sendable {
     func record(_ name: String) { log.append(name) }
     func recordSearch(_ criteria: String, refused: Bool) { searches.append(criteria); if refused { refusedSearches += 1 } }
     func commands(_ name: String) -> Int { lock.withLock { log.filter { $0 == name }.count } }
+
+    /// Holds one FETCH reply so a test can interleave a stale sync read with an action connection.
+    func holdNextFetchResponse() { lock.withLock { deferNextFetchResponse = true } }
+
+    /// Called by a transport while the server lock is held.
+    func deferFetchResponse(_ response: String, from transport: FakeIMAPTransport) -> Bool {
+        guard deferNextFetchResponse else { return false }
+        deferNextFetchResponse = false
+        deferredFetchResponses.append((transport, response))
+        return true
+    }
+
+    func releaseFetchResponses() {
+        let responses = lock.withLock { () -> [(FakeIMAPTransport, String)] in
+            defer { deferredFetchResponses.removeAll() }
+            return deferredFetchResponses
+        }
+        for (transport, response) in responses { transport.push(response) }
+    }
 }
 
 /// One client connection to `FakeIMAPServer`.
@@ -353,6 +374,8 @@ final class FakeIMAPTransport: MailTransport, @unchecked Sendable {
                 send(")\r\n")
             }
             send("\(tag) OK fetch\r\n")
+            let response = String(decoding: output, as: UTF8.self)
+            if server.deferFetchResponse(response, from: self) { output.removeAll() }
         case "UID STORE":
             guard args.count >= 3, let set = args[0].text, let mode = args[1].text, let flags = args[2].list?.compactMap(\.text) else { send("\(tag) BAD store\r\n"); return }
             let targets = uids(set, in: box)

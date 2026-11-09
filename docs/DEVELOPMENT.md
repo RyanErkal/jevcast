@@ -68,7 +68,7 @@ Delete moves to a unique Trash folder. There is no purge action. Moves never use
 mailbox-wide EXPUNGE. A refused sign-in stops background sync until the user
 updates the sign-in. A queued action refuses a changed mail source.
 
-Demo snapshots include `mail-workspace` (the panel at 1320 points), `mail-workspace-compact` (980 points), `mail-workspace-sidebar-hidden`, `mail-workspace-drafts`, `mail-workspace-search`, `mail-outbox`, `mail-compose`, `mail-reply`, and `mail-add-account`, and the Automations window at its normal size, at 980 points wide, and at its minimum size (`automations-*`).
+Demo snapshots include `mail-invitation` (a meeting invitation with its answer buttons), `mail-workspace` (the panel at 1320 points), `mail-workspace-compact` (980 points), `mail-workspace-sidebar-hidden`, `mail-workspace-drafts`, `mail-workspace-search`, `mail-outbox`, `mail-compose`, `mail-reply`, and `mail-add-account`, and the Automations window at its normal size, at 980 points wide, and at its minimum size (`automations-*`).
 They contain invented addresses and content, without account or credential reads.
 AppleScript compilation and these renders are separate from live Mail proof.
 Add `--mail-only` to `--snapshot-ui <dir> --demo` to render only the eighteen Mail
@@ -100,6 +100,20 @@ Repair Sent Copy uses IMAP only and never sends the message again. Interrupted
 sends never resume at startup. Received attachments load only on an explicit
 Preview, Open, Save, or Forward action.
 
+Invitations, lists, links, and folders: `CalendarInvite` in `LauncherCore` reads the first event of a
+`text/calendar` part (kept as `MIMEMessage.calendarText`) and writes the reply; `MailInviteCard` shows it and
+`MailModel+Invites` sends the answer with `NativeMailEngine.sendInvitationReply`, a `multipart/alternative`
+message with a `text/calendar; method=REPLY` part. `MailUnsubscribe` reads `List-Unsubscribe`; the mail option
+sends the list's own email and the web option only opens the browser. `MailtoLink` reads `mailto:` links;
+`MailLinkRouter` opens them as a new message and `App.application(_:open:)` receives them when Jevcast is the
+default mail app (the `mailto` URL type is in the Info.plist that `scripts/build.sh` writes). Folder changes
+are in `MailAccountSync+Folders`: CREATE, RENAME, and DELETE only after STATUS reports no messages.
+
+The conversation reader document (`MailThreadHTML`) uses `<details>` for each reply, so older read replies
+start closed without any script. `MailModel.conversationGroups` is cached until the rows, mailboxes, or
+learned headers change, and `MailConversationSummaryRow` is `Equatable`, so a redraw of the model does not
+redraw the list.
+
 ## Calendar
 
 Calendar opens in 3 Days: today and the next two days in a scrollable hourly grid.
@@ -110,6 +124,24 @@ time, description, meeting notes, location, organizer, guests, and attachments
 beside the calendar; × or Escape closes it. Join Google Meet opens the
 event's meeting link in the system browser. Notes come from the event description.
 Linked documents open in the browser. Jevcast does not record meetings or generate notes.
+
+Events on the calendars of this Mac can be added, changed, moved, and deleted. `CalendarPage+Editing.swift`
+holds the actions, `CalendarEventEditor.swift` the editor beside the grid, and `CalendarWriter.swift` the
+`CalendarWriting` protocol with its EventKit implementation. `CalendarEventDraft` in `LauncherCore` checks a
+draft and works out all-day times and moves. ⌘N, the + button, or a double-click on a time opens a new event;
+⌘E or Return edits the selected event; a drag moves it by quarter hours and days; ⌫ asks first. A repeating
+event changes for one day, or for that day and later. An event is editable when its calendar allows changes
+and you are its organizer. Events read directly from Google are read only; the same event read from this Mac
+wins, so it can be changed. Tests inject a fake writer and never touch EventKit.
+
+The calendar menu picks All Calendars, On This Mac, or Google. `GoogleCalendarAccounts` holds every connected
+Google account; the first keeps the original storage names and each further account adds a short ID to its
+Keychain and preference names. `CalendarAlertCenter` shows a minimized notch notice shortly before a meeting
+(`MeetingAlert` decides which events are due). It reads EventKit each minute and Google at most every ten
+minutes. The Calendar menu turns it off. Calendar opens on the view last used (`calendarMode`).
+
+Google requests share one `URLSession` and read calendars side by side. Fetched windows are kept per source
+and account; a Google window is read again when it is two minutes old, while its events stay on screen.
 
 Connect Google in the Calendar header starts a separate read-only Google sign-in.
 The sign-in window stays open while the system browser is active. Once connected,
@@ -137,7 +169,7 @@ inject fake HTTP responses and account checks inject in-memory credentials.
 
 `--snapshot-ui <dir> --demo --calendar-only` renders 3 Days (also with event
 details, in light appearance, and with details at 860 points), Week, Day, Month,
-and the Google sign-in form with invented events and fresh preferences. It does not read EventKit or Keychain credentials.
+the Google sign-in form, the new-event editor (`calendar-new-event`), and an event of your own with Edit and Delete (`calendar-own-event`), with invented events and fresh preferences. It does not read EventKit or Keychain credentials; a demo writer saves nothing.
 
 ## Rename the app
 

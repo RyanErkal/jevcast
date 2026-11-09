@@ -190,7 +190,7 @@ final class MailModel: ObservableObject {
     var serverSearchRows: [MailSummary] = []
     var fingerprint = ""
     private var poll: Task<Void, Never>?
-    private var isDemo = false
+    private(set) var isDemo = false
     private var searchWork: Task<Void, Never>?
     var loadWork: Task<Void, Never>?
     /// The newest and oldest cursors for the current list.
@@ -290,7 +290,10 @@ final class MailModel: ObservableObject {
                 guard let self, self.poll != nil else { return }
                 self.loadSenders()
                 // A change of mail source, or a first account, needs the store found again.
-                if NativeMailCenter.isActive, let root = self.root, NativeMailCenter.isNativeRoot(root) { self.refresh() } else { self.refreshStatus() }
+                if NativeMailCenter.isActive, let root = self.root, NativeMailCenter.isNativeRoot(root) {
+                    // A refresh that could not start now is tried again at the next check.
+                    if !self.refresh() { self.fingerprint = "" }
+                } else { self.refreshStatus() }
             }
     }
     private var defaultsObserver: AnyCancellable?
@@ -361,7 +364,7 @@ final class MailModel: ObservableObject {
                 // Jevcast's own store announces each change, so its file is checked only as a
                 // slow safety net. Apple Mail's index has no notice and is checked every time.
                 let native = NativeMailCenter.isActive && NativeMailCenter.isNativeRoot(root)
-                if !native || ticks % 5 == 0 {
+                if !native || ticks % 5 == 0 || self.fingerprint.isEmpty {
                     let current = await Task.detached { MailStore.fingerprint(root: root) }.value
                     if current != self.fingerprint, self.refresh() { self.fingerprint = current }
                 }

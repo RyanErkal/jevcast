@@ -13,6 +13,7 @@ enum MailSnapshots {
             ("mail-reply", AnyView(reply()), NSSize(width: 820, height: 760)),
             panel("mail-outbox", outbox()),
             panel("mail-workspace", MailPage(mail: workspace())),
+            panel("mail-invitation", MailPage(mail: workspace(invitation: true))),
             panel("mail-thread", thread()),
             panel("mail-thread-compact", thread(), width: 980),
             panel("mail-thread-smallest", thread(), width: 860),
@@ -182,7 +183,7 @@ enum MailSnapshots {
     }
 
     /// Invented accounts, folders, and messages, ready as the panel shows them. The first message is selected.
-    static func workspace(drafts: Bool = false, search: Bool = false, providerFoldersExpanded: Bool = false) -> MailModel {
+    static func workspace(drafts: Bool = false, search: Bool = false, providerFoldersExpanded: Bool = false, invitation: Bool = false) -> MailModel {
         let model = fixture()
         let roles: [MailMailbox.Role] = [.inbox, .drafts, .sent, .archive, .junk, .trash, .other, .other, .other, .other]
         let names = ["INBOX", "[Gmail]/Drafts", "[Gmail]/Sent Mail", "[Gmail]/All Mail", "[Gmail]/Spam", "[Gmail]/Trash",
@@ -195,15 +196,21 @@ enum MailSnapshots {
         } + [MailMailbox(rowID: 20, url: "imap://personal/INBOX", unread: 2, total: 25, serverRole: .inbox)]
         let subjects = ["Friday's Plan", "Design Review", "October Invoice", "Launch Checklist", "Project Update", "Catch Up Next Week"]
         let people = ["Sam Lee", "Jamie Park", "Accounts", "Alex Chen", "Morgan Riley", "Casey"]
-        let messages = subjects.enumerated().map { offset, subject in
-            MailSummary(rowID: Int64(offset + 1), mailbox: 1, subject: subject, senderName: people[offset],
-                        senderAddress: "sender\(offset)@example.com", snippet: "", date: Date().addingTimeInterval(Double(-offset * 3600)),
+        let previews = ["Friday at 10 works well. Please find the agenda attached.", "You are invited to the design review on Thursday.",
+                        "Your invoice for October is ready to view.", "Two items are left before we can ship.",
+                        "The first phase is complete. Here is what comes next.", "Are you free for a call on Tuesday?"]
+        var messages = subjects.enumerated().map { offset, subject in
+            MailSummary(rowID: Int64(offset + 1), mailbox: offset == 4 ? 20 : 1, subject: subject, senderName: people[offset],
+                        senderAddress: "sender\(offset)@example.com", snippet: previews[offset], date: Date().addingTimeInterval(Double(-offset * 3600)),
                         read: offset > 1, flagged: offset == 1, conversation: Int64(offset + 1))
         }
+        // The invitation fixture opens on the invitation.
+        if invitation { messages.swapAt(0, 1) }
         var message = OutgoingMessage(from: .init(name: "Sam Lee", address: "sam@example.com"), to: [.init(address: "alex@example.com")],
                                       subject: "Friday's Plan", body: "Hi Alex,\n\nFriday at 10 works well. Please find the agenda attached.\n\nSee you then,\nSam")
         message.attachments = [.init(filename: "Agenda.pdf", mimeType: "application/pdf", data: Data(repeating: 0, count: 2048))]
-        let detail = MIMEMessage.parse(MailComposer.render(message))
+        var detail = MIMEMessage.parse(MailComposer.render(message))
+        if invitation { detail = MIMEMessage.parse(Data(invitationMessage().utf8)) }
         model.installDemo(mailboxes: boxes, messages: drafts ? [] : search ? messages.filter { $0.subject.contains("Friday") } : messages, detail: detail)
         model.favoriteMailboxKeys = [boxes[7].url]
         if providerFoldersExpanded { model.expandedSidebarGroupKeys = ["demo:[Gmail]"] }
@@ -221,13 +228,29 @@ enum MailSnapshots {
         return model
     }
 
+    /// An invented invitation, as a calendar server sends it: text for people and iCalendar for programs.
+    static func invitationMessage() -> String {
+        let day = Calendar.current.date(byAdding: .day, value: 2, to: Date()) ?? Date()
+        let stamp = day.formatted(.iso8601.year().month().day().dateSeparator(.omitted))
+        let calendar = ["BEGIN:VCALENDAR", "VERSION:2.0", "METHOD:REQUEST", "BEGIN:VEVENT", "UID:demo-design-review@example.com", "SEQUENCE:0",
+                        "DTSTART:\(stamp)T100000", "DTEND:\(stamp)T104500", "SUMMARY:Design Review", "LOCATION:Studio, Room 4",
+                        "ORGANIZER;CN=Jamie Park:mailto:jamie@example.com", "ATTENDEE;CN=Alex Morgan;PARTSTAT=NEEDS-ACTION:mailto:alex@example.com",
+                        "ATTENDEE;CN=Sam Lee;PARTSTAT=ACCEPTED:mailto:sam@example.com", "END:VEVENT", "END:VCALENDAR"].joined(separator: "\r\n")
+        return "From: Jamie Park <jamie@example.com>\r\nTo: alex@example.com\r\nSubject: Design Review\r\nMIME-Version: 1.0\r\n"
+            + "Content-Type: multipart/alternative; boundary=\"demo\"\r\n\r\n--demo\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n"
+            + "Hi Alex,\n\nYou are invited to the design review on Thursday. We will look at the new onboarding screens.\n\nJamie\r\n"
+            + "--demo\r\nContent-Type: text/calendar; method=REQUEST; charset=utf-8\r\n\r\n" + calendar + "\r\n--demo--\r\n"
+    }
+
     static func thread() -> MailPage {
         let model = workspace()
         let first = model.messages[0]
         let replies = (0..<4).map { offset in
             MailSummary(rowID: Int64(100 + offset), mailbox: 1, subject: "Re: Friday's Plan",
                 senderName: offset % 2 == 0 ? "Sam Lee" : "Alex Morgan", senderAddress: offset % 2 == 0 ? "sam@example.com" : "alex@example.com",
-                snippet: "", date: first.date.addingTimeInterval(Double(-offset * 3600)), read: offset > 0,
+                snippet: ["Confirmed. See you Friday at 10!", "Thanks Sam. Could we start at 10?", "Friday works. Shall we meet at the studio?",
+                          "Are you free to review the designs this week?"][offset],
+                date: first.date.addingTimeInterval(Double(-offset * 3600)), read: offset > 0,
                 flagged: false, conversation: 900)
         }
         model.messages = replies + model.messages.dropFirst()

@@ -602,12 +602,15 @@
               <li><strong>Work through your inbox.</strong> Conversation groups, filters, bulk actions, rules, smart mailboxes, and VIP senders.</li>
               <li><strong>Write with care.</strong> Recipient suggestions, provider-authorized aliases, signatures, saved drafts, and explicit recovery after an uncertain send.</li>
               <li><strong>Plan your mail.</strong> Snooze messages and use Send Later. Jevcast must be running and your Mac awake; missed sends wait for review.</li>
+              <li><strong>Answer invitations.</strong> A meeting invitation shows as a card. Accept, Maybe, or Decline tells the organiser, and Add to Calendar saves the event.</li>
+              <li><strong>Stay on the keyboard.</strong> Archive, flag, mark junk, and move to a folder with keys. A mail address you click starts a new message here, and Jevcast can be your default mail app.</li>
+              <li><strong>Leave lists and tidy folders.</strong> Unsubscribe with one confirmed click. Make, rename, and remove your own folders.</li>
               <li><strong>Keep your archives.</strong> Import and export .eml and .mbox files without changing the originals.</li>
             </ul>
             <p><a href="https://github.com/RyanErkal/jevcast/blob/main/docs/MAIL_FEATURES.md">Read the feature guide and verification limits</a>.</p>
           </div>
           <figure class="auto-shot">
-            <img src="images/mail-workspace.png" width="2640" height="1656" loading="lazy" alt="Jevcast Mail inside the launcher with invented accounts, mailbox folders, message list, and reading pane." />
+            <img src="images/mail-invitation.png" width="2640" height="1656" loading="lazy" alt="Jevcast Mail inside the launcher with invented accounts. The message list shows each sender, subject, and the start of the text. A meeting invitation is open, with a card that shows its time and place and the buttons Accept, Maybe, and Decline. All mail is demo data." />
           </figure>
         </div>
       </section>
@@ -618,14 +621,17 @@
             <h2 id="calendar-title">Your day, from one shortcut.</h2>
             <p>
               Type <code>calendar</code> or hold Caps Lock and press <kbd>C</kbd>.
-              See the next three days on an hourly grid, open a meeting beside it, and join Google Meet.
+              See the next three days on an hourly grid, add and change events, open a meeting beside it, and join Google Meet.
             </p>
             <ul class="auto-points">
               <li><strong>Sign in with Google.</strong> Connect your Google Calendar directly, or use calendars already on your Mac.</li>
               <li><strong>See the time.</strong> 3 Days, Day, and Week have horizontal hour lines, all-day events, and a current-time marker. Month and List are there too. <kbd>←</kbd> and <kbd>→</kbd> switch views.</li>
               <li><strong>Open the details.</strong> Click an event to see its description, meeting notes, location, organiser, guests, and linked documents beside the calendar.</li>
               <li><strong>Join the meeting.</strong> Open the event's Google Meet link in your browser.</li>
-              <li><strong>Read-only Google access.</strong> Choose which calendars to show. Jevcast cannot change or delete your Google events.</li>
+              <li><strong>Add and change events.</strong> Press <kbd>⌘</kbd><kbd>N</kbd> or double-click a time. Edit, drag, or delete your events on the calendars of your Mac. Calendar does not need to be open.</li>
+              <li><strong>One view for every calendar.</strong> Show your Mac and several Google accounts together.</li>
+              <li><strong>Know when to join.</strong> A quiet mark beside the notch shows a few minutes before a meeting, with Join.</li>
+              <li><strong>Read-only Google access.</strong> Choose which calendars to show. Jevcast cannot change or delete events through your Google sign-in.</li>
             </ul>
             <p>
               Google sign-in uses your own free Desktop app client. The
@@ -639,7 +645,7 @@
               width="2280"
               height="1400"
               loading="lazy"
-              alt="Jevcast Calendar in 3 Days view, Wednesday to Friday on an hourly grid. A team stand-up is selected, and its details show beside the grid: the time, Join Google Meet, the organiser, two guests, meeting notes, and a link. Other events are a holiday, lunch, planning, a dentist appointment, a design review, and the gym. All events are demo data."
+              alt="Jevcast Calendar in 3 Days view, three days on an hourly grid, with buttons to refresh and to add an event. A team stand-up is selected, and its details show beside the grid: the time, Join Google Meet, your answer to the invitation, the organiser, two guests, meeting notes, and a link. Other events are a holiday, lunch, planning, a dentist appointment, a design review, and the gym. All events are demo data."
             />
           </figure>
         </div>
@@ -754,7 +760,7 @@
               <span class="net-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" /></svg></span>
               <h3>Mail accounts</h3>
               <code>your mail servers</code>
-              <p>Only for accounts you add in Settings › Mail. Talks to that account's own IMAP and SMTP servers over TLS, and nothing else. Google or Microsoft sign-in uses your own OAuth client and their sign-in pages.</p>
+              <p>Only for accounts you add in Settings › Mail. Talks to that account's own IMAP and SMTP servers over TLS, and nothing else. An invitation answer or an unsubscribe email goes only after you click. Google or Microsoft sign-in uses your own OAuth client and their sign-in pages.</p>
               <a
                 class="net-link"
                 href="https://github.com/RyanErkal/jevcast/tree/main/Sources/LauncherCore/NativeMail"
@@ -782,7 +788,7 @@
               <span class="net-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M8 2v4m8-4v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" /></svg></span>
               <h3>Google Calendar</h3>
               <code>Google sign-in and Calendar API</code>
-              <p>Only after you connect Google in Calendar. Reads the calendars you choose and their event details. Uses its own read-only token in the Keychain. It does not use your Mail token.</p>
+              <p>Only after you connect Google in Calendar. Reads the calendars you choose and their event details, also in the background while the notice before meetings is on. Uses its own read-only token in the Keychain. It does not use your Mail token.</p>
               <a class="net-link" href="https://github.com/RyanErkal/jevcast/tree/main/Sources/LauncherCore/Calendar">Read the code<span aria-hidden="true"> ↗</span></a>
             </li>
           </ul>
@@ -854,6 +860,14 @@ scripts/build.sh</code></pre>
             </p>
           </div>
           <ol class="releases">
+            <li class="release">
+              <div class="release-head"><span class="release-tag">1.22.0</span><time datetime="2026-11-09">9 November 2026</time></div>
+              <ul>
+                <li><strong>Calendar without Calendar.</strong> Add, change, drag, and delete events on your Mac's calendars. Show your Mac and several Google accounts together. A quiet mark shows before a meeting, with Join.</li>
+                <li><strong>Mail without Mail.</strong> Answer invitations, unsubscribe from lists, manage folders, and open mail links in Jevcast. New keys archive, flag, and move.</li>
+                <li><strong>Faster and calmer.</strong> The mail list no longer redraws while you type. Conversations show one title and close older replies. Google Calendar keeps what it fetched.</li>
+              </ul>
+            </li>
             <li class="release">
               <div class="release-head"><span class="release-tag">1.21.3</span><time datetime="2026-10-09">9 October 2026</time></div>
               <ul>

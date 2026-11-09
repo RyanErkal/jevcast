@@ -47,9 +47,10 @@ struct MailInviteCard: View {
     }
 
     @ViewBuilder private var actions: some View {
-        if invite.method == .request {
+        // A cancellation or another guest's answer has nothing to answer or add.
+        if invite.method != .cancel, invite.method != .reply {
             VStack(alignment: .trailing, spacing: 6) {
-                if model.canAnswerInvite {
+                if invite.method == .request, model.canAnswerInvite {
                     HStack(spacing: 6) {
                         answer(.accepted, "Accept")
                         answer(.tentative, "Maybe")

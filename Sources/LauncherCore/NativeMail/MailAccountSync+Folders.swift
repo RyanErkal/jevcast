@@ -38,8 +38,6 @@ extension MailAccountSync {
         let full = parts.joined(separator: delimiter)
         guard full != box.name else { return }
         guard !taken(full) else { throw MailError.notFound("A folder with this name already exists.") }
-        // The sync and wait connections may have this mailbox selected under its old name.
-        await syncClient.drop()
         try await actionClient.renameMailbox(box.name, to: full)
         await relist()
     }
@@ -51,7 +49,6 @@ extension MailAccountSync {
         guard !mailboxes.contains(where: { $0.name.hasPrefix(box.name + delimiter) }) else {
             throw MailError.notFound("This folder holds other folders. Remove or move them first. Nothing was changed.")
         }
-        await syncClient.drop()
         try await actionClient.deleteEmptyMailbox(box.name)
         await relist()
     }

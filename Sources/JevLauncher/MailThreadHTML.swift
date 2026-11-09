@@ -30,7 +30,7 @@ enum MailThreadHTML {
         + ".jev-date{margin-left:auto;white-space:nowrap}"
         + ".jev-message:not([open])>summary .jev-address{display:none}"
         + ".jev-message:not([open])>summary .jev-snippet{display:block}"
-        + ".jev-meta{padding:0 18px 4px;display:block}"
+        + ".jev-facts{display:flex;flex-wrap:wrap;gap:2px 16px;padding:0 18px 4px}"
         + ".jev-body{padding:6px 18px 18px}"
         + ".jev-html{background:#fff;color:#202124}"
         + ".jev-plain{font:14px -apple-system,sans-serif}"
@@ -42,8 +42,17 @@ enum MailThreadHTML {
         + "body{background:#1c1c1e;color:#e8e8ea}"
         + ".jev-address,.jev-date,.jev-snippet,.jev-meta{color:#a0a0a5}"
         + ".jev-html{border-radius:8px;padding:12px}"
+        + ".jev-html.jev-simple{background:transparent;color:inherit;border-radius:0;padding:0}"
+        + ".jev-simple a{color:#6cb4ff}"
         + ".jev-plain a{color:#6cb4ff}}"
         + "</style>"
+
+    /// True for HTML that is only text: no layout, images, or colors of its own. Such a message
+    /// follows the page's appearance. Any designed message keeps a white page, so it reads as sent.
+    static func isSimple(_ html: String) -> Bool {
+        let text = html.lowercased()
+        return !["<table", "<img", "<style", "<font", "bgcolor", "background", "color"].contains { text.contains($0) }
+    }
 
     static func render(_ entries: [Entry], prefersPlain: Bool) -> String {
         guard let first = entries.first else { return style }
@@ -72,13 +81,15 @@ enum MailThreadHTML {
             var quotes = ""
             if let body = entry.body {
                 if !prefersPlain, let html = body.html {
-                    content = "<div class=\"jev-html\">" + MailHTML.threadFragment(html, className: "jev-body-" + id) + "</div>"
+                    content = "<div class=\"jev-html" + (isSimple(html) ? " jev-simple" : "") + "\">"
+                        + MailHTML.threadFragment(html, className: "jev-body-" + id) + "</div>"
                     if html.range(of: #"(?is)blockquote\b[^>]*type\s*=\s*["']?cite|gmail_quote|yahoo_quoted"#, options: .regularExpression) != nil {
                         quotes = "<label class=\"jev-meta\"><input class=\"jev-quotes\" type=\"checkbox\"> Show quoted text</label>"
                     }
                 } else { content = "<div class=\"jev-plain\">" + MailHTML.plain(body.message.readableText) + "</div>" }
             } else { content = "<p class=\"jev-plain\">This message has not downloaded yet.</p>" }
-            return "<details class=\"jev-message\"" + (open ? " open" : "") + ">" + summary + facts + quotes
+            let line = facts.isEmpty && quotes.isEmpty ? "" : "<div class=\"jev-facts\">" + facts + quotes + "</div>"
+            return "<details class=\"jev-message\"" + (open ? " open" : "") + ">" + summary + line
                 + "<div class=\"jev-body\">" + content + "</div></details>"
         }.joined()
     }

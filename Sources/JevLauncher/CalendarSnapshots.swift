@@ -1,4 +1,5 @@
 import AppKit
+import LauncherCore
 import SwiftUI
 
 /// Demo-only views. CalendarPage never reads EventKit, accounts, tokens, or preferences here.
@@ -7,15 +8,19 @@ enum CalendarSnapshots {
     static func writeAll(to directory: String) {
         let rig = LauncherSnapshotRig(catalogue: AppCatalogue(loadCache: false, roots: DemoData.appRoots, persistsCache: false), demo: true)
         let names = ["calendar-3-days", "calendar-3-days-details", "calendar-3-days-light", "calendar-3-days-compact",
-                     "calendar-week", "calendar-day", "calendar-month", "calendar-google-sign-in"]
+                     "calendar-week", "calendar-day", "calendar-month", "calendar-google-sign-in",
+                     "calendar-new-event", "calendar-own-event"]
         func render(_ index: Int) {
             guard index < names.count else { rig.removePreferences(); NSApp.terminate(nil); return }
             let name = names[index]
             let list = SourcePage(.calendar, source: nil, model: rig.model, hasDetail: true, emptyText: "")
             let defaults = UserDefaults(suiteName: LauncherSnapshotRig.suite)!
             let account = GoogleCalendarAccount(defaults: defaults, readToken: { nil }, saveToken: { _ in }, deleteToken: {}, readSecret: { nil })
-            let page = CalendarPage(list: list, readsEvents: false, google: name == "calendar-3-days-compact" ? account : nil)
+            let page = CalendarPage(list: list, readsEvents: false, google: name == "calendar-3-days-compact" ? account : nil,
+                                    writer: DemoCalendarWriter())
             page.opened()
+            if name == "calendar-new-event" { page.beginCreate() }
+            if name == "calendar-own-event", let event = page.displayedEvents.first(where: { $0.id == "demo2" }) { page.select(event) }
             if name == "calendar-3-days-compact", let month = Calendar.current.dateInterval(of: .month, for: Date()) {
                 page.showDay(month.end.addingTimeInterval(-86_400 - 1)); page.setMode(.threeDays)
             }
@@ -44,4 +49,16 @@ enum CalendarSnapshots {
         }
         render(0)
     }
+}
+
+/// Invented calendars for demo images. It saves nothing.
+@MainActor
+struct DemoCalendarWriter: CalendarWriting {
+    func calendars() -> [WritableCalendar] {
+        [WritableCalendar(id: "work", title: "Work", account: "iCloud", color: .blue), WritableCalendar(id: "home", title: "Home", account: "iCloud", color: .green)]
+    }
+    var defaultCalendarID: String? { "work" }
+    func allowed() async -> Bool { true }
+    func save(_ draft: CalendarEventDraft, eventID: String?, occurrence: Date?, future: Bool) throws {}
+    func delete(eventID: String, occurrence: Date?, future: Bool) throws {}
 }

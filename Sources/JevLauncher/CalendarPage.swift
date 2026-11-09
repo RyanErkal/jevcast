@@ -332,8 +332,9 @@ final class CalendarPage: ObservableObject, LauncherPage {
         byDay = result
         // The details follow the event when it changes, and close when it is gone.
         if let selected = selectedEvent, editing == nil {
-            selectedEvent = events.first { $0.id == selected.id }
+            let next = events.first { $0.id == selected.id }
                 ?? events.first { $0.localID != nil && $0.localID == selected.localID && $0.start == selected.start }
+            if next != selected { selectedEvent = next }
         }
     }
     func inMonth(_ day: Date) -> Bool { mode != .month || calendar.isDate(day, equalTo: anchor, toGranularity: .month) }
@@ -510,7 +511,9 @@ final class CalendarPage: ObservableObject, LauncherPage {
                          guests: index == 0 ? [CalendarGuest(name: "Alex Morgan", response: "accepted"), CalendarGuest(name: "Sam Taylor", response: "accepted")] : [],
                          attachments: index == 0 ? [CalendarAttachment(title: "Meeting notes", url: URL(string: "https://docs.google.com/document/d/demo")!)] : [],
                          meetingURL: index == 0 ? URL(string: "https://meet.google.com/abc-defg-hij") : nil,
-                         webURL: index == 0 ? URL(string: "https://calendar.google.com/") : nil)
+                         webURL: index == 0 ? URL(string: "https://calendar.google.com/") : nil,
+                         // Your own demo events can be changed; the one you were invited to shows your answer.
+                         localID: "demo\(index)", editable: index != 0, calendarID: "work", myResponse: index == 0 ? "accepted" : nil)
         }
     }
 

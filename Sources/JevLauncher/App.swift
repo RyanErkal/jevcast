@@ -228,6 +228,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         MailFeatureCenter.shared.start(model: mailModel)
         CalendarAlertCenter.shared.openCalendar = { [weak self] in self?.showView(.calendar) }
         MailLinkRouter.compose = { [weak self] link in self?.composeMail(link) ?? false }
+        mailLinksReady = true
+        if let link = pendingMailLink {
+            pendingMailLink = nil
+            DispatchQueue.main.async { [weak self] in self?.openMailLink(link) }
+        }
         if !MailIOPolicy.isOffline { CalendarAlertCenter.shared.start() }
         // The runner opened the app for an alert: AutomationCenter shows it; nothing else opens.
         if alertLaunch { return }
@@ -612,6 +617,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         if let rowID { (model.page as? MailPage)?.show(rowID) }
         if let address { mailModel.compose(to: address) }
     }
+    private var mailLinksReady = false
+    private var pendingMailLink: MailtoLink?
     /// A `mailto:` link as a new message in the panel. False when Jevcast's own mail accounts are not in use.
     @discardableResult
     func composeMail(_ link: MailtoLink) -> Bool {
@@ -622,10 +629,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     }
     /// macOS sends mail links here when Jevcast is the default mail app.
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls.prefix(1) where url.scheme?.lowercased() == "mailto" {
-            guard let link = MailtoLink(url) else { continue }
-            if !composeMail(link) { model.showFailure("Add a mail account in Settings › Mail to write mail in Jevcast.") }
-        }
+        guard let link = urls.lazy.filter({ $0.scheme?.lowercased() == "mailto" }).compactMap(MailtoLink.init).first else { return }
+        // A link that started the app arrives before the app is ready. It opens once launch is done.
+        guard mailLinksReady else { pendingMailLink = link; return }
+        openMailLink(link)
+    }
+    private func openMailLink(_ link: MailtoLink) {
+        if !composeMail(link) { model.showFailure("Add a mail account in Settings › Mail to write mail in Jevcast.") }
     }
     /// The running shell, or a new one. When the shell exits, the view closes and the next
     /// Hyper–T starts a new shell. Nil when libghostty cannot start.

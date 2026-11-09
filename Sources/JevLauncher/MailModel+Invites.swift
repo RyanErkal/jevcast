@@ -11,7 +11,7 @@ extension MailModel {
     }
 
     /// True when Accept, Maybe, and Decline can send an answer: a request, in a Jevcast account.
-    var canAnswerInvite: Bool { invite?.canReply == true && inviteAccount != nil }
+    var canAnswerInvite: Bool { invite?.canReply == true && (inviteAccount != nil || isDemo) }
 
     /// Your answer to the invitation on screen: the one sent from this Mac, or the one the invitation records.
     var inviteAnswer: CalendarInvite.Response? {

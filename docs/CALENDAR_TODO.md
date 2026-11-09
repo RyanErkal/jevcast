@@ -1,5 +1,12 @@
 # Calendar: morning checklist
 
+Update, 9 November 2026 (1.22.0): Calendar can add, change, move, and delete events on the
+calendars of this Mac, shows several Google accounts with this Mac in All Calendars, and
+marks the notch before a meeting. Offline tests and demo snapshots passed. Live checks to do
+on the Mac: add an event with ⌘N and with a double-click; edit, drag, and delete one; change
+one day of a repeating event; check that the change reaches the account on another device;
+connect a second Google account; wait for a meeting notice and press Join.
+
 Update, 7 October 2026: the app and runner were installed and relaunched from
 `/Applications/Jevcast.app`. Their signatures and binary hashes were verified.
 Ryan reported that the installed app works. The agent did not exercise live

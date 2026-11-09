@@ -226,6 +226,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         NativeMailCenter.shared.start()
         MailFeatureCenter.shared.openMessage = { [weak self] in self?.showMail(select: $0) }
         MailFeatureCenter.shared.start(model: mailModel)
+        CalendarAlertCenter.shared.openCalendar = { [weak self] in self?.showView(.calendar) }
+        MailLinkRouter.compose = { [weak self] link in self?.composeMail(link) ?? false }
+        mailLinksReady = true
+        if let link = pendingMailLink {
+            pendingMailLink = nil
+            DispatchQueue.main.async { [weak self] in self?.openMailLink(link) }
+        }
+        if !MailIOPolicy.isOffline { CalendarAlertCenter.shared.start() }
         // The runner opened the app for an alert: AutomationCenter shows it; nothing else opens.
         if alertLaunch { return }
         if CommandLine.arguments.contains("--terminal") { showView(.terminal, fromHyper: true) }
@@ -539,11 +547,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         automations.openWindow = { [weak self] automationID, runID in self?.showAutomations(automationID: automationID, runID: runID) }
         automations.openSettings = { [weak self] in self?.showSettings(tab: .automations) }
         NotchAlertController.shared.stillApplies = { [weak self] alert in
-            alert.id.hasPrefix(MailNotificationCenter.alertPrefix) || (self?.automations.alertStillApplies(alert) ?? false)
+            alert.id.hasPrefix(MailNotificationCenter.alertPrefix) || alert.id.hasPrefix(CalendarAlertCenter.alertPrefix)
+                || (self?.automations.alertStillApplies(alert) ?? false)
         }
         NotchAlertController.shared.onPresented = { [weak self] alert in self?.automations.alertPresented(alert) }
         NotchAlertController.shared.onAction = { [weak self] alert, action in
             if MailFeatureCenter.shared.notifications.handle(alert: alert, action: action) { return }
+            if CalendarAlertCenter.shared.handle(alert: alert, action: action) { return }
             let id = alert.id
             guard let self, !self.automations.handleAlertAction(id, action, approval: alert.approvalManifest) else { return }
             guard id.hasPrefix("brief:"), action == "open" else { return }
@@ -606,6 +616,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         showView(.mail)
         if let rowID { (model.page as? MailPage)?.show(rowID) }
         if let address { mailModel.compose(to: address) }
+    }
+    private var mailLinksReady = false
+    private var pendingMailLink: MailtoLink?
+    /// A `mailto:` link as a new message in the panel. False when Jevcast's own mail accounts are not in use.
+    @discardableResult
+    func composeMail(_ link: MailtoLink) -> Bool {
+        guard NativeMailCenter.isActive, !NativeMailCenter.shared.accounts.isEmpty, UISnapshots.directory == nil else { return false }
+        showView(.mail)
+        mailModel.compose(link: link)
+        return true
+    }
+    /// macOS sends mail links here when Jevcast is the default mail app.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let link = urls.lazy.filter({ $0.scheme?.lowercased() == "mailto" }).compactMap(MailtoLink.init).first else { return }
+        // A link that started the app arrives before the app is ready. It opens once launch is done.
+        guard mailLinksReady else { pendingMailLink = link; return }
+        openMailLink(link)
+    }
+    private func openMailLink(_ link: MailtoLink) {
+        if !composeMail(link) { model.showFailure("Add a mail account in Settings › Mail to write mail in Jevcast.") }
     }
     /// The running shell, or a new one. When the shell exits, the view closes and the next
     /// Hyper–T starts a new shell. Nil when libghostty cannot start.

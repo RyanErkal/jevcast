@@ -82,8 +82,8 @@ public struct MailSyncPolicy: Sendable {
     public var inboxFullCheck: TimeInterval = 30
     /// Inbox bodies read ahead so new mail opens at once, and the largest read ahead.
     /// Other bodies are read when opened.
-    public var prefetchInbox = 30
-    public var prefetchMaxSize: Int64 = 1_000_000
+    public var prefetchInbox = 100
+    public var prefetchMaxSize: Int64 = 2_000_000
     public var bodyBatch = 10
     /// A pass over the inbox and opened folders, when IDLE reports nothing sooner.
     public var periodic: TimeInterval = 300

@@ -30,6 +30,9 @@ public struct OutgoingMessage: Codable, Sendable {
     public var inReplyTo: String?
     public var references: [String] = []
     public var attachments: [Attachment] = []
+    /// iCalendar text that answers an invitation. It goes as a `text/calendar; method=REPLY` part,
+    /// which is how calendar servers read a reply sent by mail.
+    public var calendarReply: String?
     public var date = Date()
     public var messageID: String
 

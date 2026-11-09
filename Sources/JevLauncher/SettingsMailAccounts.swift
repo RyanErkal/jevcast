@@ -44,6 +44,7 @@ struct MailAccountsSection: View {
             Text("Its mail is deleted from this Mac. The mail stays on the server.")
         }
         MailOAuthSetupSection()
+        if center.backend == .jevcast, !center.accounts.isEmpty { DefaultMailAppSection() }
     }
 
     private func reconnect(_ account: NativeMailAccount) {

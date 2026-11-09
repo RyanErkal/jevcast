@@ -1,6 +1,8 @@
 # Mail replacement plan
 
 Implementation checkpoint: version 1.21.0 adds the six approved feature groups.
+Version 1.22.0 adds invitation answers, unsubscribe, mail links with optional default
+mail-app registration, and folder management.
 [Mail features](MAIL_FEATURES.md) records the implemented behavior and its limits.
 The acceptance target below remains broader than offline implementation proof.
 

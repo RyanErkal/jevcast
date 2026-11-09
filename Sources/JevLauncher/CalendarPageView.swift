@@ -41,22 +41,51 @@ struct CalendarPageView: View {
                             }
                         }
                         .frame(maxWidth: .infinity)
-                        if let event = page.selectedEvent {
+                        if page.editing != nil {
                             Divider()
-                            CalendarEventDetail(event: event, close: page.clearSelection, open: page.open, openCalendar: { page.openInCalendar(event) })
+                            CalendarEventEditor(page: page)
+                                .frame(width: Self.inspectorWidth(geometry.size.width))
+                                .transition(.move(edge: .trailing).combined(with: .opacity))
+                        } else if let event = page.selectedEvent {
+                            Divider()
+                            CalendarEventDetail(event: event, close: page.clearSelection, open: page.open, openCalendar: { page.openInCalendar(event) },
+                                                edit: { page.beginEdit(event) }, delete: { page.deleting = event },
+                                                respond: page.openMail.map { openMail in { openMail(event.title) } })
                                 .frame(width: Self.inspectorWidth(geometry.size.width))
                                 .transition(.move(edge: .trailing).combined(with: .opacity))
                         }
                     }
                     .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: page.selectedEvent?.id)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: page.editing != nil)
                 }
+            }
+        }
+        .alert(deleteTitle, isPresented: Binding(get: { page.deleting != nil }, set: { if !$0 { page.deleting = nil } })) {
+            Button("Cancel", role: .cancel) { page.deleting = nil }
+            if page.deleting?.recurring == true {
+                Button("Delete This Event", role: .destructive) { page.confirmDelete(future: false) }
+                Button("Delete This and Future Events", role: .destructive) { page.confirmDelete(future: true) }
+            } else {
+                Button("Delete", role: .destructive) { page.confirmDelete(future: false) }
+            }
+        } message: { Text("The event is removed from its calendar on every device. This cannot be undone here.") }
+        .overlay(alignment: .bottom) {
+            // A failed change made outside the editor, such as a move or a delete.
+            if page.editing == nil, let problem = page.editProblem {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Text(problem).lineLimit(2)
+                    Button("Dismiss") { page.editProblem = nil }.buttonStyle(.link)
+                }
+                .font(.system(size: 12)).padding(.horizontal, 12).padding(.vertical, 8)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous)).padding(.bottom, 12)
             }
         }
     }
 
-    private func signIn() {
-        page.signIn()
-    }
+    private var deleteTitle: String { "Delete “" + (page.deleting?.title ?? "event") + "”?" }
+
+    private func signIn() { page.signIn() }
 
     /// One row: the month and the steps on the left; the source, refresh, and views on the right.
     private var header: some View {
@@ -69,15 +98,22 @@ struct CalendarPageView: View {
             }
             Spacer(minLength: 8)
             if page.loading { ProgressView().controlSize(.mini).help("Loading events") }
+            if let notice = page.notice {
+                Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).help(notice).accessibilityLabel(notice)
+            }
             Group {
-                if let google = page.google {
-                    CalendarAccountControls(page: page, google: google, signIn: signIn)
+                if let accounts = page.accounts {
+                    CalendarAccountControls(page: page, accounts: accounts, signIn: signIn)
                 } else { Label("Demo calendar", systemImage: "calendar") }
             }
             // Small controls draw their text at 11 points; a larger font would cut it off.
             .font(.system(size: 11)).controlSize(.small).foregroundStyle(.secondary)
             Button { page.refresh() } label: { Image(systemName: "arrow.clockwise") }
                 .buttonStyle(.borderless).foregroundStyle(.secondary).help("Refresh events")
+            if page.writer != nil, !(page.mode == .list && page.source == .mac) {
+                Button { page.beginCreate() } label: { Image(systemName: "plus") }
+                    .buttonStyle(.borderless).foregroundStyle(.secondary).help("New event (⌘N)").accessibilityLabel("New event")
+            }
             Picker("Calendar view", selection: Binding(get: { page.mode }, set: { page.setMode($0) })) {
                 ForEach(CalendarPage.Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
@@ -174,38 +210,55 @@ struct CalendarPageView: View {
     }
 }
 
+/// Which calendars show: every source together, this Mac only, or Google only; each Google
+/// account's calendars; and adding or removing a Google account.
 private struct CalendarAccountControls: View {
     @ObservedObject var page: CalendarPage
-    @ObservedObject var google: GoogleCalendarAccount
+    @ObservedObject var accounts: GoogleCalendarAccounts
     let signIn: () -> Void
     @State private var error: String?
     var body: some View {
+        let connected = accounts.connected
         HStack(spacing: 10) {
             Menu {
-                Button("On This Mac") { page.use(.mac) }
-                if google.connected { Button(google.label) { page.use(.google) } }
-                Button(google.connected ? "Sign in again…" : "Connect Google Calendar…", action: signIn)
-                if google.connected {
+                if !connected.isEmpty { Toggle("All Calendars", isOn: choice(.all)) }
+                Toggle("On This Mac", isOn: choice(.mac))
+                if !connected.isEmpty { Toggle(connected.count == 1 ? connected[0].label : "Google", isOn: choice(.google)) }
+                ForEach(connected, id: \.slot) { account in
                     Divider()
-                    Button("Disconnect Google Calendar") {
-                        do { try google.disconnect(); page.use(.mac) } catch { self.error = "Could not remove the Calendar token from the Keychain. Try again." }
+                    Section(account.label) {
+                        ForEach(account.calendars) { calendar in
+                            Toggle(calendar.summary, isOn: Binding(get: { account.enabledIDs.contains(calendar.id) }, set: {
+                                account.setEnabled(calendar.id, enabled: $0); page.refresh()
+                            }))
+                        }
+                        Button("Sign in again…") { page.signIn(account) }
+                        Button("Disconnect " + account.label) {
+                            do { try page.disconnect(account) } catch { self.error = "Could not remove the Calendar token from the Keychain. Try again." }
+                        }
                     }
                 }
-            } label: { Label(page.source == .google ? google.label : "On This Mac", systemImage: "calendar") }
-                .fixedSize().menuStyle(.borderlessButton)
-            if !google.connected { Button("Connect Google", action: signIn).controlSize(.small).fixedSize() }
-            if page.source == .google, !google.calendars.isEmpty {
-                Menu("Calendars") {
-                    ForEach(google.calendars) { calendar in
-                        Toggle(calendar.summary, isOn: Binding(get: { google.enabledIDs.contains(calendar.id) }, set: {
-                            google.setEnabled(calendar.id, enabled: $0); page.refresh()
-                        }))
-                    }
-                }.fixedSize().menuStyle(.borderlessButton)
-            }
+                Divider()
+                Toggle("Alert Before Meetings", isOn: Binding(get: { CalendarAlertCenter.shared.enabled }, set: { CalendarAlertCenter.shared.enabled = $0 }))
+                Button(connected.isEmpty ? "Connect Google Calendar…" : "Add Another Google Account…", action: signIn)
+            } label: { Label(title(connected), systemImage: "calendar") }
+                .fixedSize().menuStyle(.borderlessButton).help("Choose calendars")
+            if connected.isEmpty { Button("Connect Google", action: signIn).controlSize(.small).fixedSize() }
         }.alert("Google Calendar", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
             Button("OK") { error = nil }
         } message: { Text(error ?? "") }
+    }
+
+    private func choice(_ source: CalendarPage.Source) -> Binding<Bool> {
+        Binding(get: { page.source == source }, set: { if $0 { page.use(source) } })
+    }
+
+    private func title(_ connected: [GoogleCalendarAccount]) -> String {
+        switch page.source {
+        case .all: return "All Calendars"
+        case .mac: return "On This Mac"
+        case .google: return connected.count == 1 ? connected[0].label : "Google"
+        }
     }
 }
 

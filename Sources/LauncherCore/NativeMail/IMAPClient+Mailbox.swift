@@ -227,6 +227,32 @@ extension IMAPClient {
         }
     }
 
+    /// Makes a new, empty mailbox. Not retried, so a lost reply cannot repeat it.
+    public func createMailbox(_ name: String) async throws {
+        try await exclusive(retry: false) { _ = try await execute(IMAPCommand("CREATE").mailbox(name)) }
+    }
+
+    /// Renames a mailbox. The server keeps its messages and renames the mailboxes inside it.
+    public func renameMailbox(_ name: String, to newName: String) async throws {
+        try await exclusive(retry: false) { _ = try await execute(IMAPCommand("RENAME").mailbox(name).mailbox(newName)) }
+        // A selected mailbox that changed its name is selected again by its new name.
+        if selected?.name == name { disconnect() }
+    }
+
+    /// Removes a mailbox only when the server says it holds no messages. Otherwise nothing changes.
+    public func deleteEmptyMailbox(_ name: String) async throws {
+        if selected?.name == name { disconnect() }
+        try await exclusive(retry: false) {
+            let reply = try await execute(IMAPCommand("STATUS").mailbox(name).raw("(MESSAGES)"))
+            var count: UInt32?
+            for case .mailboxStatus(_, let values) in reply.untagged { count = values["MESSAGES"].map { UInt32($0) } }
+            guard count == 0 else {
+                throw MailError.notFound("This folder still holds messages. Move or delete them first. Nothing was changed.")
+            }
+            _ = try await execute(IMAPCommand("DELETE").mailbox(name))
+        }
+    }
+
     public func noop() async throws {
         try await exclusive { _ = try await execute(IMAPCommand("NOOP")) }
     }

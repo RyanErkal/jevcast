@@ -176,6 +176,36 @@ public actor NativeMailEngine {
         await sync.request(MailSyncRequest(mailboxes: [box.rowID]))
     }
 
+    // MARK: Folders
+
+    private func folder(_ rowID: Int64) async throws -> (NativeMailStore.Mailbox, MailAccountSync) {
+        guard let box = try await store.mailbox(rowID) else { throw MailError.notFound("This folder is no longer in the account.") }
+        guard let sync = syncs[box.account] else { throw MailError.notFound("This mailbox's account is not set up.") }
+        return (box, sync)
+    }
+
+    /// A new folder at the top of the account, or inside the folder with `parent`.
+    public func createFolder(_ name: String, account: String, parent: Int64? = nil) async throws {
+        if let parent {
+            let (box, sync) = try await folder(parent)
+            try await sync.createFolder(name, under: box)
+        } else {
+            guard let sync = syncs[account] else { throw MailError.notFound("This account is not set up.") }
+            try await sync.createFolder(name, under: nil)
+        }
+    }
+
+    public func renameFolder(_ rowID: Int64, to name: String) async throws {
+        let (box, sync) = try await folder(rowID)
+        try await sync.renameFolder(box, to: name)
+    }
+
+    /// Removes an empty folder of your own. A folder with messages or folders inside is refused.
+    public func deleteEmptyFolder(_ rowID: Int64) async throws {
+        let (box, sync) = try await folder(rowID)
+        try await sync.deleteEmptyFolder(box)
+    }
+
     private func emptiable(_ rowID: Int64) async throws -> (NativeMailStore.Mailbox, MailAccountSync) {
         guard let box = try await store.mailbox(rowID), box.role == .trash || box.role == .junk else {
             throw MailError.notFound("Only Trash and Junk can be emptied. Nothing was deleted.")
@@ -256,6 +286,19 @@ public actor NativeMailEngine {
         message.inReplyTo = inReplyTo; message.references = references
         if let messageID { message.messageID = messageID }
         return try await sync.send(message, verifiedSender: verifiedSender)
+    }
+
+    /// Answers a meeting invitation: a short message to the organizer that carries the iCalendar
+    /// reply. Calendar servers read the reply and record the answer.
+    @discardableResult
+    public func sendInvitationReply(from accountID: String, to organizer: MailContact, subject: String, body: String,
+                                    calendar: String, inReplyTo: String? = nil) async throws -> MailSendReceipt {
+        let sync = try sendingSync(accountID)
+        let sender = try NativeMailSender.canonical(for: sync.account).validated(for: sync.account)
+        var message = OutgoingMessage(from: sender.contact, to: [organizer], subject: subject, body: body)
+        message.calendarReply = calendar
+        if let inReplyTo, !inReplyTo.isEmpty { message.inReplyTo = inReplyTo; message.references = [inReplyTo] }
+        return try await sync.send(message, verifiedSender: sender)
     }
 
     /// A reply. The composer's `recipients` and `subject` win over the ones worked out from the

@@ -21,6 +21,11 @@ list opens Mail tools. Escape returns from a tool to the previous draft or list.
 | Notifications | Off by default per account. Notices use the notch, support private previews and quiet hours, and suppress initial history and backfills. They require Jevcast running. |
 | Snooze | Local to this Mac. Hides the message from Inbox and Unread until its return time. Other folders and other devices retain it. |
 | Send Later | Saves the entire draft and attachments before leaving the composer. Requires Jevcast running and the Mac awake. Missed times wait for review. Interrupted or uncertain dispatches require a Sent check. Startup never resumes them. |
+| Invitations | A message with a calendar part shows a card: title, time, place, organiser, and your answer. Accept, Maybe, and Decline send a standard calendar reply to the organiser from the account that received the message (Jevcast accounts only). Add to Calendar saves the event on this Mac. A cancellation and another guest's answer show as information only. |
+| Unsubscribe | Shown when the message has a `List-Unsubscribe` header. After you confirm, Jevcast sends the list's own unsubscribe email from that account, or opens the list's https page in your browser. Jevcast does not request the page itself. |
+| Mail links | A mail address clicked in a message starts a new message in Jevcast. Settings › Mail › Default mail app makes Jevcast open mail links from other apps; macOS may ask you to confirm. |
+| Folders | Right-click an account or folder: New Folder, Rename, Delete Empty Folder. Only your own folders can be renamed or removed. A folder with messages or folders inside is refused, and nothing is deleted. A renamed folder downloads its headers again when opened. |
+| Keys | ⌃⌘A archive, ⇧⌘L flag, ⇧⌘U read or unread, ⇧⌘J junk, ⇧⌘M move (type a folder name, then Return), ⌘1 to ⌘7 the main mailboxes. |
 | Import and export | `.eml` and `.mbox` imports go to a separate owner-only archive. Preview reports counts and malformed entries. Imports deduplicate raw bytes. Source files are preserved. The import limit is 128 MB per file. Export retains message and attachment bytes. |
 
 Scheduled mail, snooze, rules, and the imported archive are stored under
@@ -43,9 +48,17 @@ reliability. Account reconnect and read-only sync are separate live checks.
 Google OAuth projects left in Testing can issue refresh tokens that expire
 after seven days. Reconnecting accounts does not change that provider setting.
 
-Folder creation/renaming, default mail-app registration, encrypted mail, and a
-week-long cutover exercise are separate follow-up work. The features above do
+Encrypted mail and a week-long cutover exercise are separate follow-up work.
+Version 1.22.0 adds folder changes and default mail-app registration; neither has a live check yet. The features above do
 not establish complete Apple Mail parity.
+
+## Version 1.22.0 checks on 2026-11-09
+
+Offline checks cover the invitation parser and reply text, the calendar part of a sent reply, `mailto` and
+`List-Unsubscribe` parsing, folder name rules, the conversation document, and the list's footer keys. The
+Mail demo snapshots rendered, including `mail-invitation` and `mail-thread`. Not checked live: a real
+invitation reply and how each calendar server records it, a real unsubscribe email, folder changes on a real
+server, the default mail app prompt, and the ⇧⌘M menu with a real keyboard.
 
 ## Release checks on 2026-10-09
 

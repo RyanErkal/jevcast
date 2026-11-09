@@ -13,13 +13,17 @@ struct MailMessageList: View {
 
     var body: some View {
         let groups = model.conversationGroups
-        let activeRow = groups.first { $0.messages.contains { $0.summary.rowID == model.selectedID } }?.latest.summary.rowID
+        let activeRow = model.selectedConversationRowID
+        // In a list of several accounts, each row carries its account's mark.
+        let marksAccounts = model.showsAccountMarks
         return ScrollViewReader { proxy in
             List(selection: selection) {
                 ForEach(groups) { conversation in
                     MailConversationSummaryRow(conversation: conversation,
-                        isVIP: conversation.messages.contains { model.isVIP($0.summary) },
+                        isVIP: !model.vipAddresses.isEmpty && conversation.messages.contains { model.isVIP($0.summary) },
+                        account: marksAccounts ? model.accountMark(conversation.accountID) : nil,
                         delete: { model.delete(conversation.latest.summary.rowID) })
+                        .equatable()
                         .tag(conversation.latest.summary.rowID).id(conversation.latest.summary.rowID)
                         .listRowBackground(activeRow == conversation.latest.summary.rowID
                             ? Color.accentColor.opacity(0.22) : Color.clear)

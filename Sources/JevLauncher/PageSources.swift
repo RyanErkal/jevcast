@@ -55,7 +55,11 @@ enum LauncherPages {
             let list = SourcePage(.calendar, source: snapshot ? nil : CalendarSource(), model: model, scope: "week", hasDetail: true,
                                   emptyText: "Nothing in the next seven days.",
                                   popOut: snapshot ? nil : { [weak model] in model?.onClose?(false); CalendarSource.openApp("com.apple.iCal") })
-            return CalendarPage(list: list, readsEvents: !snapshot, hideLauncher: { [weak model] in model?.onClose?(false) })
+            return CalendarPage(list: list, readsEvents: !snapshot, hideLauncher: { [weak model] in model?.onClose?(false) },
+                                openMail: snapshot ? nil : { [weak model] text in
+                                    // The invitation is a message. Mail opens with the event's title as its search.
+                                    model?.closeAllViews(); model?.showView(.mail); model?.filterView(text)
+                                })
         case .tasks:
             let center = model.scheduledBriefs
             let openRun = links.runWindow ?? { _ in }

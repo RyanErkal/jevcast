@@ -81,11 +81,16 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>NSPrincipalClass</key><string>NSApplication</string>
 <key>NSMicrophoneUsageDescription</key><string>Transcribe your voice while the launcher is open, or while you hold Right Command to dictate. Audio is not saved.</string>
 <key>NSSpeechRecognitionUsageDescription</key><string>Turn spoken launcher commands into text using on-device speech recognition.</string>
-<key>NSCalendarsFullAccessUsageDescription</key><string>List your events, join calls, and add events you type in the launcher.</string>
+<key>NSCalendarsFullAccessUsageDescription</key><string>List your events, join calls, and add, change, or delete events when you ask.</string>
 <key>NSRemindersFullAccessUsageDescription</key><string>List, complete, and add reminders from the launcher.</string>
 <key>NSContactsUsageDescription</key><string>Find people so you can email, message, or call them from the launcher.</string>
 <key>NSAppleEventsUsageDescription</key><string>Read and switch browser tabs, and read and act on Mail messages, only when you ask.</string>
 <key>NSHighResolutionCapable</key><true/>
+<key>CFBundleURLTypes</key><array><dict>
+<key>CFBundleURLName</key><string>Email address</string>
+<key>CFBundleTypeRole</key><string>Editor</string>
+<key>CFBundleURLSchemes</key><array><string>mailto</string></array>
+</dict></array>
 </dict></plist>
 PLIST
 if [ -f "$APP/Contents/Resources/Assets.car" ]; then

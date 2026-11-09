@@ -71,7 +71,13 @@ final class MailThreadPresentationTests: XCTestCase {
         let view = try XCTUnwrap(web)
         let text = try await view.evaluateJavaScript("document.body.innerText") as? String ?? ""
         XCTAssertTrue(text.contains("Confirmed. See you Friday at 10!"))
-        XCTAssertTrue(text.contains("Are you free to review the designs this week?"))
+        // A read reply after the newest two starts closed: one line, with its text ready to open.
+        let whole = try await view.evaluateJavaScript("document.body.textContent") as? String ?? ""
+        XCTAssertTrue(whole.contains("Are you free to review the designs this week?"))
+        let open = try await view.evaluateJavaScript("document.querySelectorAll('details.jev-message[open]').length") as? Int
+        XCTAssertEqual(open, MailThreadHTML.openReplies)
+        let titles = try await view.evaluateJavaScript("document.querySelectorAll('.jev-title').length") as? Int
+        XCTAssertEqual(titles, 1, "The subject shows once, above the replies.")
         XCTAssertFalse(text.contains("Earlier message repeated here."))
         _ = try await view.evaluateJavaScript("document.querySelector('.jev-quotes').checked = true")
         let revealed = try await view.evaluateJavaScript("document.body.innerText") as? String ?? ""

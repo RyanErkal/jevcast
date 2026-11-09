@@ -12,6 +12,8 @@ public struct MIMEMessage: Equatable, Sendable {
     public var plainText: String?
     public var html: String?
     public var attachments: [Attachment] = []
+    /// The first iCalendar part, as text: a meeting invitation, its update, or its cancellation.
+    public var calendarText: String?
     /// Images carried inside the message and shown in its HTML as `cid:` links, by Content-ID.
     public var inlineImages: [String: InlineImage] = [:]
     public struct InlineImage: Codable, Equatable, Sendable {
@@ -23,6 +25,7 @@ public struct MIMEMessage: Equatable, Sendable {
     public static func == (lhs: MIMEMessage, rhs: MIMEMessage) -> Bool {
         lhs.headers.map { $0.name + ":" + $0.value } == rhs.headers.map { $0.name + ":" + $0.value }
             && lhs.plainText == rhs.plainText && lhs.html == rhs.html && lhs.attachments == rhs.attachments
+            && lhs.calendarText == rhs.calendarText
     }
 
     /// The first header with this name, decoded. Names are not case-sensitive.
@@ -88,6 +91,7 @@ public struct MIMEMessage: Equatable, Sendable {
             if message.plainText == nil, let text = inner.plainText { message.plainText = text }
             if message.html == nil, let html = inner.html { message.html = html }
             message.attachments += inner.attachments
+            if message.calendarText == nil { message.calendarText = inner.calendarText }
             return
         }
         let decoded = decode(body, encoding)
@@ -96,6 +100,11 @@ public struct MIMEMessage: Equatable, Sendable {
            decoded.count <= 5_000_000 {
             message.inlineImages[cid] = InlineImage(mimeType: type, data: decoded)
             return
+        }
+        // An invitation is kept as text for the invitation card. A named one stays an attachment too.
+        if message.calendarText == nil, decoded.count <= 1_000_000,
+           type == "text/calendar" || (type == "application/ics" || filename?.lowercased().hasSuffix(".ics") == true) {
+            message.calendarText = decodeText(decoded, charset: params["charset"])
         }
         let isAttachment = disposition?.0 == "attachment" || (filename != nil && !type.hasPrefix("text/"))
         if isAttachment || !(type == "text/plain" || type == "text/html") {

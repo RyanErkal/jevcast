@@ -2,6 +2,36 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.22.0] - 2026-11-09
+
+### Added
+
+- **Calendar editing.** Add, change, move, and delete events on the calendars of this Mac. ⌘N or a double-click on a time opens the editor beside the grid; ⌘E changes the selected event; a drag moves it by quarter hours and days; ⌫ asks before it deletes. A repeating event changes for one day or for that day and later. Changes go through EventKit, so they reach the account's server without Calendar open. Events read directly from Google stay read only.
+- **All Calendars.** Show this Mac and Google together, and connect more than one Google account. An event that both sources hold shows once.
+- **Meeting notices.** A mark shows beside the notch a few minutes before a meeting, with Join for a call link. Turn it off in the Calendar menu.
+- **Invitations in Mail.** A meeting invitation shows as a card with its time, place, organiser, and your answer. Accept, Maybe, and Decline send a standard calendar reply to the organiser from the account that received it. Add to Calendar saves the event on this Mac.
+- **Mail links and default mail app.** A mail address clicked in a message starts a new message in Jevcast. Settings › Mail can make Jevcast the Mac's default mail app; nothing changes until you click it.
+- **Unsubscribe.** A mailing list that says how to leave gets an Unsubscribe button. Jevcast sends the list's own unsubscribe email after you confirm, or opens the list's page in your browser.
+- **Folders.** Make a folder, rename one, and remove an empty one from the sidebar's menu. Standard mailboxes cannot be renamed or removed, and a folder that holds messages or folders is never removed.
+- **Mail keys.** ⌃⌘A archives, ⇧⌘L flags, ⇧⌘U marks read or unread, ⇧⌘J marks junk, ⇧⌘M opens the folders to move to, and ⌘1 to ⌘7 open Inbox, All Mail, Unread, Flagged, Drafts, Sent, and Outbox.
+
+### Changed
+
+- **Conversation reader.** The subject shows once. Each reply has one header line, and older read replies start closed as one line. The page follows light and dark appearance; a designed HTML message keeps its white page.
+- **Message list.** Each row shows the start of the message. In a list of several accounts, each row has its account's mark.
+- **Calendar.** Opens on the view you last used. The filter also reads the place, calendar, people, and notes. With an event selected, ↑ and ↓ go to the event before and after it, and ⌘T returns to today.
+
+### Performance
+
+- **Mail list.** Conversation grouping runs once per change of the list, not on every redraw. A row draws again only when its conversation changes, so typing a reply no longer redraws the list. The thread document is built once per conversation.
+- **Mail sync.** The list follows store changes at a steady rate during a long sync. Mail connects again when the network changes. The inbox keeps its newest 100 bodies ready, up to 2 MB each.
+- **Google Calendar.** One connection serves every request and calendars are read side by side. Fetched months are kept, so stepping through days no longer clears the grid.
+
+### Verification limits
+
+- Checked with the offline test suite, a universal build, and demo snapshots. Live checks are not done: saving and deleting real events, the EventKit permission prompt, a real invitation reply and its effect on the organiser's calendar, a real unsubscribe, folder changes on a real server, the default mail app prompt, and the drag to move.
+- An invitation reply updates the organiser. Your own copy of the event follows when your calendar server reads that reply; a copy read directly from Google can keep its earlier answer.
+
 ## [1.21.3] - 2026-10-09
 
 ### Fixed

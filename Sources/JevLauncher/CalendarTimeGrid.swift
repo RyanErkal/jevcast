@@ -28,14 +28,24 @@ struct CalendarTimeGrid: View {
                             let dayWidth = max(1, (geometry.size.width - rail) / CGFloat(max(1, page.days.count)))
                             todayTint(dayWidth: dayWidth, height: gridHeight).offset(x: rail)
                             lines(width: geometry.size.width, dayWidth: dayWidth)
+                            // A double-click on an empty time starts a new event there.
+                            Color.clear.contentShape(Rectangle())
+                                .frame(width: max(0, geometry.size.width - rail), height: hourHeight * 24).offset(x: rail, y: top)
+                                .onTapGesture(count: 2) { point in
+                                    let index = min(page.days.count - 1, max(0, Int(point.x / dayWidth)))
+                                    guard page.days.indices.contains(index) else { return }
+                                    page.beginCreate(on: page.days[index], minute: Int(point.y / hourHeight * 60))
+                                }
+                            // One timer draws both the faint line under the events and the clock over them.
                             TimelineView(.periodic(from: .now, by: 30)) { context in
-                                nowAcross(now: context.date, width: geometry.size.width)
-                            }
-                            ForEach(Array(page.days.enumerated()), id: \.element) { index, day in
-                                eventColumn(day: day, width: dayWidth, index: index)
-                            }
-                            TimelineView(.periodic(from: .now, by: 30)) { context in
-                                clock(now: context.date, width: geometry.size.width, dayWidth: dayWidth)
+                                ZStack(alignment: .topLeading) {
+                                    nowAcross(now: context.date, width: geometry.size.width)
+                                    ForEach(Array(page.days.enumerated()), id: \.element) { index, day in
+                                        eventColumn(day: day, width: dayWidth, index: index)
+                                    }
+                                    clock(now: context.date, width: geometry.size.width, dayWidth: dayWidth)
+                                }
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                             }
                         }
                     }
@@ -183,17 +193,53 @@ struct CalendarTimeGrid: View {
 
     @ViewBuilder private func eventColumn(day: Date, width: CGFloat, index: Int) -> some View {
         let events = page.events(on: day).filter { !$0.allDay }
+        let byID = Dictionary(events.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let placements = CalendarTimeLayout.placements(events.map { .init(id: $0.id, start: $0.start, end: $0.end) }, on: day)
         ForEach(placements, id: \.id) { placement in
-            if let event = events.first(where: { $0.id == placement.id }) {
+            if let event = byID[placement.id] {
                 let lane = (width - 6) / CGFloat(placement.columns)
                 let height = max(18, CGFloat(placement.endMinute - placement.startMinute) / 60 * hourHeight - 2)
-                CalendarEventButton(event: event, selected: page.selectedEvent?.id == event.id,
-                                    style: height >= 38 ? .block : .line, fillsHeight: true) { page.select(event) }
+                CalendarGridEvent(page: page, event: event, block: height >= 38, dayWidth: width, hourHeight: hourHeight)
                     .frame(width: max(10, lane - (placement.column + 1 < placement.columns ? 2 : 0)), height: height)
                     .offset(x: rail + CGFloat(index) * width + 3 + CGFloat(placement.column) * lane,
                             y: top + CGFloat(placement.startMinute) / 60 * hourHeight + 1)
             }
         }
+    }
+}
+
+/// One event in the hourly grid. An event Jevcast can change moves when dragged: up and down by
+/// quarter hours, sideways by days. It is saved when dropped.
+private struct CalendarGridEvent: View {
+    @ObservedObject var page: CalendarPage
+    let event: CalendarPage.Event
+    let block: Bool
+    let dayWidth: CGFloat
+    let hourHeight: CGFloat
+    @State private var drag = CGSize.zero
+
+    var body: some View {
+        let button = CalendarEventButton(event: event, selected: page.selectedEvent?.id == event.id,
+                                         style: block ? .block : .line, fillsHeight: true) { page.select(event) }
+        if event.editable, page.writer != nil {
+            button.offset(snapped).zIndex(drag == .zero ? 0 : 1).opacity(drag == .zero ? 1 : 0.8)
+                .simultaneousGesture(DragGesture(minimumDistance: 6)
+                    .onChanged { drag = $0.translation }
+                    .onEnded { value in
+                        let move = Self.move(value.translation, dayWidth: dayWidth, hourHeight: hourHeight)
+                        drag = .zero
+                        page.move(event, minutes: move.minutes, days: move.days)
+                    })
+        } else { button }
+    }
+
+    /// The dragged distance as whole days and quarter hours.
+    static func move(_ translation: CGSize, dayWidth: CGFloat, hourHeight: CGFloat) -> (minutes: Int, days: Int) {
+        (CalendarEventDraft.snappedMinutes(Double(translation.height / hourHeight * 60)), Int((translation.width / max(1, dayWidth)).rounded()))
+    }
+
+    private var snapped: CGSize {
+        let move = Self.move(drag, dayWidth: dayWidth, hourHeight: hourHeight)
+        return CGSize(width: CGFloat(move.days) * dayWidth, height: CGFloat(move.minutes) / 60 * hourHeight)
     }
 }

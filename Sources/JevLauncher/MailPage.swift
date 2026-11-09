@@ -133,6 +133,10 @@ final class MailPage: ObservableObject, LauncherPage {
         let key = event.charactersIgnoringModifiers?.lowercased()
         if flags == .command, key == "z", mail.pendingSend != nil { mail.undoSend(); return true }
         if flags == .command, key == "n" { mail.compose(); return true }
+        if flags == .command, let key, let digit = Int(key), (1...Self.places.count).contains(digit) {
+            mail.place = Self.places[digit - 1]
+            return true
+        }
         guard mail.place != .outbox, mail.selected != nil else { return false }
         if key == " ", flags.isEmpty, mail.search.isEmpty {
             expanded.toggle()
@@ -142,16 +146,25 @@ final class MailPage: ObservableObject, LauncherPage {
         case ("r", .command): mail.reply(all: false)
         case ("r", [.command, .shift]): mail.reply(all: true)
         case ("f", [.command, .shift]): mail.forward()
+        // The same keys as Apple Mail: archive, flag, read or unread, junk. ⇧⌘M opens the folders to move to.
+        case ("a", [.command, .control]): mail.archive()
+        case ("l", [.command, .shift]): mail.toggleFlag()
+        case ("u", [.command, .shift]): mail.toggleRead()
+        case ("j", [.command, .shift]): mail.setJunk(!mail.selectedIsJunk)
+        case ("m", [.command, .shift]): MailMoveMenu.show(mail)
         default: return false
         }
         return true
     }
 
+    /// ⌘1 to ⌘7 open Inbox, All Mail, Unread, Flagged, Drafts, Sent, and Outbox.
+    private static let places: [MailModel.Place] = [.inbox, .allMail, .unread, .flagged, .drafts, .sent, .outbox]
+
     var footerHints: [(title: String, key: String)] {
         if accountDetailsID != nil || tool != nil { return [] }
         if isTyping { return [("Send", "⌘↩")] }
         guard mail?.place != .outbox, mail?.selected != nil else { return [("New", "⌘N")] }
-        return [("Reply", "⌘R"), ("Forward", "⇧⌘F"), (expanded ? "List" : "Expand", "Space"), ("New", "⌘N")]
+        return [("Reply", "⌘R"), ("Archive", "⌃⌘A"), ("Move", "⇧⌘M"), (expanded ? "List" : "Expand", "Space"), ("New", "⌘N")]
     }
     var backTitle: String? { accountDetailsID != nil || tool != nil ? "Mail" : isTyping ? "Discard" : nil }
     var footerChanges: AnyPublisher<Void, Never> {
@@ -193,6 +206,7 @@ private struct MailPageView: View {
             page.accountDetailsID = nil
             if !page.composing { DispatchQueue.main.async { page.focusFilter?() } }
         }
+        .modifier(MailFolderPrompt(model: mail))
         // Above the composer's footer while one is open, so the note never covers Send.
         .overlay(alignment: .bottom) { MailBanner(model: mail).padding(.bottom, page.composing ? 58 : 12) }
     }

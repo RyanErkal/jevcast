@@ -13,6 +13,11 @@ extension MailComposer {
             body = multipart("alternative", [plain, rich])
         }
         else if !inline.isEmpty { body = multipart("mixed", [plain] + inline.map(attachmentPart)) }
+        if let reply = message.calendarReply, message.html == nil, inline.isEmpty {
+            let calendar = Data(("Content-Type: text/calendar; charset=utf-8; method=REPLY\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n"
+                + quotedPrintable(crlf(reply)) + "\r\n").utf8)
+            body = multipart("alternative", [plain, calendar])
+        }
         let files = message.attachments.filter { $0.contentID == nil }
         if !files.isEmpty { body = multipart("mixed", [body] + files.map(attachmentPart)) }
         return body

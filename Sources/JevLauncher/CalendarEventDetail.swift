@@ -7,6 +7,10 @@ struct CalendarEventDetail: View {
     let close: () -> Void
     let open: (URL) -> Void
     let openCalendar: () -> Void
+    var edit: (() -> Void)?
+    var delete: (() -> Void)?
+    /// Opens the invitation in Mail, where it can be answered.
+    var respond: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -90,10 +94,26 @@ struct CalendarEventDetail: View {
                 }
                 .buttonStyle(.borderedProminent).controlSize(.large)
             }
-            Button(action: openCalendar) {
-                Text(event.localID == nil ? "Open in Google Calendar" : "Open in Calendar").frame(maxWidth: .infinity)
+            if event.editable, let edit, let delete {
+                HStack(spacing: 8) {
+                    Button(action: edit) { Label("Edit", systemImage: "pencil").frame(maxWidth: .infinity) }.help("Edit (⌘E)")
+                    Button(role: .destructive, action: delete) { Label("Delete", systemImage: "trash").frame(maxWidth: .infinity) }.help("Delete (⌫)")
+                }
+                .buttonStyle(.bordered).controlSize(event.meetingURL == nil ? .large : .regular)
+            } else if event.localID == nil, event.webURL != nil {
+                // An event read from Google is read only here. Its page in the browser can change it.
+                Button(action: openCalendar) { Text("Open in Google Calendar").frame(maxWidth: .infinity) }
+                    .buttonStyle(.bordered).controlSize(event.meetingURL == nil ? .large : .regular)
             }
-            .buttonStyle(.bordered).controlSize(event.meetingURL == nil ? .large : .regular)
+            if let answer = event.myResponse {
+                HStack(spacing: 8) {
+                    Image(systemName: answer == "accepted" ? "checkmark.circle.fill" : answer == "declined" ? "xmark.circle.fill" : "questionmark.circle")
+                        .foregroundStyle(answer == "accepted" ? Color.green : answer == "declined" ? Color.red : Color.secondary)
+                    Text("Your answer: " + response(answer)).font(.system(size: 12))
+                    Spacer(minLength: 4)
+                    if let respond { Button("Answer in Mail", action: respond).buttonStyle(.link).font(.system(size: 12)).help("Finds the invitation in Mail, where you can accept or decline") }
+                }
+            }
         }
     }
 

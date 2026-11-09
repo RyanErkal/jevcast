@@ -9,7 +9,7 @@ import SwiftUI
 final class CalendarPage: ObservableObject, LauncherPage {
     /// In ← and → order. Calendar opens on 3 Days.
     enum Mode: String, CaseIterable { case day = "Day", threeDays = "3 Days", week = "Week", month = "Month", list = "List" }
-    enum Source: String { case mac = "On This Mac", google = "Google" }
+    enum Source: String, CaseIterable { case all = "All Calendars", mac = "On This Mac", google = "Google" }
     struct Event: Identifiable, Equatable, Sendable {
         let id: String
         let title: String
@@ -27,28 +27,46 @@ final class CalendarPage: ObservableObject, LauncherPage {
         var webURL: URL?
         var localID: String?
         var timeZone: String?
+        /// True when Jevcast can change or delete the event: it is on a calendar of this Mac that
+        /// allows changes, and you are its organizer or it has no guests.
+        var editable = false
+        var recurring = false
+        var calendarID: String?
+        /// Your own answer to an invitation: accepted, declined, tentative, or needsAction.
+        var myResponse: String?
     }
 
     let id = ViewID.calendar
     private let list: SourcePage
     /// False for snapshot runs, which never read real events.
-    private let readsEvents: Bool
+    let readsEvents: Bool
     @Published private(set) var mode: Mode = .threeDays
     @Published private(set) var source: Source = .mac
     @Published private(set) var selectedEvent: Event?
     @Published private(set) var loading = false
     @Published private(set) var errorMessage: String?
+    /// A problem with one source of a merged view. The other sources still show.
+    @Published private(set) var notice: String?
     let google: GoogleCalendarAccount?
-    private let defaults: UserDefaults?
+    let accounts: GoogleCalendarAccounts?
+    let defaults: UserDefaults?
     private let hideLauncher: () -> Void
     private let openSignIn: @MainActor (GoogleCalendarAccount) -> Void
+    /// Opens Mail with a search, for answering an invitation where the invitation is.
+    let openMail: ((String) -> Void)?
+    let writer: CalendarWriting?
     /// Any day inside the month or week on screen.
     @Published private(set) var anchor = Date()
     /// The days on screen and each day's events, worked out once per change, not per redraw.
     @Published private(set) var days: [Date] = []
     @Published private(set) var byDay: [Date: [Event]] = [:]
     @Published private(set) var problem: SourceProblem?
-    private var events: [Event] = []
+    /// The open event editor, for a new event or a change.
+    @Published var editing: CalendarEditing?
+    /// An event waiting for Delete to be confirmed.
+    @Published var deleting: Event?
+    @Published var editProblem: String?
+    var events: [Event] = []
     private var filterText = ""
     private var work: Task<Void, Never>?
     private var fetchTask: Task<[Event], Never>?
@@ -56,46 +74,86 @@ final class CalendarPage: ObservableObject, LauncherPage {
     private var changeWork: Task<Void, Never>?
     /// Fetched windows, newest last, kept across openings so the view shows at once. Each window covers
     /// the month on screen and the months either side, so ↑ and ↓ and a week inside it need no fetch.
-    /// Cleared when Calendar changes.
-    private static var cache: [(range: DateInterval, events: [Event])] = []
+    /// Cleared when Calendar changes. Google events are read again once they are two minutes old.
+    private struct Window { let key: String; let range: DateInterval; let events: [Event]; let at: Date }
+    private static var cache: [Window] = []
     private static var cacheObserver: NSObjectProtocol?
     private var listOpened = false
     private var calendar: Calendar { Calendar.current }
+    var usesMac: Bool { source != .google }
+    var usesGoogle: Bool { source != .mac }
+    var googleAccounts: [GoogleCalendarAccount] { accounts?.all ?? [] }
+    var connectedGoogle: [GoogleCalendarAccount] { googleAccounts.filter(\.connected) }
 
     init(list: SourcePage, readsEvents: Bool, google: GoogleCalendarAccount? = nil, defaults: UserDefaults? = nil,
          hideLauncher: @escaping () -> Void = {},
-         openSignIn: @escaping @MainActor (GoogleCalendarAccount) -> Void = { CalendarGoogleSignInWindow.shared.show(account: $0) }) {
+         openSignIn: @escaping @MainActor (GoogleCalendarAccount) -> Void = { CalendarGoogleSignInWindow.shared.show(account: $0) },
+         accounts: GoogleCalendarAccounts? = nil, writer: CalendarWriting? = nil, openMail: ((String) -> Void)? = nil) {
         self.list = list; self.readsEvents = readsEvents
         self.google = google ?? (readsEvents ? .shared : nil)
         self.defaults = defaults ?? (readsEvents ? .standard : nil)
-        self.hideLauncher = hideLauncher; self.openSignIn = openSignIn
-        if self.google?.connected == true, self.defaults?.string(forKey: "calendarSource") == Source.google.rawValue { source = .google }
+        // An injected account stands alone. The app's own account brings the further accounts with it.
+        if let accounts { self.accounts = accounts }
+        else if let google { self.accounts = GoogleCalendarAccounts(primary: google, defaults: nil, make: { _ in google }) }
+        else { self.accounts = readsEvents ? .shared : nil }
+        self.writer = writer ?? (readsEvents ? EventKitCalendarWriter() : nil)
+        self.hideLauncher = hideLauncher; self.openSignIn = openSignIn; self.openMail = openMail
+        let stored = self.defaults?.string(forKey: "calendarSource").flatMap(Source.init(rawValue:))
+        if let stored, stored == .mac || !connectedGoogle.isEmpty { source = stored }
     }
 
     var canPopOut: Bool { source == .google || list.canPopOut }
-    var openTitle: String { selectedEvent.map { $0.meetingURL == nil ? "Open in Calendar" : "Join Call" } ?? "Details" }
-    var footerChanges: AnyPublisher<Void, Never> { $selectedEvent.map { _ in () }.eraseToAnyPublisher() }
+    var isTyping: Bool { editing != nil }
+    var openTitle: String {
+        guard let event = selectedEvent else { return "Details" }
+        if event.meetingURL != nil { return "Join Call" }
+        return event.editable ? "Edit" : "Open"
+    }
+    var backTitle: String? { editing != nil ? "Cancel" : nil }
+    var footerHints: [(title: String, key: String)] {
+        if editing != nil { return [("Save", "⌘↩")] }
+        var hints: [(title: String, key: String)] = []
+        if let event = selectedEvent {
+            hints.append(("Next event", "↓"))
+            if event.editable { hints += [("Edit", "⌘E"), ("Delete", "⌫")] }
+        }
+        if writer != nil { hints.append(("New event", "⌘N")) }
+        return hints + [("Today", "⌘T")]
+    }
+    var footerChanges: AnyPublisher<Void, Never> {
+        $selectedEvent.map { _ in () }.merge(with: $editing.map { _ in () }).eraseToAnyPublisher()
+    }
     func popOut() {
         guard readsEvents else { return }
         if source == .google { Frontmost.open(URL(string: "https://calendar.google.com/")!) } else { list.popOut() }
     }
-    func select(_ event: Event) { selectedEvent = event }
-    func signIn() {
-        guard let google else { return }
+    func select(_ event: Event) { if editing == nil { selectedEvent = event } }
+    /// Signs in the first free account, or one more account when every account is in use.
+    func signIn(_ account: GoogleCalendarAccount? = nil) {
+        guard let target = account ?? accounts?.accountForSignIn() ?? google else { return }
         // Hide first, so app activation focuses the sign-in window instead of the launcher.
         hideLauncher()
-        openSignIn(google)
+        openSignIn(target)
     }
     func clearSelection() { selectedEvent = nil }
     func use(_ next: Source) {
         source = next; selectedEvent = nil
         defaults?.set(next.rawValue, forKey: "calendarSource")
-        events = []; byDay = [:]; problem = nil; errorMessage = nil
+        events = []; byDay = [:]; problem = nil; errorMessage = nil; notice = nil
         if next == .mac, mode == .list, !listOpened { listOpened = true; list.opened() }
         load()
     }
+    func disconnect(_ account: GoogleCalendarAccount) throws {
+        if let accounts { try accounts.disconnect(account) } else { try account.disconnect() }
+        Self.cache = []
+        if connectedGoogle.isEmpty { use(.mac) } else { load() }
+    }
     func refresh() { Self.cache = []; load(refreshGoogle: true) }
-    func showDay(_ day: Date) { anchor = day; mode = .day; selectedEvent = nil; load() }
+    func showDay(_ day: Date) { anchor = day; setStoredMode(.day); selectedEvent = nil; load() }
+    private func setStoredMode(_ next: Mode) {
+        mode = next
+        defaults?.set(next.rawValue, forKey: "calendarMode")
+    }
     var displayedEvents: [Event] {
         var seen = Set<String>()
         return days.flatMap { events(on: $0) }.filter { seen.insert($0.id).inserted }
@@ -111,7 +169,11 @@ final class CalendarPage: ObservableObject, LauncherPage {
     }
 
     func opened() {
-        mode = .threeDays; anchor = Date(); listOpened = false; selectedEvent = nil
+        // The view you last used comes back. Calendar always opens on today.
+        mode = defaults?.string(forKey: "calendarMode").flatMap(Mode.init(rawValue:)) ?? .threeDays
+        anchor = Date(); listOpened = false; selectedEvent = nil; editing = nil; deleting = nil; editProblem = nil
+        accounts?.prune()
+        if mode == .list, source == .mac { listOpened = true; list.opened() }
         if readsEvents { Self.watchStore() }
         load()
         // Changes made in Calendar show while the view is open. A burst of changes reloads once.
@@ -122,7 +184,7 @@ final class CalendarPage: ObservableObject, LauncherPage {
                 self.changeWork = Task { @MainActor [weak self] in
                     try? await Task.sleep(nanoseconds: 400_000_000)
                     guard !Task.isCancelled, let self else { return }
-                    Self.cache = []; if self.source == .mac { self.load() }
+                    Self.cache = []; if self.usesMac { self.load() }
                 }
             }
         }
@@ -139,33 +201,58 @@ final class CalendarPage: ObservableObject, LauncherPage {
         guard text != filterText else { return }
         filterText = text
         list.filter(text)
-        if mode != .list || source == .google { group() }
+        if mode != .list || source != .mac { group() }
     }
 
     func handle(_ key: PageKey) -> Bool {
+        if deleting != nil { return true }
         switch (mode, key) {
         case (_, .left): cycle(-1); return true
         case (_, .right): cycle(1); return true
         case (.list, _) where source == .mac: return list.handle(key)
-        case (_, .up): step(-1); return true
-        case (_, .down): step(1); return true
+        // With an event selected, ↑ and ↓ go to the event before and after it.
+        case (_, .up): if selectedEvent != nil { selectNeighbour(-1) } else { step(-1) }; return true
+        case (_, .down): if selectedEvent != nil { selectNeighbour(1) } else { step(1) }; return true
         case (_, .open):
             if let event = selectedEvent {
-                if let url = event.meetingURL { open(url) } else { openInCalendar(event) }
+                if let url = event.meetingURL { open(url) } else if event.editable { beginEdit(event) } else { openInCalendar(event) }
             }
             else if let event = events(on: calendar.startOfDay(for: anchor)).first ?? displayedEvents.first { select(event) }
             return true
-        case (_, .delete): return true
+        case (_, .delete):
+            if let event = selectedEvent, event.editable { deleting = event }
+            return true
         }
     }
+    /// ⌘N writes a new event, ⌘E changes the selected one, and ⌘T returns to today.
+    func handleEvent(_ event: NSEvent) -> Bool {
+        guard editing == nil, deleting == nil, mode != .list || source != .mac else { return false }
+        let flags = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        guard flags == .command, let key = event.charactersIgnoringModifiers?.lowercased() else { return false }
+        switch key {
+        case "n": beginCreate(); return writer != nil
+        case "e": if let selected = selectedEvent, selected.editable { beginEdit(selected); return true }; return false
+        case "t": today(); return true
+        default: return false
+        }
+    }
+    /// The event before or after the selected one, in time order, among the days on screen.
+    private func selectNeighbour(_ delta: Int) {
+        let all = displayedEvents.sorted { ($0.start, $0.id) < ($1.start, $1.id) }
+        guard let current = selectedEvent, let index = all.firstIndex(where: { $0.id == current.id }) else { selectedEvent = all.first; return }
+        let next = index + delta
+        if all.indices.contains(next) { selectedEvent = all[next] }
+    }
     func back() -> Bool {
+        if deleting != nil { deleting = nil; return true }
+        if editing != nil { cancelEdit(); return true }
         if selectedEvent != nil { selectedEvent = nil; return true }
         return mode == .list && source == .mac ? list.back() : false
     }
 
     func setMode(_ next: Mode) {
         guard next != mode else { return }
-        mode = next; selectedEvent = nil
+        setStoredMode(next); selectedEvent = nil
         // The list loads its rows the first time it shows, not while the grid is on screen.
         if next == .list, source == .mac, !listOpened { listOpened = true; list.opened() }
         load()
@@ -188,6 +275,8 @@ final class CalendarPage: ObservableObject, LauncherPage {
         load()
     }
     func today() { anchor = Date(); selectedEvent = nil; load() }
+    /// Shows `day` in the view already on screen.
+    func showDayKeepingMode(_ day: Date) { anchor = day; selectedEvent = nil; load() }
 
     /// The days on screen: whole weeks covering the month, the one week, or days from the anchor.
     private func computeDays() -> [Date] {
@@ -222,11 +311,13 @@ final class CalendarPage: ObservableObject, LauncherPage {
     func events(on day: Date) -> [Event] { byDay[day] ?? [] }
     /// Puts each event on every day it covers, with the filter applied. One pass over the events.
     private func group() {
-        let words = filterText.trimmingCharacters(in: .whitespaces).lowercased()
+        let words = filterText.trimmingCharacters(in: .whitespaces)
         var result: [Date: [Event]] = [:]
         guard let first = days.first, let last = days.last else { byDay = [:]; return }
         let calendar = calendar
-        for event in events where words.isEmpty || event.title.lowercased().contains(words) {
+        // The filter reads the title, place, calendar, people, and notes.
+        for event in events where words.isEmpty || CalendarEventFilter.matches(words, fields:
+            [event.title, event.location, event.calendarName, event.organizer, event.notes] + event.guests.map(\.name)) {
             var day = max(calendar.startOfDay(for: event.start), first)
             // An event that ends exactly at midnight does not show on the next day.
             let end = event.end > event.start ? event.end : event.start.addingTimeInterval(1)
@@ -237,41 +328,88 @@ final class CalendarPage: ObservableObject, LauncherPage {
             }
         }
         byDay = result
+        // The details follow the event when it changes, and close when it is gone.
+        if let selected = selectedEvent, editing == nil {
+            selectedEvent = events.first { $0.id == selected.id }
+                ?? events.first { $0.localID != nil && $0.localID == selected.localID && $0.start == selected.start }
+        }
     }
     func inMonth(_ day: Date) -> Bool { mode != .month || calendar.isDate(day, equalTo: anchor, toGranularity: .month) }
+
+    func reload() { load() }
+
+    private var cacheKey: String {
+        let google = usesGoogle ? connectedGoogle.map { $0.slot + "=" + $0.enabledIDs.sorted().joined(separator: ",") }.joined(separator: ";") : ""
+        return source.rawValue + "|" + google
+    }
 
     private func load(refreshGoogle: Bool = false) {
         work?.cancel(); fetchTask?.cancel(); loading = false
         errorMessage = nil; problem = nil
-        guard mode != .list || source == .google else { return }
+        guard mode != .list || source != .mac else { return }
         days = computeDays()
         guard readsEvents else { events = Self.demoEvents(around: anchor); group(); return }
-        if source == .google { loadGoogle(refreshCalendars: refreshGoogle); return }
-        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else {
-            events = []; group()
-            problem = SourceProblem(text: "Allow Calendar access to see your events.", access: .calendars)
+        let macAllowed = EKEventStore.authorizationStatus(for: .event) == .fullAccess
+        let readsMac = usesMac && macAllowed, google = usesGoogle ? connectedGoogle : []
+        if !readsMac && google.isEmpty {
+            events = []; group(); notice = nil
+            if usesMac && !macAllowed { problem = SourceProblem(text: "Allow Calendar access to see your events.", access: .calendars) }
+            else { errorMessage = GoogleCalendarError.signInRequired.localizedDescription }
             return
         }
-        problem = nil
         guard let start = days.first, let last = days.last, let end = calendar.date(byAdding: .day, value: 1, to: last) else { return }
         let range = DateInterval(start: start, end: end)
-        let window = fetchWindow(covering: range)
-        work?.cancel(); fetchTask?.cancel()
-        let shown = Self.cached(range)
+        let window = fetchWindow(covering: range), key = cacheKey
+        // A cached range shows at once. The wider window is fetched in the background when missing or
+        // old, so the next step is cached too. On a miss the old events stay until the fetch arrives.
+        let shown = Self.cached(range, key: key)
         if let shown { events = shown; group() }
-        // A cached range shows at once. The wider window is fetched in the background when missing,
-        // so the next step is cached too. On a miss the old events stay until the fetch arrives.
-        if shown != nil, Self.cached(window) != nil { return }
+        let maxAge: TimeInterval? = google.isEmpty ? nil : 120
+        if shown != nil, !refreshGoogle, Self.cached(window, key: key, maxAge: maxAge) != nil { return }
+        if shown == nil, !google.isEmpty { loading = true }
         nonisolated(unsafe) let store = Permissions.events
-        let task = Task.detached(priority: shown == nil ? .userInitiated : .utility) { Self.fetch(store, window) }
-        fetchTask = task
+        let priority: TaskPriority = shown == nil ? .userInitiated : .utility
+        let macTask: Task<[Event], Never>? = readsMac ? Task.detached(priority: priority) { Self.fetch(store, window) } : nil
+        fetchTask = macTask
         work = Task { @MainActor [weak self] in
-            let found = await task.value
+            var found = await macTask?.value ?? []
+            var failure: String?
+            let sameAsMac = Set(found.map(Self.duplicateKey))
+            await withTaskGroup(of: (Int, Result<[Event], Error>).self) { group in
+                for (index, account) in google.enumerated() {
+                    group.addTask { @MainActor in
+                        do { return (index, .success(try await Self.googleEvents(account, window, refreshCalendars: refreshGoogle))) }
+                        catch { return (index, .failure(error)) }
+                    }
+                }
+                var parts: [(Int, [Event])] = []
+                for await (index, result) in group {
+                    switch result {
+                    case .success(let events): parts.append((index, events))
+                    case .failure(let error): if !(error is CancellationError) { failure = error.localizedDescription }
+                    }
+                }
+                // The copy on this Mac wins over the same event read from Google, because it can be changed here.
+                for (_, events) in parts.sorted(by: { $0.0 < $1.0 }) { found += events.filter { !sameAsMac.contains(Self.duplicateKey($0)) } }
+            }
             guard !Task.isCancelled, let self else { return }
-            Self.store(window, found)
-            let visible = Self.cached(range) ?? found
+            self.loading = false
+            if let failure, !readsMac, found.isEmpty, shown == nil {
+                self.events = []; self.group(); self.errorMessage = failure
+                return
+            }
+            self.notice = failure
+            found.sort { ($0.allDay ? 0 : 1, $0.start, $0.id) < ($1.allDay ? 0 : 1, $1.start, $1.id) }
+            // A failed source keeps its last good events on screen and is tried again at the next step.
+            if failure == nil { Self.store(window, found, key: key) }
+            else if shown != nil { return }
+            let visible = failure == nil ? Self.cached(range, key: key) ?? found : found.filter { $0.start < range.end && $0.end > range.start }
             self.events = visible; self.group()
         }
+    }
+    /// One event read twice: from this Mac's calendar and from Google directly.
+    nonisolated private static func duplicateKey(_ event: Event) -> String {
+        "\(event.title)|\(event.start.timeIntervalSince1970)|\(event.end.timeIntervalSince1970)|\(event.allDay)"
     }
     /// The month on screen with a month either side, in whole weeks.
     private func fetchWindow(covering range: DateInterval) -> DateInterval {
@@ -283,16 +421,22 @@ final class CalendarPage: ObservableObject, LauncherPage {
         return DateInterval(start: min(first.start, range.start), end: max(last.end, range.end))
     }
     /// Events in `range` from a cached window that covers it, in the fetched order.
-    private static func cached(_ range: DateInterval) -> [Event]? {
-        guard let hit = cache.last(where: { $0.range.start <= range.start && $0.range.end >= range.end }) else { return nil }
+    private static func cached(_ range: DateInterval, key: String, maxAge: TimeInterval? = nil) -> [Event]? {
+        let now = Date()
+        guard let hit = cache.last(where: { entry in
+            entry.key == key && entry.range.start <= range.start && entry.range.end >= range.end
+                && (maxAge == nil || now.timeIntervalSince(entry.at) < maxAge!)
+        }) else { return nil }
         if hit.range == range { return hit.events }
         return hit.events.filter { $0.start < range.end && ($0.end > range.start || $0.start >= range.start) }
     }
-    private static func store(_ range: DateInterval, _ events: [Event]) {
-        cache.removeAll { $0.range == range }
-        cache.append((range, events))
-        if cache.count > 6 { cache.removeFirst(cache.count - 6) }
+    private static func store(_ range: DateInterval, _ events: [Event], key: String) {
+        cache.removeAll { $0.key == key && $0.range == range }
+        cache.append(Window(key: key, range: range, events: events, at: Date()))
+        if cache.count > 8 { cache.removeFirst(cache.count - 8) }
     }
+    /// Forgets fetched events, so the next load reads them again. Used after a change made here.
+    static func clearCache() { cache = [] }
     /// Clears the cache when Calendar changes, also while the view is closed.
     private static func watchStore() {
         guard cacheObserver == nil else { return }
@@ -318,7 +462,11 @@ final class CalendarPage: ObservableObject, LauncherPage {
                          organizer: event.organizer?.name ?? event.organizer?.url.absoluteString.replacingOccurrences(of: "mailto:", with: "") ?? "",
                          guests: (event.attendees ?? []).map { CalendarGuest(name: $0.name ?? $0.url.absoluteString.replacingOccurrences(of: "mailto:", with: ""), response: Self.response($0.participantStatus)) },
                          meetingURL: MeetingLink.find(in: [event.url?.absoluteString, event.location, event.notes]),
-                         webURL: CalendarLinks.web(event.url?.absoluteString), localID: event.eventIdentifier, timeZone: event.timeZone?.identifier)
+                         webURL: CalendarLinks.web(event.url?.absoluteString), localID: event.eventIdentifier, timeZone: event.timeZone?.identifier,
+                         editable: event.eventIdentifier != nil && event.calendar?.allowsContentModifications == true
+                             && (event.organizer == nil || event.organizer?.isCurrentUser == true),
+                         recurring: event.hasRecurrenceRules, calendarID: event.calendar?.calendarIdentifier,
+                         myResponse: (event.attendees ?? []).first(where: \.isCurrentUser).map { Self.response($0.participantStatus) })
         }
     }
     /// The calendar's own colour. `cgColor` keeps it in its colour space; a missing or
@@ -364,28 +512,19 @@ final class CalendarPage: ObservableObject, LauncherPage {
     }
 
     func content() -> AnyView { AnyView(CalendarPageView(page: self, list: list)) }
+    func setEvents(_ next: [Event]) { events = next; group() }
 
-    private func loadGoogle(refreshCalendars: Bool) {
-        guard let google, google.connected else { events = []; group(); errorMessage = GoogleCalendarError.signInRequired.localizedDescription; return }
-        guard let start = days.first, let last = days.last, let end = calendar.date(byAdding: .day, value: 1, to: last) else { return }
-        let range = DateInterval(start: start, end: end)
-        events = []; group(); loading = true
-        work = Task { @MainActor [weak self] in
-            do {
-                let found = try await google.load(range, refreshCalendars: refreshCalendars)
-                guard !Task.isCancelled, let self else { return }
-                let calendars = Dictionary(uniqueKeysWithValues: google.calendars.map { ($0.id, $0) })
-                self.events = found.map { event in
-                    let info = calendars[event.calendarID]
-                    return Event(id: event.id, title: event.title, start: event.start, end: event.end, allDay: event.allDay,
-                        color: Self.googleColor(info?.backgroundColor), notes: event.notes, location: event.location, calendarName: info?.summary ?? "Google Calendar",
-                        organizer: event.organizer, guests: event.guests, attachments: event.attachments, meetingURL: event.meetingURL, webURL: event.webURL, timeZone: event.timeZone)
-                }
-                self.group(); self.loading = false
-            } catch {
-                guard !Task.isCancelled, let self else { return }
-                self.loading = false; self.errorMessage = error.localizedDescription
-            }
+    /// One Google account's events as calendar events. The ID carries the account, so two accounts never collide.
+    private static func googleEvents(_ account: GoogleCalendarAccount, _ range: DateInterval, refreshCalendars: Bool) async throws -> [Event] {
+        let found = try await account.load(range, refreshCalendars: refreshCalendars)
+        let calendars = Dictionary(account.calendars.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let prefix = account.slot.isEmpty ? "" : account.slot + ":"
+        return found.map { event in
+            let info = calendars[event.calendarID]
+            return Event(id: prefix + event.id, title: event.title, start: event.start, end: event.end, allDay: event.allDay,
+                color: googleColor(info?.backgroundColor), notes: event.notes, location: event.location, calendarName: info?.summary ?? "Google Calendar",
+                organizer: event.organizer, guests: event.guests, attachments: event.attachments, meetingURL: event.meetingURL, webURL: event.webURL,
+                timeZone: event.timeZone, myResponse: event.myResponse)
         }
     }
 

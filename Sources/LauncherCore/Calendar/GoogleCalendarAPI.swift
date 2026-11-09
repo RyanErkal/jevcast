@@ -12,14 +12,19 @@ public struct GoogleCalendarAPI: Sendable {
               !CommandLine.arguments.contains("--snapshot-ui") else { throw GoogleCalendarError.offline }
     }
 
+    /// One session for every Calendar request, so the connection to Google is reused. It keeps no
+    /// cookies or cache on disk and never follows a redirect.
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 25; config.timeoutIntervalForResource = 40
+        config.httpMaximumConnectionsPerHost = 6
+        return URLSession(configuration: config, delegate: CalendarNoRedirect(), delegateQueue: nil)
+    }()
+
     public static let network: Request = { request in
         try requireOnline()
         guard let url = request.url, url.scheme == "https", url.host == "www.googleapis.com", url.port == nil,
               url.path.hasPrefix("/calendar/v3/"), url.user == nil, url.password == nil, request.httpMethod == "GET" else { throw GoogleCalendarError.invalidResponse }
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 25; config.timeoutIntervalForResource = 40
-        let session = URLSession(configuration: config, delegate: CalendarNoRedirect(), delegateQueue: nil)
-        defer { session.invalidateAndCancel() }
         do {
             let (data, response) = try await session.data(for: request)
             guard let response = response as? HTTPURLResponse else { throw GoogleCalendarError.invalidResponse }
@@ -44,36 +49,56 @@ public struct GoogleCalendarAPI: Sendable {
         return result.filter { $0.hidden != true }
     }
 
+    /// Calendars are read side by side, at most six at a time, so many calendars cost about one request's wait.
     public func events(in range: DateInterval, calendars: [GoogleCalendarInfo], token: String, displayCalendar: Calendar = .current) async throws -> [GoogleCalendarEvent] {
-        struct Page: Decodable { let items: [GoogleEventPayload]?; let nextPageToken: String? }
         guard range.end > range.start, calendars.count <= 100 else { throw GoogleCalendarError.tooManyEvents }
         let formatter = ISO8601DateFormatter()
-        var result: [GoogleCalendarEvent] = []
         let query: [URLQueryItem] = [
             .init(name: "timeMin", value: formatter.string(from: range.start)), .init(name: "timeMax", value: formatter.string(from: range.end)),
             .init(name: "singleEvents", value: "true"), .init(name: "orderBy", value: "startTime"), .init(name: "showDeleted", value: "false"),
             .init(name: "maxResults", value: "2500"), .init(name: "timeZone", value: displayCalendar.timeZone.identifier)
         ]
-        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
-        for calendar in calendars {
-            guard !calendar.id.isEmpty, let encoded = calendar.id.addingPercentEncoding(withAllowedCharacters: allowed) else { throw GoogleCalendarError.invalidResponse }
-            var next: String?, seen = Set<String>(), pages = 0
-            repeat {
-                try Task.checkCancellation()
-                let page: Page = try await get(path: "calendars/" + encoded + "/events", query: query, page: next, token: token)
-                for payload in page.items ?? [] {
-                    if let event = try payload.event(calendar: calendar, displayCalendar: displayCalendar), event.start < range.end, event.end > range.start { result.append(event) }
+        guard calendars.allSatisfy({ !$0.id.isEmpty }) else { throw GoogleCalendarError.invalidResponse }
+        let result = try await withThrowingTaskGroup(of: [GoogleCalendarEvent].self) { group in
+            var all: [GoogleCalendarEvent] = [], next = 0
+            while next < min(6, calendars.count) {
+                let calendar = calendars[next]; next += 1
+                group.addTask { try await self.events(of: calendar, in: range, query: query, token: token, displayCalendar: displayCalendar) }
+            }
+            while let part = try await group.next() {
+                all += part
+                guard all.count <= 20_000 else { throw GoogleCalendarError.tooManyEvents }
+                if next < calendars.count {
+                    let calendar = calendars[next]; next += 1
+                    group.addTask { try await self.events(of: calendar, in: range, query: query, token: token, displayCalendar: displayCalendar) }
                 }
-                pages += 1
-                guard result.count <= 20_000, pages <= 50 else { throw GoogleCalendarError.tooManyEvents }
-                next = page.nextPageToken
-                if let next, !seen.insert(next).inserted { throw GoogleCalendarError.invalidResponse }
-            } while next != nil
+            }
+            return all
         }
         // A recurring instance has its own Google ID. A duplicate page is not another event.
         var unique: [String: GoogleCalendarEvent] = [:]
         for event in result { unique[event.id] = event }
         return unique.values.sorted { ($0.start, $0.id) < ($1.start, $1.id) }
+    }
+
+    private func events(of calendar: GoogleCalendarInfo, in range: DateInterval, query: [URLQueryItem], token: String,
+                        displayCalendar: Calendar) async throws -> [GoogleCalendarEvent] {
+        struct Page: Decodable { let items: [GoogleEventPayload]?; let nextPageToken: String? }
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
+        guard let encoded = calendar.id.addingPercentEncoding(withAllowedCharacters: allowed) else { throw GoogleCalendarError.invalidResponse }
+        var result: [GoogleCalendarEvent] = [], next: String?, seen = Set<String>(), pages = 0
+        repeat {
+            try Task.checkCancellation()
+            let page: Page = try await get(path: "calendars/" + encoded + "/events", query: query, page: next, token: token)
+            for payload in page.items ?? [] {
+                if let event = try payload.event(calendar: calendar, displayCalendar: displayCalendar), event.start < range.end, event.end > range.start { result.append(event) }
+            }
+            pages += 1
+            guard result.count <= 20_000, pages <= 50 else { throw GoogleCalendarError.tooManyEvents }
+            next = page.nextPageToken
+            if let next, !seen.insert(next).inserted { throw GoogleCalendarError.invalidResponse }
+        } while next != nil
+        return result
     }
 
     private func get<T: Decodable>(path: String, query: [URLQueryItem], page: String?, token: String) async throws -> T {

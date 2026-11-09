@@ -52,6 +52,8 @@ public struct GoogleCalendarEvent: Equatable, Identifiable, Sendable {
     public let meetingURL: URL?
     public let webURL: URL?
     public let timeZone: String?
+    /// Your own answer when you are a guest: accepted, declined, tentative, or needsAction.
+    public var myResponse: String? = nil
 }
 
 public enum CalendarLinks {
@@ -121,7 +123,8 @@ struct GoogleEventPayload: Decodable {
             organizer: organizer?.displayName ?? organizer?.email ?? "",
             guests: (attendees ?? []).map { CalendarGuest(name: $0.displayName ?? $0.email ?? "Guest", response: $0.responseStatus ?? "needsAction") },
             attachments: links,
-            meetingURL: meeting.flatMap { CalendarLinks.web($0.absoluteString) }, webURL: CalendarLinks.web(htmlLink), timeZone: start.timeZone ?? calendar.timeZone)
+            meetingURL: meeting.flatMap { CalendarLinks.web($0.absoluteString) }, webURL: CalendarLinks.web(htmlLink), timeZone: start.timeZone ?? calendar.timeZone,
+            myResponse: (attendees ?? []).first(where: { $0.isCurrentUser == true })?.responseStatus)
     }
 
     private static func date(_ moment: Moment, allDay: Bool, calendar: Calendar, zone: String?) -> Date? {

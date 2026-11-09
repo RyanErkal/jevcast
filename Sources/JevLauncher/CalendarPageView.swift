@@ -239,6 +239,7 @@ private struct CalendarAccountControls: View {
                     }
                 }
                 Divider()
+                Toggle("Alert Before Meetings", isOn: Binding(get: { CalendarAlertCenter.shared.enabled }, set: { CalendarAlertCenter.shared.enabled = $0 }))
                 Button(connected.isEmpty ? "Connect Google Calendar…" : "Add Another Google Account…", action: signIn)
             } label: { Label(title(connected), systemImage: "calendar") }
                 .fixedSize().menuStyle(.borderlessButton).help("Choose calendars")

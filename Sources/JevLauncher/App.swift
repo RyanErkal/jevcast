@@ -226,6 +226,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         NativeMailCenter.shared.start()
         MailFeatureCenter.shared.openMessage = { [weak self] in self?.showMail(select: $0) }
         MailFeatureCenter.shared.start(model: mailModel)
+        CalendarAlertCenter.shared.openCalendar = { [weak self] in self?.showView(.calendar) }
+        if !MailIOPolicy.isOffline { CalendarAlertCenter.shared.start() }
         // The runner opened the app for an alert: AutomationCenter shows it; nothing else opens.
         if alertLaunch { return }
         if CommandLine.arguments.contains("--terminal") { showView(.terminal, fromHyper: true) }
@@ -539,11 +541,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         automations.openWindow = { [weak self] automationID, runID in self?.showAutomations(automationID: automationID, runID: runID) }
         automations.openSettings = { [weak self] in self?.showSettings(tab: .automations) }
         NotchAlertController.shared.stillApplies = { [weak self] alert in
-            alert.id.hasPrefix(MailNotificationCenter.alertPrefix) || (self?.automations.alertStillApplies(alert) ?? false)
+            alert.id.hasPrefix(MailNotificationCenter.alertPrefix) || alert.id.hasPrefix(CalendarAlertCenter.alertPrefix)
+                || (self?.automations.alertStillApplies(alert) ?? false)
         }
         NotchAlertController.shared.onPresented = { [weak self] alert in self?.automations.alertPresented(alert) }
         NotchAlertController.shared.onAction = { [weak self] alert, action in
             if MailFeatureCenter.shared.notifications.handle(alert: alert, action: action) { return }
+            if CalendarAlertCenter.shared.handle(alert: alert, action: action) { return }
             let id = alert.id
             guard let self, !self.automations.handleAlertAction(id, action, approval: alert.approvalManifest) else { return }
             guard id.hasPrefix("brief:"), action == "open" else { return }

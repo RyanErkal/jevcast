@@ -445,7 +445,7 @@ final class CalendarPage: ObservableObject, LauncherPage {
         }
     }
     /// Reads EventKit off the main thread. Cancelled events and declined invitations are left out.
-    nonisolated private static func fetch(_ store: EKEventStore, _ range: DateInterval) -> [Event] {
+    nonisolated static func fetch(_ store: EKEventStore, _ range: DateInterval) -> [Event] {
         let predicate = store.predicateForEvents(withStart: range.start, end: range.end, calendars: nil)
         var colours: [String: Color] = [:]
         return store.events(matching: predicate).filter { event in
@@ -515,7 +515,7 @@ final class CalendarPage: ObservableObject, LauncherPage {
     func setEvents(_ next: [Event]) { events = next; group() }
 
     /// One Google account's events as calendar events. The ID carries the account, so two accounts never collide.
-    private static func googleEvents(_ account: GoogleCalendarAccount, _ range: DateInterval, refreshCalendars: Bool) async throws -> [Event] {
+    static func googleEvents(_ account: GoogleCalendarAccount, _ range: DateInterval, refreshCalendars: Bool) async throws -> [Event] {
         let found = try await account.load(range, refreshCalendars: refreshCalendars)
         let calendars = Dictionary(account.calendars.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let prefix = account.slot.isEmpty ? "" : account.slot + ":"

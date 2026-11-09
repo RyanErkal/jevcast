@@ -1,3 +1,4 @@
+import Network
 import AppKit
 import LauncherCore
 
@@ -54,6 +55,10 @@ final class NativeMailCenter: ObservableObject {
     private var engine: NativeMailEngine?
     private var offlineStore: NativeMailStore?
     private var wakeObserver: NSObjectProtocol?
+    private var pathMonitor: NWPathMonitor?
+    private var lastRoute: String?
+    private var sawRoute = false
+    private var networkWork: Task<Void, Never>?
 
     init(backend: MailBackend = .current, accounts: [NativeMailAccount] = [], defaults: UserDefaults? = .standard) {
         self.backend = backend; self.accounts = accounts; self.defaults = defaults
@@ -126,9 +131,38 @@ final class NativeMailCenter: ObservableObject {
                 Task { await engine.wake() }
             }
         }
+        watchNetwork()
         guard Self.isActive, !accounts.isEmpty, let engine = ensureEngine() else { return }
         let accounts = self.accounts
         Task { await engine.setAccounts(accounts) }
+    }
+
+    /// A new network, such as another Wi-Fi or a VPN, leaves the old connections dead until they
+    /// time out. Mail connects again as soon as the Mac is online on the new one. This watches the
+    /// Mac's own network state and sends nothing.
+    private func watchNetwork() {
+        guard pathMonitor == nil, !MailIOPolicy.isOffline else { return }
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            let online = path.status == .satisfied
+            let route = path.availableInterfaces.map(\.name).sorted().joined(separator: ",")
+            Task { @MainActor [weak self] in self?.networkChanged(online: online, route: route) }
+        }
+        monitor.start(queue: DispatchQueue(label: "jevcast.mail.network", qos: .utility))
+        pathMonitor = monitor
+    }
+
+    private func networkChanged(online: Bool, route: String) {
+        defer { lastRoute = online ? route : nil; sawRoute = true }
+        // The first report is the state at launch, not a change.
+        guard sawRoute, online, lastRoute != route else { return }
+        networkWork?.cancel()
+        networkWork = Task { @MainActor in
+            // A network switch reports several times. One reconnect follows the last report.
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled, let engine = NativeMailCenter.activeEngine else { return }
+            await engine.wake()
+        }
     }
 
     func setBackend(_ new: MailBackend) {

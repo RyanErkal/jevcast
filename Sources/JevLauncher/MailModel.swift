@@ -24,7 +24,19 @@ final class MailModel: ObservableObject {
     @Published var vipAddresses: Set<String> = []
     let mailDefaults: UserDefaults?
     @Published private(set) var status: MailStore.Status = .noMail
-    @Published var mailboxes: [MailMailbox] = []
+    @Published var mailboxes: [MailMailbox] = [] {
+        didSet {
+            mailboxIndex = Dictionary(mailboxes.map { ($0.rowID, $0) }, uniquingKeysWith: { first, _ in first })
+            accountCount = Set(mailboxes.map(\.accountID)).count
+            conversationCache = nil
+        }
+    }
+    private(set) var accountCount = 0
+    /// Mailboxes by row ID. Rows ask for their mailbox on every redraw, so this is a lookup, not a search.
+    private(set) var mailboxIndex: [Int64: MailMailbox] = [:]
+    /// The list grouped into conversations. Grouping reads every loaded row, so it runs once per
+    /// change of the rows, mailboxes, or learned headers, and not on every redraw.
+    var conversationCache: [MailConversation]?
     @Published var place: Place = .inbox { didSet { if oldValue != place { selectedID = nil; reload(); syncPlace() } } }
     @Published var search = "" { didSet { if oldValue != search { reloadSoon() } } }
     /// Structured filters are applied to the complete source range before the visible page.
@@ -38,7 +50,10 @@ final class MailModel: ObservableObject {
     var windowIsKey = false { didSet { if windowIsKey != oldValue { armRead() } } }
     private var readTimer: Task<Void, Never>?
     @Published var messages: [MailSummary] = [] {
-        didSet { pageTriggerID = messages.count > 30 ? messages[messages.count - 30].rowID : messages.last?.rowID }
+        didSet {
+            pageTriggerID = messages.count > 30 ? messages[messages.count - 30].rowID : messages.last?.rowID
+            conversationCache = nil
+        }
     }
     /// The row that asks for the next page when it appears: 30 rows before the end.
     private(set) var pageTriggerID: Int64?
@@ -199,8 +214,8 @@ final class MailModel: ObservableObject {
     private let deleteAction: (MailSummary, MailMailbox, Bool) async throws -> Void
     /// Header metadata learned while reading a message. It is enough to refine a fallback
     /// conversation without making a network or account request.
-    var conversationHeaders: [Int64: MailConversationHeader] = [:]
-    var conversationAttachments: Set<Int64> = []
+    var conversationHeaders: [Int64: MailConversationHeader] = [:] { didSet { conversationCache = nil } }
+    var conversationAttachments: Set<Int64> = [] { didSet { conversationCache = nil } }
     /// Full filtered results are cached only while a structured filter is active. Pagination
     /// slices this cache, so older matches are not lost behind the first index page.
     var activeFilterRows: [MailSummary]?
@@ -251,7 +266,9 @@ final class MailModel: ObservableObject {
             }
         // Jevcast's own store says when it changes, so new mail and changes show without waiting for a poll.
         nativeObserver = NotificationCenter.default.publisher(for: NativeMailCenter.changed)
-            .debounce(for: .milliseconds(120), scheduler: DispatchQueue.main)
+            // A long sync posts many changes. The list follows at most a few times a second, and
+            // still follows while the changes keep coming.
+            .throttle(for: .milliseconds(300), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] _ in
                 guard let self, self.poll != nil else { return }
                 self.loadSenders()
@@ -263,7 +280,7 @@ final class MailModel: ObservableObject {
     private var nativeObserver: AnyCancellable?
 
     var selected: MailSummary? { messages.first { $0.rowID == selectedID } }
-    func mailbox(_ id: Int64) -> MailMailbox? { mailboxes.first { $0.rowID == id } }
+    func mailbox(_ id: Int64) -> MailMailbox? { mailboxIndex[id] }
     /// The list's title, such as "Inbox" or a mailbox's name.
     var placeTitle: String {
         switch place {
@@ -297,7 +314,7 @@ final class MailModel: ObservableObject {
     /// kept in its own empty account scope until the index supplies the account ID.
     func snoozeKey(for message: MailSummary) -> String {
         let account = mailbox(message.mailbox)?.accountID
-            ?? mailboxes.first { message.labels.contains($0.rowID) }?.accountID
+            ?? message.labels.lazy.compactMap { self.mailbox($0)?.accountID }.first
             ?? ""
         return account + ":" + message.messageKey
     }
@@ -324,8 +341,13 @@ final class MailModel: ObservableObject {
                 ticks += 1
                 guard let self, let root = self.root else { continue }
                 self.updateMailRunning()
-                let current = await Task.detached { MailStore.fingerprint(root: root) }.value
-                if current != self.fingerprint, self.refresh() { self.fingerprint = current }
+                // Jevcast's own store announces each change, so its file is checked only as a
+                // slow safety net. Apple Mail's index has no notice and is checked every time.
+                let native = NativeMailCenter.isActive && NativeMailCenter.isNativeRoot(root)
+                if !native || ticks % 5 == 0 {
+                    let current = await Task.detached { MailStore.fingerprint(root: root) }.value
+                    if current != self.fingerprint, self.refresh() { self.fingerprint = current }
+                }
                 // Mail fetches on its own timer, which can be minutes. Ask again soon after it
                 // starts, then every 30 seconds while the inbox is open.
                 if ticks == 5 || ticks % 15 == 0 { self.checkForNewMail() }

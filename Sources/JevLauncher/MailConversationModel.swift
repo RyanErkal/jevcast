@@ -5,9 +5,26 @@ extension MailModel {
     /// The currently loaded page grouped by provider thread or Message-ID references.
     /// A subject is never used as a conversation key.
     var conversationGroups: [MailConversation] {
-        MailConversationGrouping.group(messages, accountID: { message in
-            mailbox(message.mailbox)?.accountID ?? mailboxes.first { message.labels.contains($0.rowID) }?.accountID ?? ""
+        if let conversationCache { return conversationCache }
+        let accounts = mailboxIndex.mapValues(\.accountID)
+        let groups = MailConversationGrouping.group(messages, accountID: { message in
+            accounts[message.mailbox] ?? message.labels.lazy.compactMap { accounts[$0] }.first ?? ""
         }, headers: conversationHeaders, attachments: conversationAttachments)
+        conversationCache = groups
+        return groups
+    }
+
+    /// True when the list on screen holds mail of more than one account.
+    var showsAccountMarks: Bool {
+        guard accountCount > 1 else { return false }
+        switch place {
+        case .inbox, .allMail, .unread, .flagged, .sent, .drafts: return true
+        case .outbox, .mailbox: return searchScope == .allAccounts && !search.isEmpty
+        }
+    }
+
+    func accountMark(_ accountID: String) -> MailAccountMark? {
+        accountID.isEmpty ? nil : MailAccountMark(title: accountTitle(accountID), color: MailAccountMark.color(for: accountID))
     }
 
     var selectedConversation: MailConversation? {

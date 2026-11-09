@@ -108,7 +108,23 @@ final class MailModel: ObservableObject {
     private var pending: MailSummary?
     private var pendingOpen: Int64?
     private var openWork: Task<Void, Never>?
-    @Published private(set) var detail: MIMEMessage?
+    @Published private(set) var detail: MIMEMessage? {
+        didSet {
+            // Read once per message, not on every redraw of the reader.
+            invite = detail?.calendarText.flatMap(CalendarInvite.parse)
+            unsubscribe = MailUnsubscribe(header: detail?.header("List-Unsubscribe"))
+        }
+    }
+    /// The meeting invitation in the message on screen, when it carries one.
+    private(set) var invite: CalendarInvite?
+    /// How the mailing list of the message on screen can be left, when it says how.
+    private(set) var unsubscribe: MailUnsubscribe?
+    /// A folder to make, rename, or remove, waiting for its name or for a yes.
+    @Published var folderRequest: MailFolderRequest?
+    /// True while an answer to an invitation or an unsubscribe email is being sent.
+    @Published var inviteBusy = false
+    /// Answers sent from this Mac, by invitation: the card shows the answer after a restart too.
+    @Published var inviteAnswers: [String: String] = [:]
     @Published private(set) var detailMissing = false
     @Published var banner: String?
     @Published private(set) var summary: String?
@@ -234,6 +250,7 @@ final class MailModel: ObservableObject {
          mailDefaults: UserDefaults? = MailIOPolicy.isOffline ? nil : .standard) {
         self.mailDefaults = mailDefaults
         favoriteMailboxKeys = Set(mailDefaults?.stringArray(forKey: "mailFavoriteMailboxes") ?? [])
+        inviteAnswers = mailDefaults?.dictionary(forKey: "mailInviteAnswers") as? [String: String] ?? [:]
         collapsedMailboxKeys = Set(mailDefaults?.stringArray(forKey: "mailCollapsedMailboxes") ?? [])
         expandedSidebarGroupKeys = Set(mailDefaults?.stringArray(forKey: "mailExpandedSidebarGroups") ?? [])
         self.draftStore = draftStore

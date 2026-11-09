@@ -84,6 +84,12 @@ public actor MailAccountSync {
         await signal.post(.everything)
     }
 
+    /// Reads the mailbox list again at once, after a folder was made, renamed, or removed.
+    func relist() async {
+        listedAt = nil
+        await signal.post(.everything)
+    }
+
     private func setState(_ new: State) {
         guard new != state else { return }
         state = new

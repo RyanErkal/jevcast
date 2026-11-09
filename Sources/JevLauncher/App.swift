@@ -227,6 +227,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         MailFeatureCenter.shared.openMessage = { [weak self] in self?.showMail(select: $0) }
         MailFeatureCenter.shared.start(model: mailModel)
         CalendarAlertCenter.shared.openCalendar = { [weak self] in self?.showView(.calendar) }
+        MailLinkRouter.compose = { [weak self] link in self?.composeMail(link) ?? false }
         if !MailIOPolicy.isOffline { CalendarAlertCenter.shared.start() }
         // The runner opened the app for an alert: AutomationCenter shows it; nothing else opens.
         if alertLaunch { return }
@@ -610,6 +611,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         showView(.mail)
         if let rowID { (model.page as? MailPage)?.show(rowID) }
         if let address { mailModel.compose(to: address) }
+    }
+    /// A `mailto:` link as a new message in the panel. False when Jevcast's own mail accounts are not in use.
+    @discardableResult
+    func composeMail(_ link: MailtoLink) -> Bool {
+        guard NativeMailCenter.isActive, !NativeMailCenter.shared.accounts.isEmpty, UISnapshots.directory == nil else { return false }
+        showView(.mail)
+        mailModel.compose(link: link)
+        return true
+    }
+    /// macOS sends mail links here when Jevcast is the default mail app.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls.prefix(1) where url.scheme?.lowercased() == "mailto" {
+            guard let link = MailtoLink(url) else { continue }
+            if !composeMail(link) { model.showFailure("Add a mail account in Settings › Mail to write mail in Jevcast.") }
+        }
     }
     /// The running shell, or a new one. When the shell exits, the view closes and the next
     /// Hyper–T starts a new shell. Nil when libghostty cannot start.

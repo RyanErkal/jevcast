@@ -100,6 +100,8 @@ final class GoogleCalendarAccount: ObservableObject {
         }
         refresh?.cancel(); refresh = nil; generation = UUID()
         connected = true
+        // Another person may have signed in. Events fetched before belong to the old sign-in.
+        CalendarPage.clearCache()
         defaults.removeObject(forKey: enabledKey)
         acceptCalendars(list)
     }
@@ -125,6 +127,7 @@ final class GoogleCalendarAccount: ObservableObject {
         defaults.set(false, forKey: connectedKey)
         defaults.removeObject(forKey: enabledKey)
         connected = false; calendars = []; enabledIDs = []
+        CalendarPage.clearCache()
     }
 
     func setEnabled(_ id: String, enabled: Bool) {

@@ -98,6 +98,11 @@ struct MailSidebar: View {
             .accessibilityLabel(accessibilityLabel)
             .accessibilityValue(accessibilityValue)
         }.padding(.trailing, 8)
+        .contextMenu {
+            if center.backend == .jevcast, center.accounts.contains(where: { $0.id == account }) {
+                Button("New Folder…") { model.folderRequest = .init(kind: .create, accountID: account, box: nil) }
+            }
+        }
     }
 
     @ViewBuilder private func accountFolders(_ folders: MailSidebarFolders) -> some View {

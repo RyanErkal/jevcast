@@ -80,6 +80,10 @@ struct MailReader: View {
                 } else if let detail = shown.detail, !detail.attachments.isEmpty {
                     MailReceivedAttachments(model: model, message: shown.message, detail: detail).padding(10)
                 }
+                // An invitation shows as a card with its answer buttons, above the message.
+                if !composing, let invite = model.invite, model.selectedID == shown.message.rowID {
+                    MailInviteCard(model: model, invite: invite)
+                }
                 if !composing, let summary = model.summary {
                     GroupBox { Text(summary).font(.system(size: 12)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
                         label: { Label("AI summary", systemImage: "sparkles") }
@@ -204,6 +208,9 @@ struct MailReader: View {
             .menuIndicator(.hidden).fixedSize()
             if !composing, let features { MailMessageTools(model: model, features: features) }
             Spacer(minLength: 4)
+            if !composing, let unsubscribe = model.unsubscribe, unsubscribe.web != nil || NativeMailCenter.isActive {
+                MailUnsubscribeButton(model: model, unsubscribe: unsubscribe)
+            }
             zoomControl
             if let expanded {
                 Button { expanded.wrappedValue.toggle() } label: {

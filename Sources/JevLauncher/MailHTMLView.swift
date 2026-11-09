@@ -91,7 +91,8 @@ struct MailHTMLView: NSViewRepresentable {
             if action.navigationType == .linkActivated, let url = action.request.url {
                 if url.scheme == "jevcast-message", url.host == "select",
                    let id = Int64(url.lastPathComponent) { selectMessage?(id) }
-                if ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") { Frontmost.open(url) }
+                // A mail address starts a new message here. A web link opens in the browser.
+                if ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") { MailLinkRouter.open(url) }
                 decisionHandler(.cancel)
                 return
             }

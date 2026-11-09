@@ -141,7 +141,7 @@ final class MailComposeTests: XCTestCase {
         XCTAssertEqual(page.footerHints.first?.key, "⌘↩")
         XCTAssertEqual(page.backTitle, "Discard")
         model.draft = nil
-        XCTAssertEqual(page.footerHints.map(\.key), ["⌘R", "⇧⌘F", "Space", "⌘N"])
+        XCTAssertEqual(page.footerHints.map(\.key), ["⌘R", "⌃⌘A", "⇧⌘M", "Space", "⌘N"])
         XCTAssertEqual(page.footerHints.first?.title, "Reply")
         XCTAssertNil(page.backTitle)
     }

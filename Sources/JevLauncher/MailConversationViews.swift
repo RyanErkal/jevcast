@@ -81,6 +81,8 @@ struct MailConversationReader: View {
     let fitsWidth: Bool
     let prefersPlain: Bool
     @State private var entries: [MailThreadHTML.Entry] = []
+    /// The rendered document. It is built when a reply loads, not on every redraw of the pane.
+    @State private var html = MailThreadHTML.style
     @State private var loading = true
     @State private var attempt = 0
 
@@ -96,7 +98,7 @@ struct MailConversationReader: View {
             if !loading && entries.contains(where: { $0.body == nil }) {
                 Button("Retry missing messages") { attempt += 1 }.buttonStyle(.link).font(.caption).padding(6)
             }
-            MailHTMLView(html: MailThreadHTML.render(entries, prefersPlain: prefersPlain),
+            MailHTMLView(html: html,
                          documentID: conversation.latest.summary.rowID, loadsRemote: model.loadsImages,
                          zoom: zoom, fitsWidth: fitsWidth, selectMessage: { id in
                 guard conversation.messages.contains(where: { $0.summary.rowID == id }) else { return }
@@ -106,12 +108,17 @@ struct MailConversationReader: View {
         .task(id: loadKey) {
             loading = true
             entries = []
+            html = MailThreadHTML.style
             for item in conversation.messages {
                 let body = await model.conversationBody(item.summary)
                 guard !Task.isCancelled else { return }
                 entries.append(.init(message: item.summary, body: body))
+                // The newest replies show while older ones still load.
+                if entries.count <= MailThreadHTML.openReplies { html = MailThreadHTML.render(entries, prefersPlain: prefersPlain) }
             }
+            html = MailThreadHTML.render(entries, prefersPlain: prefersPlain)
             loading = false
         }
+        .onChange(of: prefersPlain) { _, plain in html = MailThreadHTML.render(entries, prefersPlain: plain) }
     }
 }

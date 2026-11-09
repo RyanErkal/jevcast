@@ -62,6 +62,14 @@ struct MailSidebarMailbox: View {
         .help(help)
         .contextMenu {
             Button(model.isFavorite(box) ? "Remove from Favourites" : "Add to Favourites") { model.toggleFavorite(box) }
+            if NativeMailCenter.isActive {
+                Divider()
+                Button("New Folder Inside…") { model.folderRequest = .init(kind: .create, accountID: box.accountID, box: box) }
+                if box.role == .other {
+                    Button("Rename…") { model.folderRequest = .init(kind: .rename, accountID: box.accountID, box: box, name: box.name) }
+                    Button("Delete Empty Folder…", role: .destructive) { model.folderRequest = .init(kind: .delete, accountID: box.accountID, box: box) }
+                }
+            }
         }
     }
 

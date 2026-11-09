@@ -107,7 +107,7 @@ final class CalendarPage: ObservableObject, LauncherPage {
     var openTitle: String {
         guard let event = selectedEvent else { return "Details" }
         if event.meetingURL != nil { return "Join Call" }
-        return event.editable ? "Edit" : "Open"
+        return event.editable ? "Edit" : event.localID == nil ? "Open in Google Calendar" : ""
     }
     var backTitle: String? { editing != nil ? "Cancel" : nil }
     var footerHints: [(title: String, key: String)] {
@@ -215,7 +215,9 @@ final class CalendarPage: ObservableObject, LauncherPage {
         case (_, .down): if selectedEvent != nil { selectNeighbour(1) } else { step(1) }; return true
         case (_, .open):
             if let event = selectedEvent {
-                if let url = event.meetingURL { open(url) } else if event.editable { beginEdit(event) } else { openInCalendar(event) }
+                // A call is joined, an event of this Mac is edited, and a Google event opens its web page.
+                if let url = event.meetingURL { open(url) } else if event.editable { beginEdit(event) }
+                else if event.localID == nil { openInCalendar(event) }
             }
             else if let event = events(on: calendar.startOfDay(for: anchor)).first ?? displayedEvents.first { select(event) }
             return true
@@ -339,7 +341,8 @@ final class CalendarPage: ObservableObject, LauncherPage {
     func reload() { load() }
 
     private var cacheKey: String {
-        let google = usesGoogle ? connectedGoogle.map { $0.slot + "=" + $0.enabledIDs.sorted().joined(separator: ",") }.joined(separator: ";") : ""
+        // The account object is part of the key, so two accounts never share fetched events.
+        let google = usesGoogle ? connectedGoogle.map { "\(ObjectIdentifier($0).hashValue)=" + $0.enabledIDs.sorted().joined(separator: ",") }.joined(separator: ";") : ""
         return source.rawValue + "|" + google
     }
 

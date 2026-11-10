@@ -274,7 +274,7 @@ struct MailReceivedAttachments: View {
 
     private static func subtitle(_ attachment: MIMEMessage.Attachment) -> String {
         let size = ByteCountFormatter.string(fromByteCount: Int64(attachment.size), countStyle: .file)
-        return "\(attachment.mimeType) · \(size)"
+        return MailStyle.kind(mimeType: attachment.mimeType, filename: attachment.name) + " · " + size
     }
 }
 

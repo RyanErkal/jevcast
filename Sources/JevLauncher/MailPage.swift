@@ -132,7 +132,9 @@ final class MailPage: ObservableObject, LauncherPage {
         let flags = event.modifierFlags.intersection([.command, .control, .option, .shift])
         let key = event.charactersIgnoringModifiers?.lowercased()
         if flags == .command, key == "z", mail.pendingSend != nil { mail.undoSend(); return true }
+        if flags == .command, key == "z", mail.lastChange != nil { mail.undoLastChange(); return true }
         if flags == .command, key == "n" { mail.compose(); return true }
+        if flags == .command, key == "k" { MailActionsMenu.show(self, mail); return true }
         if flags == .command, let key, let digit = Int(key), (1...Self.places.count).contains(digit) {
             mail.place = Self.places[digit - 1]
             return true
@@ -164,7 +166,8 @@ final class MailPage: ObservableObject, LauncherPage {
         if accountDetailsID != nil || tool != nil { return [] }
         if isTyping { return [("Send", "⌘↩")] }
         guard mail?.place != .outbox, mail?.selected != nil else { return [("New", "⌘N")] }
-        return [("Reply", "⌘R"), ("Archive", "⌃⌘A"), ("Move", "⇧⌘M"), (expanded ? "List" : "Expand", "Space"), ("New", "⌘N")]
+        // The few keys used most. ⌘K lists every action with its key.
+        return [("Reply", "⌘R"), ("Archive", "⌃⌘A"), ("Actions", "⌘K")]
     }
     var backTitle: String? { accountDetailsID != nil || tool != nil ? "Mail" : isTyping ? "Discard" : nil }
     var footerChanges: AnyPublisher<Void, Never> {
@@ -208,7 +211,10 @@ private struct MailPageView: View {
         }
         .modifier(MailFolderPrompt(model: mail))
         // Above the composer's footer while one is open, so the note never covers Send.
-        .overlay(alignment: .bottom) { MailBanner(model: mail).padding(.bottom, page.composing ? 58 : 12) }
+        .overlay(alignment: .bottom) {
+            MailBanner(model: mail).padding(.bottom, page.composing ? 58 : 12)
+                .animation(MailStyle.motion, value: mail.lastChange?.id).animation(MailStyle.motion, value: mail.banner)
+        }
     }
 
     private var ready: Bool {

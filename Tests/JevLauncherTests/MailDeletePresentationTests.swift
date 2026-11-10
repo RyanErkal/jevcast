@@ -24,6 +24,37 @@ final class MailDeletePresentationTests: XCTestCase {
         XCTAssertTrue(Set(model.messages.map(\.rowID)).isDisjoint(with: deleted), "A stale refresh must not reinsert a completed removal.")
     }
 
+    func testDeleteOffersUndoWithTheMessagesThatMoved() async throws {
+        let fixture = try XCTUnwrap(MailSnapshots.thread().mail)
+        let model = MailModel(aiWriting: { _ in throw CancellationError() }, aiWritingAllowed: { false },
+            deleteMessage: { _, _, _ in }, draftStore: nil, mailDefaults: nil)
+        model.installDemo(mailboxes: fixture.mailboxes, messages: fixture.messages)
+        model.delete(2)
+        let change = try XCTUnwrap(model.lastChange)
+        XCTAssertEqual(change.title, "Moved to Trash"); XCTAssertEqual(change.operation, .trash)
+        XCTAssertTrue(change.moved.isEmpty, "A message counts as moved only after the server took the change.")
+        await model.waitForActions()
+        XCTAssertEqual(model.lastChange?.moved.map(\.message.rowID), [2])
+        XCTAssertNil(model.banner, "The Undo note shows; no other note covers it.")
+        // A conversation moves every loaded reply, and Undo holds all of them.
+        model.delete(100)
+        XCTAssertEqual(model.lastChange?.title, "Moved 4 messages to Trash")
+        await model.waitForActions()
+        XCTAssertEqual(Set(model.lastChange?.moved.map(\.message.rowID) ?? []), [100, 101, 102, 103])
+    }
+
+    func testAFailedDeleteOffersNoUndo() async throws {
+        let fixture = try XCTUnwrap(MailSnapshots.thread().mail)
+        let model = MailModel(aiWriting: { _ in throw CancellationError() }, aiWritingAllowed: { false },
+            deleteMessage: { _, _, _ in throw LauncherError("Server refused the move") }, draftStore: nil, mailDefaults: nil)
+        model.installDemo(mailboxes: fixture.mailboxes, messages: fixture.messages)
+        model.delete(2)
+        XCTAssertNotNil(model.lastChange)
+        await model.waitForActions()
+        XCTAssertNil(model.lastChange, "Nothing moved, so there is nothing to undo.")
+        XCTAssertTrue(model.banner?.contains("Server refused the move") == true)
+    }
+
     func testFailedDeleteReturnsOnRefreshAndReportsServerFailure() async throws {
         let fixture = try XCTUnwrap(MailSnapshots.thread().mail)
         let model = MailModel(aiWriting: { _ in throw CancellationError() }, aiWritingAllowed: { false },

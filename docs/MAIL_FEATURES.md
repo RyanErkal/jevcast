@@ -21,6 +21,8 @@ list opens Mail tools. Escape returns from a tool to the previous draft or list.
 | Notifications | Off by default per account. Notices use the notch, support private previews and quiet hours, and suppress initial history and backfills. They require Jevcast running. |
 | Snooze | Local to this Mac. Hides the message from Inbox and Unread until its return time. Other folders and other devices retain it. |
 | Send Later | Saves the entire draft and attachments before leaving the composer. Requires Jevcast running and the Mac awake. Missed times wait for review. Interrupted or uncertain dispatches require a Sent check. Startup never resumes them. |
+| Undo | Archive, Delete (to Trash), and Move show a note with Undo for eight seconds; ⌘Z does the same. Jevcast waits for the change to finish, then moves back only the messages that the change moved. A Jevcast account finds each one in its new folder by exact Message-ID and refuses when none or more than one matches. A delete in Trash is permanent and has no undo. |
+| Actions menu | ⌘K lists every action for the selected message with its key. |
 | Invitations | A message with a calendar part shows a card: title, time, place, organiser, and your answer. Accept, Maybe, and Decline send a standard calendar reply to the organiser from the account that received the message (Jevcast accounts only). Add to Calendar saves the event on this Mac. A cancellation and another guest's answer show as information only. |
 | Unsubscribe | Shown when the message has a `List-Unsubscribe` header. After you confirm, Jevcast sends the list's own unsubscribe email from that account, or opens the list's https page in your browser. Jevcast does not request the page itself. |
 | Mail links | A mail address clicked in a message starts a new message in Jevcast. Settings › Mail › Default mail app makes Jevcast open mail links from other apps; macOS may ask you to confirm. |
@@ -51,6 +53,14 @@ after seven days. Reconnecting accounts does not change that provider setting.
 Encrypted mail and a week-long cutover exercise are separate follow-up work.
 Version 1.22.0 adds folder changes and default mail-app registration; neither has a live check yet. The features above do
 not establish complete Apple Mail parity.
+
+## Version 1.23.0 checks on 2026-11-10
+
+Offline checks cover Undo against the fake IMAP server (the exact message returns, an older message in the
+same folder stays, and a second undo is refused), the Undo note's state after a delete and after a failed
+delete, search-word marking, file kinds, initials, and the plain-message page style. Mail demo snapshots
+rendered in dark and light appearance. Not checked live: Undo on a real server, the menus with a real
+keyboard, and motion.
 
 ## Version 1.22.0 checks on 2026-11-09
 

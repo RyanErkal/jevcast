@@ -83,7 +83,10 @@ enum CommandRunner {
         let box = ProcessBox()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                DispatchQueue.global(qos: .userInitiated).async {
+                // Plain threads, not DispatchQueue.global. On a small machine with a busy global pool,
+                // the pool can accept a block and never start it; the command then never runs and
+                // its caller waits for good.
+                Thread.detachNewThread {
                     let process = Process()
                     process.executableURL = URL(fileURLWithPath: step[0])
                     process.arguments = Array(step.dropFirst())
@@ -103,9 +106,11 @@ enum CommandRunner {
                     }
                     // A cancel that came between start and run found nothing running yet.
                     if box.cancelled { process.terminate() }
+                    // The time limit waits on its own thread and wakes early when the command ends.
+                    let finished = DispatchSemaphore(value: 0)
                     if let timeout {
-                        DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { [weak process] in
-                            guard let process, process.isRunning else { return }
+                        Thread.detachNewThread { [weak process] in
+                            guard finished.wait(timeout: .now() + timeout) == .timedOut, let process, process.isRunning else { return }
                             box.timedOut = true
                             process.terminate()
                         }
@@ -113,10 +118,11 @@ enum CommandRunner {
                     let errors = DispatchGroup()
                     nonisolated(unsafe) var errorData = Data()
                     errors.enter()
-                    DispatchQueue.global(qos: .utility).async { errorData = err.fileHandleForReading.readDataToEndOfFile(); errors.leave() }
+                    Thread.detachNewThread { errorData = err.fileHandleForReading.readDataToEndOfFile(); errors.leave() }
                     let outputData = out.fileHandleForReading.readDataToEndOfFile()
                     errors.wait()
                     process.waitUntilExit()
+                    finished.signal()
                     let stdout = String(decoding: outputData, as: UTF8.self)
                     if box.cancelled {
                         continuation.resume(throwing: CancellationError())

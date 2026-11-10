@@ -1,3 +1,4 @@
+import SwiftUI
 import AppKit
 import Combine
 import LauncherCore
@@ -119,6 +120,8 @@ final class MailModel: ObservableObject {
     private(set) var invite: CalendarInvite?
     /// How the mailing list of the message on screen can be left, when it says how.
     private(set) var unsubscribe: MailUnsubscribe?
+    /// The last archive, delete, or move, while ⌘Z can still put it back. It shows as a note with Undo.
+    @Published var lastChange: MailUndoableChange?
     /// A folder to make, rename, or remove, waiting for its name or for a yes.
     @Published var folderRequest: MailFolderRequest?
     /// True while an answer to an invitation or an unsubscribe email is being sent.
@@ -979,13 +982,14 @@ final class MailModel: ObservableObject {
     // MARK: Actions
 
     /// Runs a Mail action. `update` changes the row at once; the index confirms it later.
-    private func perform(_ name: String, message target: MailSummary? = nil, removes: Bool = false, _ action: @escaping () async throws -> Void, update: ((inout MailSummary) -> Void)? = nil) {
+    func perform(_ name: String, message target: MailSummary? = nil, removes: Bool = false, _ action: @escaping () async throws -> Void, update: ((inout MailSummary) -> Void)? = nil) {
         guard let message = target ?? selected else { return }
         if let account = mailbox(message.mailbox)?.accountID { changedAccounts.insert(account) }
         let index = messages.firstIndex { $0.rowID == message.rowID }
         if removes, let index {
             removing[message.rowID] = .distantFuture
-            messages.remove(at: index)
+            // The row slides away, so the eye sees what left the list.
+            withAnimation(MailStyle.motion) { _ = messages.remove(at: index) }
             // The next message shows and counts as read, as in Mail.
             selectedMessageIDs.remove(message.rowID)
             if selectedID == message.rowID {
@@ -1005,6 +1009,7 @@ final class MailModel: ObservableObject {
                 // After a failed change the index decides the row again.
                 self?.removing.removeValue(forKey: message.rowID)
                 self?.readChanges.removeValue(forKey: message.rowID)
+                self?.lastChange = nil
                 self?.banner = "Could not \(name): \(error.localizedDescription)"
                 self?.reload(keepSelection: true)
             }
@@ -1023,7 +1028,7 @@ final class MailModel: ObservableObject {
         guard let archive = MailMailbox.archive(for: box.accountID, in: mailboxes), archive.rowID != box.rowID else {
             banner = "This account has no Archive mailbox."; return
         }
-        perform("archive", removes: true) { try await MailActions.move(message, from: box, to: archive) }
+        undoably(.archive, title: "Archived", [(message, box)]) { message, box in try await MailActions.move(message, from: box, to: archive) }
     }
     /// A list row represents its loaded conversation, so Delete moves every displayed reply.
     func delete(_ rowID: Int64) {
@@ -1058,11 +1063,16 @@ final class MailModel: ObservableObject {
                 ?? messages.prefix(index).last { !ids.contains($0.rowID) }
             select(next?.rowID, byUser: false)
         }
-        for (message, box) in reviewed {
-            let permanently = box.role == .trash && NativeMailCenter.isActive
-            let action = deleteAction
-            perform(permanently ? "delete permanently" : "delete", message: message, removes: true) {
-                try await action(message, box, permanently)
+        let action = deleteAction
+        // A delete in Trash removes the message for good, so it has no undo.
+        let permanent = reviewed.filter { $0.1.role == .trash && NativeMailCenter.isActive }
+        let toTrash = reviewed.filter { !($0.1.role == .trash && NativeMailCenter.isActive) }
+        for (message, box) in permanent {
+            perform("delete permanently", message: message, removes: true) { try await action(message, box, true) }
+        }
+        if !toTrash.isEmpty {
+            undoably(.trash, title: toTrash.count == 1 ? "Moved to Trash" : "Moved \(toTrash.count) messages to Trash", toTrash, name: "delete") { message, box in
+                try await action(message, box, false)
             }
         }
     }
@@ -1149,7 +1159,9 @@ final class MailModel: ObservableObject {
     }
     func move(to destination: MailMailbox) {
         guard let message = selected, let box = actionBox(message) else { return }
-        perform("move", removes: true) { try await MailActions.move(message, from: box, to: destination) }
+        undoably(.move(mailboxID: destination.rowID), title: "Moved to " + destination.name, [(message, box)]) { message, box in
+            try await MailActions.move(message, from: box, to: destination)
+        }
     }
     func openInMail() {
         guard let message = selected, let box = actionBox(message) else { return }

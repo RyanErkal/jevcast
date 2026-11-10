@@ -31,6 +31,11 @@ struct MailHTMLView: NSViewRepresentable {
         + "table{width:auto!important;table-layout:auto!important}td,th{width:auto!important}"
         + "img{height:auto!important}pre{white-space:pre-wrap!important}"
         + "*{word-wrap:break-word;overflow-wrap:anywhere}</style>"
+    /// For a message that is only text: no layout, images, or colors of its own. It follows the
+    /// Mac's light or dark appearance and keeps lines to a width that reads well. A designed message
+    /// never gets this, so it shows on the white page its sender expected.
+    static let plainStyle = "<style>:root{color-scheme:light dark}:where(body){max-width:760px;font-size:14.5px;line-height:1.45}"
+        + "@media (prefers-color-scheme:dark){:where(body){background:#1c1c1e;color:#e8e8ea}:where(a){color:#6cb4ff}}</style>"
     /// Without fitting, the page still scrolls both ways when it is wider than the pane.
     static let scrollStyle = "<style>html,body{overflow:auto!important}</style>"
 
@@ -50,7 +55,7 @@ struct MailHTMLView: NSViewRepresentable {
         let meta = "<meta http-equiv=\"Content-Security-Policy\" content=\"\(policy(remote: remote))\"><meta charset=\"utf-8\">"
         let style = "<style>:where(body){font:14px -apple-system,sans-serif;margin:12px;word-wrap:break-word}:where(img){max-width:100%;height:auto}</style>"
         // Appended after the body so these rules come last and override the sender's own style sheets.
-        return meta + style + body + (fitsWidth ? fitStyle : scrollStyle)
+        return meta + style + (MailThreadHTML.isSimple(html) ? plainStyle : "") + body + (fitsWidth ? fitStyle : scrollStyle)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }

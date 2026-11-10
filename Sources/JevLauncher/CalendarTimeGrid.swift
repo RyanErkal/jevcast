@@ -199,8 +199,9 @@ struct CalendarTimeGrid: View {
             if let event = byID[placement.id] {
                 let lane = (width - 6) / CGFloat(placement.columns)
                 let height = max(18, CGFloat(placement.endMinute - placement.startMinute) / 60 * hourHeight - 2)
-                CalendarGridEvent(page: page, event: event, block: height >= 38, dayWidth: width, hourHeight: hourHeight)
-                    .frame(width: max(10, lane - (placement.column + 1 < placement.columns ? 2 : 0)), height: height)
+                let across = max(10, lane - (placement.column + 1 < placement.columns ? 2 : 0))
+                CalendarGridEvent(page: page, event: event, block: height >= 38, dayWidth: width, hourHeight: hourHeight, across: across)
+                    .frame(width: across, height: height)
                     .offset(x: rail + CGFloat(index) * width + 3 + CGFloat(placement.column) * lane,
                             y: top + CGFloat(placement.startMinute) / 60 * hourHeight + 1)
             }
@@ -216,11 +217,12 @@ private struct CalendarGridEvent: View {
     let block: Bool
     let dayWidth: CGFloat
     let hourHeight: CGFloat
+    let across: CGFloat
     @State private var drag = CGSize.zero
 
     var body: some View {
         let button = CalendarEventButton(event: event, selected: page.selectedEvent?.id == event.id,
-                                         style: block ? .block : .line, fillsHeight: true) { page.select(event) }
+                                         style: block ? .block : .line, fillsHeight: true, width: across) { page.select(event) }
         if event.editable, page.writer != nil {
             button.offset(snapped).zIndex(drag == .zero ? 0 : 1).opacity(drag == .zero ? 1 : 0.8)
                 .simultaneousGesture(DragGesture(minimumDistance: 6)

@@ -96,22 +96,27 @@ struct MailReader: View {
                 } else { body(shown) }
             }
         } else {
-            Text("Select a message").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+            MailEmptyState(symbol: "envelope.open", title: "No message selected", detail: "Use ↑ and ↓ to pick one, or ⌘N to write.")
         }
     }
 
     private func header(_ shown: Shown) -> some View {
         let message = shown.message
-        return VStack(alignment: .leading, spacing: 4) {
-            Text(message.subject.isEmpty ? "No subject" : message.subject).font(.title3.weight(.semibold)).textSelection(.enabled)
-            HStack(spacing: 4) {
-                Text(message.sender).fontWeight(.medium)
-                if !message.senderName.isEmpty { Text("<\(message.senderAddress)>").foregroundStyle(.secondary) }
-                Spacer()
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(message.subject.isEmpty ? "No subject" : message.subject).font(.system(size: MailStyle.title, weight: .semibold)).textSelection(.enabled)
+            HStack(alignment: .top, spacing: 10) {
+                MailAvatar(name: message.senderName, address: message.senderAddress)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 5) {
+                        Text(message.sender).font(.system(size: MailStyle.subject, weight: .semibold))
+                        if !message.senderName.isEmpty { Text(message.senderAddress).font(.system(size: MailStyle.preview)).foregroundStyle(.secondary) }
+                        Spacer(minLength: 4)
+                    }
+                    .textSelection(.enabled).lineLimit(1)
+                    if let to = shown.detail?.header("To") { Text("To: " + to).font(.system(size: MailStyle.meta)).foregroundStyle(.secondary).lineLimit(2) }
+                    if let cc = shown.detail?.header("Cc") { Text("Cc: " + cc).font(.system(size: MailStyle.meta)).foregroundStyle(.secondary).lineLimit(2) }
+                }
             }
-            .font(.system(size: 12)).textSelection(.enabled)
-            if let to = shown.detail?.header("To") { Text("To: " + to).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
-            if let cc = shown.detail?.header("Cc") { Text("Cc: " + cc).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
             if let detail = shown.detail, !detail.attachments.isEmpty {
                 if !composing { MailReceivedAttachments(model: model, message: message, detail: detail) }
                 else { Label(detail.attachments.map(\.name).joined(separator: ", "), systemImage: "paperclip").font(.caption).lineLimit(1) }
@@ -128,8 +133,11 @@ struct MailReader: View {
                              zoom: MailReading.clampZoom(zoom), fitsWidth: fitsWidth)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView([.vertical, .horizontal]) {
-                    Text(MailText.linked(detail.readableText)).font(.system(size: 13 * MailReading.clampZoom(zoom))).textSelection(.enabled)
+                // Plain text wraps at a width that reads well, however wide the pane is.
+                ScrollView(.vertical) {
+                    Text(MailText.linked(detail.readableText)).font(.system(size: MailStyle.body * MailReading.clampZoom(zoom))).lineSpacing(2)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: MailStyle.readingWidth, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .leading).padding(14)
                 }
                 .defaultScrollAnchor(.topLeading)
@@ -171,16 +179,17 @@ struct MailReader: View {
     /// The few actions checking mail needs, as icons with their keys in the tooltips. While a draft
     /// is docked below, only the view controls stay.
     private func actionBar(_ message: MailSummary) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 6) {
             if !composing {
                 Button { model.delete() } label: { Image(systemName: "trash") }.help("Delete (⌫)")
-                Button { model.archive() } label: { Image(systemName: "archivebox") }.help("Archive")
+                Button { model.archive() } label: { Image(systemName: "archivebox") }.help("Archive (⌃⌘A)")
                 if NativeMailCenter.isActive, model.mailbox(message.mailbox)?.role == .drafts {
                     Button("Edit Draft") {
                         Task { do { try await model.editSelectedServerDraft() } catch { model.banner = error.localizedDescription } }
                     }.font(.caption)
                 } else {
-                    Button { model.reply(all: false) } label: { Image(systemName: "arrowshape.turn.up.left") }.help("Reply (⌘R)")
+                    Button { model.reply(all: false) } label: { Label("Reply", systemImage: "arrowshape.turn.up.left").labelStyle(.titleAndIcon) }
+                        .font(.system(size: 13, weight: .medium)).help("Reply (⌘R)")
                 }
                 Button { model.toggleRead() } label: { Image(systemName: model.selected?.read == false ? "envelope.open" : "envelope.badge") }
                     .help("Mark read or unread")
@@ -221,8 +230,8 @@ struct MailReader: View {
             Text(message.date.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary)
                 .lineLimit(1).layoutPriority(-1)
         }
-        .buttonStyle(.borderless).font(.system(size: 14))
-        .padding(.horizontal, 14).padding(.vertical, 8)
+        .buttonStyle(MailIconButtonStyle()).font(.system(size: 14))
+        .padding(.horizontal, 10).padding(.vertical, 6)
     }
 }
 
@@ -248,6 +257,16 @@ struct MailBanner: View {
                 .background(.regularMaterial, in: Capsule())
                 .onTapGesture { model.banner = nil }
                 .task(id: banner) { try? await Task.sleep(nanoseconds: 4_000_000_000); if model.banner == banner { model.banner = nil } }
+        } else if let change = model.lastChange {
+            HStack(spacing: 8) {
+                Text(change.title)
+                Text("·").foregroundStyle(.secondary)
+                Button("Undo") { model.undoLastChange() }.buttonStyle(.link).help("Undo (⌘Z)")
+                KeyChip("⌘Z")
+            }
+            .font(.callout).padding(.horizontal, 14).padding(.vertical, 8)
+            .background(.regularMaterial, in: Capsule())
+            .transition(.move(edge: .bottom).combined(with: .opacity))
         } else if model.sending {
             HStack(spacing: 10) {
                 ProgressView().controlSize(.small)

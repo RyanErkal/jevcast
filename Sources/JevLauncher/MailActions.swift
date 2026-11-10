@@ -120,6 +120,24 @@ enum MailActions {
         guard candidates.count == 1, let trash = candidates.first else { throw LauncherError("This account has no unique Trash mailbox. Nothing was deleted.") }
         try await run(MailScripts.delete, target(message, mailbox) + [trash.path])
     }
+    /// The message's Message-ID in a Jevcast account, read before a move so the move can be undone.
+    /// Apple Mail keeps a moved message's row, so it needs none.
+    static func messageID(_ message: MailSummary, in mailbox: MailMailbox) async -> String? {
+        guard let engine = try? native(mailbox) else { return nil }
+        return await engine.messageID(of: message.rowID)
+    }
+    /// Moves a message back after a move made here. A Jevcast account finds it in `current` by its
+    /// exact Message-ID, because the server gave the moved copy a new number.
+    static func moveBack(_ message: MailSummary, messageID: String?, from current: MailMailbox, to original: MailMailbox) async throws {
+        guard current.accountID == original.accountID else { throw LauncherError("Messages move only within one account.") }
+        if let engine = try native(current) {
+            guard let messageID, !messageID.isEmpty else { throw LauncherError("This message has no Message-ID, so it cannot be found again. Move it back by hand.") }
+            return try await engine.moveBack(messageID: messageID, from: current.rowID, to: original.rowID)
+        }
+        var moved = message
+        moved.mailbox = current.rowID
+        try await move(moved, from: current, to: original)
+    }
     static func move(_ message: MailSummary, from mailbox: MailMailbox, to destination: MailMailbox) async throws {
         guard destination.accountID == mailbox.accountID else { throw LauncherError("Messages move only within one account.") }
         if let engine = try native(mailbox) { return try await engine.move(message.rowID, to: destination.rowID) }

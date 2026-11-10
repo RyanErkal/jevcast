@@ -13,6 +13,10 @@ struct ComposeView: View {
     @StateObject private var editorCommands = MailEditorCommands()
     @State private var showsLink = false
     @State private var link = ""
+    /// Cc and Bcc show once asked for, or when they hold an address.
+    @State private var showsCopies = false
+    /// The original stays out of the way until asked for. It is still sent below your text.
+    @State private var showsQuote = false
 
     /// Labels sit in this column; the fields line up after it.
     private static let labelWidth: CGFloat = 62
@@ -79,12 +83,21 @@ struct ComposeView: View {
                         .help((line?.detail ?? draft.to) + "\nApple Mail sets the final list when it sends.")
                 }
             } else {
-                row("To:") { recipientField(value: binding.to, placeholder: "Name or email address") }
-                Divider().padding(.leading, Self.gutter)
-                row("Cc:") { recipientField(value: binding.cc, placeholder: "Optional") }
-                if native(draft) {
+                let copies = showsCopies || !draft.cc.isEmpty || !draft.bcc.isEmpty
+                row("To:") {
+                    recipientField(value: binding.to, placeholder: "Name or email address")
+                    if !copies {
+                        Button(native(draft) ? "Cc/Bcc" : "Cc") { showsCopies = true }.buttonStyle(.borderless).font(.system(size: 12))
+                            .fixedSize().help("Add people in copy")
+                    }
+                }
+                if copies {
                     Divider().padding(.leading, Self.gutter)
-                    row("Bcc:") { recipientField(value: binding.bcc, placeholder: "Optional") }
+                    row("Cc:") { recipientField(value: binding.cc, placeholder: "Optional") }
+                    if native(draft) {
+                        Divider().padding(.leading, Self.gutter)
+                        row("Bcc:") { recipientField(value: binding.bcc, placeholder: "Optional") }
+                    }
                 }
                 if native(draft) || draft.mode == .new {
                     Divider().padding(.leading, Self.gutter)
@@ -183,9 +196,18 @@ struct ComposeView: View {
     @ViewBuilder
     private func content(_ draft: MailModel.Draft, _ binding: Binding<MailModel.Draft>) -> some View {
         if native(draft), draft.mode != .new, draft.includesQuote || !isReply(draft) {
-            VSplitView {
-                editor(binding).frame(minHeight: 90, idealHeight: 170)
-                quote(draft, binding).frame(minHeight: 80, maxHeight: .infinity)
+            if showsQuote {
+                VSplitView {
+                    editor(binding).frame(minHeight: 90, idealHeight: 170)
+                    quote(draft, binding).frame(minHeight: 80, maxHeight: .infinity)
+                }
+            } else {
+                // Your text has the whole pane. One line says the original goes with it.
+                VStack(spacing: 0) {
+                    editor(binding)
+                    Divider()
+                    quoteBar(draft, binding)
+                }
             }
         } else {
             VStack(spacing: 0) {
@@ -222,19 +244,26 @@ struct ComposeView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    /// One line about the original: that it is sent, a way to see it, and for a reply a way to leave it out.
+    private func quoteBar(_ draft: MailModel.Draft, _ binding: Binding<MailModel.Draft>) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "text.quote").foregroundStyle(.tertiary)
+            Text(isReply(draft) ? "The original is quoted below your text, as sent." : "The original is forwarded below your text, as sent.")
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button(showsQuote ? "Hide Original" : "Show Original") { showsQuote.toggle() }.buttonStyle(.link)
+            if isReply(draft) {
+                Button("Remove Quote") { binding.wrappedValue.includesQuote = false }.buttonStyle(.link)
+                    .help("Send only your text")
+            }
+        }
+        .font(.caption).padding(.horizontal, Self.gutter).padding(.vertical, 6)
+    }
+
     @ViewBuilder
     private func quote(_ draft: MailModel.Draft, _ binding: Binding<MailModel.Draft>) -> some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text(isReply(draft) ? "Quoted below your text, as sent. It cannot be edited." : "Forwarded below your text, as sent.")
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if isReply(draft) {
-                    Button("Remove Quote") { binding.wrappedValue.includesQuote = false }.buttonStyle(.link)
-                        .help("Send only your text")
-                }
-            }
-            .font(.caption).padding(.horizontal, Self.gutter).padding(.vertical, 5)
+            quoteBar(draft, binding)
             if let source = draft.source, let original = draft.original {
                 MailQuotePreview(source: source, date: original.date, forward: !isReply(draft), loadsRemote: model.loadsImages)
             } else {
@@ -260,7 +289,9 @@ struct ComposeView: View {
                     model.didSchedule(entry)
                 }.disabled(model.aiWritingBusy || !draft.canSend)
             }
+            // Quiet beside Send, so the two are never mistaken for each other.
             Button("Discard") { model.discardDraft() }
+            .buttonStyle(.borderless).foregroundStyle(.secondary)
             .keyboardShortcut(.cancelAction)
             .help("Discard (Escape)")
             Button { model.send() } label: {

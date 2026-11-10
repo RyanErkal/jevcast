@@ -199,7 +199,7 @@ struct MailSmartView: View {
                     }
                 }
             }
-            .frame(width: 220)
+            .frame(width: 260)
             Divider()
             Form {
                 Section("Saved mailbox") {
@@ -212,9 +212,10 @@ struct MailSmartView: View {
                         ForEach(controller.accounts) { account in Text(account.title).tag(account.id) }
                     }
                     HStack {
-                        Button("Save") { saveMailbox() }.keyboardShortcut(.defaultAction)
+                        Button("Save") { saveMailbox() }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
                         Button("Preview") { previewMailbox() }
-                        if selectedID != nil { Button("Delete", role: .destructive) { deleteMailbox() } }
+                        Spacer()
+                        if selectedID != nil { Button("Delete Mailbox", role: .destructive) { deleteMailbox() } }
                     }
                     if controller.previewCount > 0 { Text("Preview: \(controller.previewCount) matching message\(controller.previewCount == 1 ? "" : "s").") .font(.caption).foregroundStyle(.secondary) }
                 }
@@ -236,7 +237,8 @@ struct MailSmartView: View {
             }
             .formStyle(.grouped)
             .padding()
-            .frame(width: 400)
+            .frame(minWidth: 360, maxWidth: 640)
+            Spacer(minLength: 0)
         }
         .onAppear { selectFirst() }
         .onChange(of: selectedID) { _, id in load(id) }

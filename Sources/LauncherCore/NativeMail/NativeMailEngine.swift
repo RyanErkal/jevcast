@@ -176,6 +176,23 @@ public actor NativeMailEngine {
         await sync.request(MailSyncRequest(mailboxes: [box.rowID]))
     }
 
+    // MARK: Undo
+
+    /// The message's Message-ID as the server gave it, read before a move so the move can be undone.
+    public func messageID(of rowID: Int64) async -> String? {
+        (try? await store.location(of: rowID))?.messageID
+    }
+
+    /// Moves a message back after a move made here a moment ago. It is found by its exact Message-ID.
+    public func moveBack(messageID: String, from currentRowID: Int64, to originalRowID: Int64) async throws {
+        guard let current = try await store.mailbox(currentRowID), let original = try await store.mailbox(originalRowID),
+              current.account == original.account, let sync = syncs[current.account] else {
+            throw MailError.notFound("The mailbox is no longer in the account. Nothing was moved.")
+        }
+        try await sync.moveBack(messageID: messageID, from: current, to: original)
+        changed()
+    }
+
     // MARK: Folders
 
     private func folder(_ rowID: Int64) async throws -> (NativeMailStore.Mailbox, MailAccountSync) {

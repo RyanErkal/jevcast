@@ -15,13 +15,14 @@ struct MailMessageList: View {
         let groups = model.conversationGroups
         let activeRow = model.selectedConversationRowID
         // In a list of several accounts, each row carries its account's mark.
-        let marksAccounts = model.showsAccountMarks
+        let labels = model.showsAccountMarks ? model.accountShortLabels : nil
+        let highlight = model.search.trimmingCharacters(in: .whitespaces)
         return ScrollViewReader { proxy in
             List(selection: selection) {
                 ForEach(groups) { conversation in
                     MailConversationSummaryRow(conversation: conversation,
                         isVIP: !model.vipAddresses.isEmpty && conversation.messages.contains { model.isVIP($0.summary) },
-                        account: marksAccounts ? model.accountMark(conversation.accountID) : nil,
+                        account: labels.flatMap { model.accountMark(conversation.accountID, labels: $0) }, highlight: highlight,
                         delete: { model.delete(conversation.latest.summary.rowID) })
                         .equatable()
                         .tag(conversation.latest.summary.rowID).id(conversation.latest.summary.rowID)
@@ -70,9 +71,10 @@ struct MailMessageList: View {
             }
             .listStyle(.inset)
             .overlay {
-                if model.messages.isEmpty && model.bodySearch != .more && !model.olderOnServer && !model.canSearchServer {
-                    Text(emptyText)
-                        .foregroundStyle(.secondary)
+                if model.messages.isEmpty, model.isLoading, model.search.isEmpty {
+                    MailLoadingRows()
+                } else if model.messages.isEmpty && model.bodySearch != .more && !model.olderOnServer && !model.canSearchServer {
+                    MailEmptyState(symbol: emptySymbol, title: emptyText, detail: emptyDetail)
                 }
             }
             .onChange(of: model.selectedConversationRowID) { _, id in if scrollsToSelection, let id { proxy.scrollTo(id) } }
@@ -93,6 +95,25 @@ struct MailMessageList: View {
         })
     }
 
+    private var emptySymbol: String {
+        if !model.search.isEmpty { return "magnifyingglass" }
+        switch model.place {
+        case .inbox, .unread: return "tray"
+        case .flagged: return "flag"
+        case .drafts: return "doc"
+        case .sent, .outbox: return "paperplane"
+        case .allMail, .mailbox: return "folder"
+        }
+    }
+    private var emptyDetail: String? {
+        if !model.search.isEmpty { return model.searchScope == .mailbox ? "Try All accounts above, or fewer words." : "Try fewer words." }
+        switch model.place {
+        case .inbox: return "New mail shows here as it arrives."
+        case .unread: return "You have read everything."
+        default: return nil
+        }
+    }
+
     private var emptyText: String {
         if !model.search.isEmpty { return model.bodySearch == .running ? "Searching…" : "No matches" }
         if model.place == .drafts, !model.savedDrafts.isEmpty { return "No other drafts" }
@@ -108,10 +129,10 @@ private struct MailServerSearchFooter: View {
             case .available:
                 Text("Showing mail downloaded to this Mac.").foregroundStyle(.secondary)
                 Button(model.search.isEmpty ? "Find \(model.placeTitle.lowercased()) on server" : "Search server mail") { model.searchServer() }
-                    .buttonStyle(.link)
+                    .buttonStyle(.bordered).controlSize(.small)
             case .running: ProgressView("Searching server…").controlSize(.small)
             case .more:
-                Button("Search more server mail") { model.searchServer() }.buttonStyle(.link)
+                Button("Search more server mail") { model.searchServer() }.buttonStyle(.bordered).controlSize(.small)
             case .complete:
                 Text("Server search complete").foregroundStyle(.secondary)
                 Button("Search again") { model.resetServerSearch(); model.searchServer() }.buttonStyle(.link)

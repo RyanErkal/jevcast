@@ -2,9 +2,11 @@ import SwiftUI
 import LauncherCore
 
 /// One selectable row per conversation. Replies live in the reader, not nested list rows.
-/// A small colored mark and the account's address, so a row in a list of several accounts shows where it is.
+/// The account a row belongs to, in a list that holds mail of several accounts: a short name in the
+/// account's own color.
 struct MailAccountMark: Equatable {
     let title: String
+    let label: String
     let color: Color
 
     /// A steady color per account: the same account has the same color after every launch.
@@ -22,49 +24,64 @@ struct MailConversationSummaryRow: View, Equatable {
     let conversation: MailConversation
     var isVIP = false
     var account: MailAccountMark?
+    /// The search words, marked where they occur.
+    var highlight = ""
     var delete: () -> Void = {}
     @State private var hovering = false
+    @Environment(\.colorScheme) private var scheme
 
     nonisolated static func == (lhs: MailConversationSummaryRow, rhs: MailConversationSummaryRow) -> Bool {
-        lhs.conversation == rhs.conversation && lhs.isVIP == rhs.isVIP && lhs.account == rhs.account
+        lhs.conversation == rhs.conversation && lhs.isVIP == rhs.isVIP && lhs.account == rhs.account && lhs.highlight == rhs.highlight
     }
 
     var body: some View {
         let summary = conversation.latest.summary
         HStack(alignment: .top, spacing: 8) {
-            Circle().fill(conversation.hasUnread ? Color.accentColor : Color.clear).frame(width: 7, height: 7).padding(.top, 5)
-            VStack(alignment: .leading, spacing: 1) {
+            Circle().fill(conversation.hasUnread ? Color.accentColor : Color.clear).frame(width: 7, height: 7).padding(.top, 6)
+            VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(summary.sender)
-                        .font(.system(size: 13, weight: conversation.hasUnread ? .semibold : .regular)).lineLimit(1)
+                    Text(marked(summary.sender))
+                        .font(.system(size: MailStyle.sender, weight: conversation.hasUnread ? .semibold : .regular)).lineLimit(1)
                     Spacer(minLength: 6)
                     if isVIP { Image(systemName: "star.fill").foregroundStyle(.yellow).font(.caption).accessibilityLabel("VIP sender") }
-                    if conversation.messages.count > 1 { Text("\(conversation.messages.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
+                    if conversation.messages.count > 1 {
+                        Text("\(conversation.messages.count)").font(.system(size: MailStyle.meta, weight: .medium)).monospacedDigit()
+                            .foregroundStyle(.secondary).padding(.horizontal, 5).background(Color.primary.opacity(0.08), in: Capsule())
+                    }
                     if conversation.hasAttachments { Image(systemName: "paperclip").font(.caption).foregroundStyle(.secondary) }
                     if conversation.isFlagged { Image(systemName: "flag.fill").font(.caption).foregroundStyle(.orange) }
                     if hovering {
                         Button(action: delete) { Image(systemName: "trash") }.buttonStyle(.borderless).help("Delete (⌫)")
                     } else {
-                        Text(MailRow.date(summary.date)).font(.caption).foregroundStyle(.secondary)
+                        Text(MailRow.date(summary.date)).font(.system(size: MailStyle.meta)).foregroundStyle(.secondary)
                     }
                 }
-                Text(conversation.subject.isEmpty ? "No subject" : conversation.subject).font(.system(size: 12))
+                Text(marked(conversation.subject.isEmpty ? "No subject" : conversation.subject)).font(.system(size: MailStyle.subject))
                     .foregroundStyle(conversation.hasUnread ? .primary : .secondary).lineLimit(1)
                 let preview = Self.preview(summary.snippet)
                 if !preview.isEmpty || account != nil {
-                    HStack(spacing: 5) {
+                    HStack(spacing: 6) {
+                        Text(marked(preview)).font(.system(size: MailStyle.preview)).foregroundStyle(.tertiary).lineLimit(1)
+                        Spacer(minLength: 4)
                         if let account {
-                            Circle().fill(account.color).frame(width: 6, height: 6)
-                                .help(account.title).accessibilityLabel("Account " + account.title)
+                            // Darker on a light list, so a pale color still reads.
+                            Text(account.label).font(.system(size: 10, weight: .medium)).foregroundStyle(account.color)
+                                .brightness(scheme == .light ? -0.3 : 0)
+                                .lineLimit(1).padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(account.color.opacity(0.14), in: Capsule())
+                                .fixedSize().help(account.title).accessibilityLabel("Account " + account.title)
                         }
-                        Text(preview).font(.system(size: 11.5)).foregroundStyle(.tertiary).lineLimit(1)
                     }
                 }
             }
         }
-        .padding(.vertical, 3).contentShape(Rectangle())
+        .padding(.vertical, 4).contentShape(Rectangle())
         .onHover { hovering = $0 }
         .accessibilityLabel("\(summary.sender), \(conversation.subject), \(conversation.messages.count) messages")
+    }
+
+    private func marked(_ text: String) -> AttributedString {
+        highlight.isEmpty ? AttributedString(text) : MailStyle.highlighted(text, words: highlight)
     }
 
     /// The start of the message as one line.

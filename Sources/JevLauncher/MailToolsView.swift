@@ -16,10 +16,11 @@ struct MailToolsView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Button { page.tool = nil } label: { Label("Mail", systemImage: "chevron.left") }
+                Button { page.tool = nil } label: { Label("Mail", systemImage: "chevron.left") }.help("Back to Mail (esc)")
+                // The tool's name reads as the title of the pane; the menu switches tools.
                 Picker("Mail tools", selection: Binding(get: { tool }, set: { page.tool = $0 })) {
                     ForEach(MailTool.allCases) { Text($0.rawValue).tag($0) }
-                }.labelsHidden().frame(maxWidth: 270)
+                }.labelsHidden().frame(maxWidth: 270).font(.headline)
                 Spacer()
                 if center.refreshing { ProgressView().controlSize(.small) }
                 Button("Refresh") { center.refresh(full: true) }
@@ -56,8 +57,8 @@ struct MailToolsView: View {
     }
 
     private var coverage: some View {
-        Text("Matches use downloaded mail. Recipient filters require downloaded message bodies.")
-            .font(.caption).foregroundStyle(.secondary).padding(8)
+        Text("Matches use the mail downloaded to this Mac. A match on recipients needs the message's text downloaded too.")
+            .font(.caption).foregroundStyle(.secondary).padding(8).frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 4)
     }
 }
 

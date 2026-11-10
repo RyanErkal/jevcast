@@ -18,6 +18,20 @@ extension MailAccountSync {
         await signal.post(MailSyncRequest(mailboxes: [destination.rowID]))
     }
 
+    /// Puts back a message that was moved a moment ago. The message is found in `current` by its
+    /// exact Message-ID, and it moves only when exactly one message there has that ID.
+    public func moveBack(messageID: String, from current: NativeMailStore.Mailbox, to original: NativeMailStore.Mailbox) async throws {
+        let info = try await actionClient.select(current.name)
+        guard let next = info.uidNext, next > 1 else { throw MailError.notFound("The message is no longer in \(current.name). Nothing was moved.") }
+        let found = try await actionClient.findMessageID(messageID, in: current.name, validity: info.uidValidity, before: next)
+        guard found.count == 1, let uid = found.first else {
+            throw MailError.notFound(found.isEmpty ? "The message is no longer in \(current.name). Nothing was moved."
+                                                   : "More than one message in \(current.name) matches. Nothing was moved.")
+        }
+        try await actionClient.move(uids: IMAPSequenceSet([uid]), to: original.name, in: current.name, validity: info.uidValidity)
+        await signal.post(MailSyncRequest(mailboxes: [current.rowID, original.rowID]))
+    }
+
     /// Removes one message for good, by its UID. Only for a message already in Trash, after the user confirmed.
     public func deletePermanently(_ location: NativeMailStore.Location) async throws {
         try await actionClient.deletePermanently(uids: IMAPSequenceSet([location.uid]), in: location.mailbox.name, validity: try validity(location))

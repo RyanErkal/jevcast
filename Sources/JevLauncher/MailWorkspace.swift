@@ -57,12 +57,17 @@ struct MailWorkspace: View {
                 MailAccountConnectionView(center: page.accountCenter, recovery: page.accountCenter.recovery, accountID: id) {
                     page.accountDetailsID = nil
                 }.id(id)
-            } else if page.composing { ComposeView(model: mail, schedules: page.features?.schedules).id(mail.draft?.id) }
+            } else if page.composing {
+                ComposeView(model: mail, schedules: page.features?.schedules).id(mail.draft?.id)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
             else {
                 MailReader(model: mail, expanded: $page.expanded, features: page.features)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The composer rises into the pane and leaves the same way.
+        .animation(MailStyle.motion, value: page.composing)
     }
 }
 
@@ -93,7 +98,8 @@ struct MailPanelList: View {
                 Button { page.showsSidebar.toggle() } label: { Image(systemName: "sidebar.left") }
                     .help(page.showsSidebar ? "Hide mailboxes" : "Show mailboxes")
                 // Without the sidebar, the title picks the mailbox.
-                if page.showsSidebar { Text(mail.placeTitle).font(.headline).lineLimit(1) }
+                if !mail.search.isEmpty, mail.place != .outbox { Text("Search").font(.headline).lineLimit(1) }
+                else if page.showsSidebar { Text(mail.placeTitle).font(.headline).lineLimit(1) }
                 else { MailPlacePicker(model: mail).font(.headline) }
                 MailEmptyButton(model: mail)
                 Spacer(minLength: 4)
@@ -112,7 +118,7 @@ struct MailPanelList: View {
                 Button { mail.checkMail() } label: { Image(systemName: "arrow.clockwise") }.help("Check for new mail")
                 Button { mail.compose() } label: { Image(systemName: "square.and.pencil") }.help("New message (⌘N)")
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(MailIconButtonStyle())
             MailClosedNote(model: mail)
             // The launcher's field is the search; this picks where it looks.
             if !mail.search.isEmpty, mail.place != .outbox {
@@ -120,8 +126,17 @@ struct MailPanelList: View {
                     ForEach(MailModel.SearchScope.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented).labelsHidden().controlSize(.small)
+                // What was found, and where: the search is the launcher's field above.
+                Text(searchSummary).font(.system(size: MailStyle.meta)).foregroundStyle(.secondary).lineLimit(1)
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
+    private var searchSummary: String {
+        let count = mail.conversationGroups.count
+        let found = count == 0 ? (mail.isLoading ? "Searching" : "No results") : "\(count)\(mail.hasMore ? "+" : "") result\(count == 1 ? "" : "s")"
+        let scope = mail.searchScope == .mailbox ? mail.placeTitle : "all accounts"
+        return found + " for “" + mail.search + "” in " + scope
     }
 }

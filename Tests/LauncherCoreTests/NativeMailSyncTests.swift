@@ -284,6 +284,36 @@ final class NativeMailSyncTests: XCTestCase {
         await engine.stopAll()
     }
 
+    func testUndoMovesBackOnlyTheExactMessageByItsMessageID() async throws {
+        server.deliver(to: "INBOX", subject: "Archive me", messageID: "<undo-1@example.com>")
+        server.deliver(to: "INBOX", subject: "Stay", messageID: "<stay@example.com>")
+        server.deliver(to: "Archive", subject: "Archived long ago", messageID: "<old@example.com>")
+        let engine = makeEngine()
+        await engine.setAccounts([account])
+        try await waitUntil("the first sync") { try self.subjects("INBOX").count == 2 }
+        let inbox = try XCTUnwrap(value("SELECT ROWID FROM mailboxes WHERE name = 'INBOX'"))
+        let archive = try XCTUnwrap(value("SELECT ROWID FROM mailboxes WHERE name = 'Archive'"))
+        let moved = try row("Archive me")
+        // Read before the move: afterwards the row is gone and the server numbers the copy anew.
+        let messageID = await engine.messageID(of: moved)
+        XCTAssertEqual(messageID, "<undo-1@example.com>")
+        try await engine.move(moved, to: archive)
+        XCTAssertEqual(server.mailbox("Archive")!.messages.count, 2)
+        XCTAssertEqual(server.mailbox("INBOX")!.messages.count, 1)
+
+        try await engine.moveBack(messageID: "<undo-1@example.com>", from: archive, to: inbox)
+        XCTAssertEqual(server.mailbox("INBOX")!.messages.count, 2)
+        XCTAssertEqual(server.mailbox("Archive")!.messages.count, 1, "The message that was already archived stays.")
+        try await waitUntil("the message back in the inbox") { try Set(self.subjects("INBOX")) == ["Archive me", "Stay"] }
+
+        // A second undo finds nothing to move and says so.
+        do { try await engine.moveBack(messageID: "<undo-1@example.com>", from: archive, to: inbox); XCTFail("Nothing is left to move back") }
+        catch MailError.notFound(let reason) { XCTAssertTrue(reason.contains("Nothing was moved")) }
+        XCTAssertEqual(server.mailbox("Archive")!.messages.count, 1)
+        XCTAssertEqual(server.mailbox("INBOX")!.messages.count, 2)
+        await engine.stopAll()
+    }
+
     func testMoveDoesNotAllowAStaleHeaderFetchToReinsertTheSourceRow() async throws {
         let uid = server.deliver(to: "INBOX", subject: "Delete during sync")
         let engine = makeEngine()

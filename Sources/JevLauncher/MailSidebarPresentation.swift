@@ -96,15 +96,16 @@ enum MailSidebarAccounts {
         let host = (domain.split(separator: ".").first.map(String.init) ?? "").filter { $0.isLetter || $0.isNumber }
         var base: String
         if words.count >= 2 {
-            base = String(words[0].prefix(1) + words[1].prefix(1))
+            base = String(words[0].prefix(1)) + String(words[1].prefix(1))
         } else if !consumerDomains.contains(domain.lowercased()), let first = local.first, let second = host.first {
             base = String([first, second])
         } else {
             base = String(local.prefix(2))
         }
-        if base.count < 2 { base += (host + "XX").prefix(2 - base.count) }
+        if base.count < 2 { base += String((host + "XX").prefix(2 - base.count)) }
         var candidates = [base]
-        for extra in local.dropFirst() + host + "23456789ABCDEFGHIJKLMNOPQRSTUVWXYZ" where !candidates.contains(base + String(extra)) {
+        let extras: String = String(local.dropFirst()) + host + "23456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        for extra in extras where !candidates.contains(base + String(extra)) {
             candidates.append(base + String(extra))
         }
         return candidates

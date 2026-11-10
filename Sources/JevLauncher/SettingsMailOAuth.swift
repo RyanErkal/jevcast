@@ -33,7 +33,7 @@ struct MailOAuthSetupSection: View {
                 }
                 Text("Saving setup does not connect a mailbox. Add an account to start sign-in.").font(.caption).foregroundStyle(.secondary)
             }
-        } header: { Text("Google and Microsoft Sign-In") }
+        }
         .task { await readSecretStatus() }
     }
     /// "Google is set up. Microsoft is not set up." Yahoo, iCloud, and others need neither.

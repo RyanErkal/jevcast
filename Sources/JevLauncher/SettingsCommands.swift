@@ -99,7 +99,7 @@ struct CommandSettings: View {
                         remove: { preferences.workflows.removeAll { $0.id == workflow.id } })
             }
             HStack { AddButton(title: "Add workflow…") { sheet = .workflow(Workflow(name: "", steps: [])) }; Spacer() }
-        } header: { Text("Workflows") } footer: {
+        } header: { Text("Your workflows") } footer: {
             InfoCaption("Run several actions from one name.",
                         detail: "For example “Coding”: open Xcode, Left Two Thirds, open Terminal, Right Third. A window step arranges the app opened in the step before it.")
         }
@@ -117,7 +117,7 @@ struct CommandSettings: View {
                         remove: { preferences.snippets.removeAll { $0.id == snippet.id } })
             }
             HStack { AddButton(title: "Add snippet…") { sheet = .snippet(Snippet(name: "", text: "")) }; Spacer() }
-        } header: { Text("Snippets") } footer: {
+        } header: { Text("Your snippets") } footer: {
             InfoCaption("Type the name to copy, Shift–Return to paste.",
                         detail: "{date}, {time}, and {clipboard} are filled in when you use the snippet.")
         }

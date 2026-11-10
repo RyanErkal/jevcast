@@ -33,7 +33,7 @@ struct AISettings: View {
             switch part {
             case .jev: JevSettings(preferences: preferences, keys: model.keys, aiWritingKeys: model.aiWritingKeys)
             case .writing: AIWritingSettings(preferences: preferences, log: model.aiWritingLog, jevKeys: model.keys, aiWritingKeys: model.aiWritingKeys, tasks: model.scheduledBriefs)
-            case .usage: UsageSettings(preferences: preferences, usage: JevUsageLog.shared)
+            case .usage: UsageSettings(preferences: preferences, usage: UISnapshots.directory == nil ? .shared : .snapshot)
             }
         }
         .formStyle(.grouped)
@@ -41,7 +41,7 @@ struct AISettings: View {
     }
 }
 
-/// Settings › Mail: the inbox window's options and the access it needs.
+/// Settings › Mail: accounts, reading options, the access Apple Mail needs, and sign-in setup.
 struct MailSettings: View {
     @ObservedObject var preferences: Preferences
     let openMail: () -> Void
@@ -56,15 +56,9 @@ struct MailSettings: View {
 
     var body: some View {
         Form {
-            MailAccountsSection()
+            MailAccountsSection(openMail: openMail)
             Section {
-                Toggle("Load web images, fonts, and styles", isOn: $loadsImages)
-                InfoCaption("Mail never runs scripts.",
-                            detail: "HTML mail can load images, fonts, and style sheets from the web. Senders can see when those load. The ⋯ menu above a message changes this too.")
-                HStack { Spacer(); Button("Open Mail") { openMail() }.controlSize(.small) }
-            } header: { Text("Inbox") }
-            Section {
-                Picker("List and message", selection: $split) {
+                Picker("Layout", selection: $split) {
                     ForEach(MailReading.Split.allCases, id: \.self) { Text($0.title).tag($0.rawValue) }
                 }
                 LabeledContent("Text size") {
@@ -78,9 +72,11 @@ struct MailSettings: View {
                     ForEach(MailReading.MarkRead.allCases, id: \.self) { Text($0.title).tag($0.rawValue) }
                 }
                 Toggle("Prefer plain text", isOn: $prefersPlain)
-                Text("In the launcher, Space shows the message across the full panel. Escape shows the list again.")
-                    .font(.caption).foregroundStyle(.secondary)
-            } header: { Text("Reading") }
+                Toggle("Load web images, fonts, and styles", isOn: $loadsImages)
+            } header: { Text("Reading") } footer: {
+                InfoCaption("Mail never runs scripts. Senders can see when web images load.",
+                            detail: "HTML mail can load images, fonts, and style sheets from the web. The ⋯ menu above a message changes this too. In the launcher, Space shows the message across the full panel. Escape shows the list again.")
+            }
             if native.backend == .appleMail {
                 Section("Access") {
                     SourcePermissionRow(kind: .fullDiskAccess)
@@ -89,12 +85,15 @@ struct MailSettings: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
-            Section("AI Writing") {
+            Section {
                 LabeledContent("AI writing reads mail") {
                     Text(preferences.aiWritingEnabled && preferences.aiWritingSendsMail ? "On" : "Off").foregroundStyle(.secondary)
                 }
+            } footer: {
                 Text("Change this in Settings › AI › Writing.").font(.caption).foregroundStyle(.secondary)
             }
+            // Only Gmail and Outlook sign-in need this, so it stays below everything else.
+            MailOAuthSetupSection()
         }
         .formStyle(.grouped)
     }

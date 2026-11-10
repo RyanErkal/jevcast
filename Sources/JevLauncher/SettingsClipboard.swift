@@ -27,12 +27,13 @@ struct ClipboardSettingsSections: View {
                 Text("Type “clip” or press Hyper-V to open it. Turning history off deletes it.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section("What to record") {
+            Section {
                 Toggle("Text", isOn: settings.recordText)
                 Toggle("Rich text formatting", isOn: settings.recordRichText).disabled(!preferences.clipboardSettings.recordText)
                 Toggle("Images", isOn: settings.recordImages)
                 Toggle("Files and media", isOn: settings.recordFiles)
                 Toggle("Find text in images", isOn: settings.ocr)
+            } header: { Text("What to record") } footer: {
                 InfoCaption("Text in images is found on this Mac.",
                             detail: "Jevcast uses Apple’s Vision framework at low priority. The text is kept with the entry so search finds it, and Copy Text from Image copies it.")
             }
@@ -45,8 +46,7 @@ struct ClipboardSettingsSections: View {
                         } else {
                             Image(systemName: "app.dashed").frame(width: 16, height: 16).foregroundStyle(.secondary)
                         }
-                        Text(Self.appName(bundleID)).lineLimit(1)
-                        Text(bundleID).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        Text(Self.appName(bundleID)).lineLimit(1).help(bundleID)
                         Spacer()
                         RemoveButton(label: "Stop ignoring \(Self.appName(bundleID))") {
                             preferences.clipboardSettings.ignoredApps.removeAll { $0 == bundleID }
@@ -66,13 +66,14 @@ struct ClipboardSettingsSections: View {
             } header: { Text("Ignored apps") } footer: {
                 Text("Copies made while these apps are in front are never recorded.").font(.caption).foregroundStyle(.secondary)
             }
-            Section("Advanced") {
+            Section {
                 Picker("Maximum entries", selection: settings.maxItems) {
                     ForEach(ClipboardSettings.maxItemChoices, id: \.self) { Text($0.formatted()).tag($0) }
                 }
                 Picker("Storage limit", selection: settings.maxBytes) {
                     ForEach(ClipboardSettings.maxByteChoices, id: \.self) { Text(ClipStyle.bytes($0)).tag($0) }
                 }
+            } header: { Text("Advanced") } footer: {
                 Text("The oldest entries go first when a limit is reached.").font(.caption).foregroundStyle(.secondary)
             }
             .disabled(!on)

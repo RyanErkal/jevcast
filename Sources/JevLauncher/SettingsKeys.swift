@@ -10,18 +10,21 @@ struct KeysSettings: View {
     var body: some View {
         Section {
             Toggle("Use Caps Lock as a Hyper key", isOn: $preferences.hyperKeyEnabled)
-            Text("Hold Caps Lock (⇪) and press a key below. While this is on, Caps Lock does not type capitals. When you quit \(AppIdentity.name), Caps Lock works as before.")
-                .font(.caption).foregroundStyle(.secondary)
             if preferences.hyperKeyEnabled { status }
-        } header: { Text("Hyper key") }
+        } header: { Text("Hyper key") } footer: {
+            InfoCaption("Hold Caps Lock (⇪) and press a key below.",
+                        detail: "While this is on, Caps Lock does not type capitals. When you quit \(AppIdentity.name), Caps Lock works as before.")
+        }
         ForEach(HyperGroup.allCases, id: \.self) { group in
             if preferences.hyperBindings.contains(where: { HyperGroup.of($0.action) == group }) {
                 Section {
                     ForEach($preferences.hyperBindings) { $binding in
                         if HyperGroup.of(binding.action) == group {
+                            // Dimmed, not disabled: keys can be set up before the Hyper key is turned on.
                             HyperBindingRow(binding: $binding, duplicate: duplicates.contains(binding.keyCode)) {
                                 preferences.hyperBindings.removeAll { $0.id == binding.id }
                             }
+                            .opacity(preferences.hyperKeyEnabled ? 1 : 0.5)
                         }
                     }
                 } header: { Text("Hyper · " + group.rawValue) }

@@ -44,10 +44,6 @@ struct GeneralSettings: View {
                 Picker("Search the web with", selection: $preferences.webEngine) {
                     Text("Google").tag("Google"); Text("DuckDuckGo").tag("DuckDuckGo")
                 }
-                LabeledContent("Clipboard history") {
-                    Button(preferences.clipboardHistory ? "On · Settings…" : "Off · Settings…") { part = .clipboard }
-                        .buttonStyle(.link)
-                }
             }
             Section {
                 PermissionRow(permission: .accessibility) { windows.requestPermission() }

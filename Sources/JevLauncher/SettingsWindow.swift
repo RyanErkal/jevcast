@@ -102,7 +102,7 @@ final class SettingsWindow: NSWindowController, NSToolbarDelegate {
         case .general: GeneralSettings(preferences: preferences, status: status, updates: updates, speech: model.speech, windows: model.windows, keys: model.keys, history: model.clipboard, changed: changed, resized: resized)
         case .search: SearchSettings(preferences: preferences, catalogue: catalogue)
         case .keys: Form { KeysSettings(preferences: preferences, controller: hyper, resized: resized) }.formStyle(.grouped)
-        case .windows: WindowSettings(preferences: preferences, model: model, changed: changed)
+        case .windows: WindowSettings(preferences: preferences, model: model, changed: changed, resized: resized)
         case .library: CommandSettings(preferences: preferences, catalogue: catalogue, resized: resized)
         case .voice: VoicePane(preferences: preferences, speech: model.speech, dictation: dictation,
                                openAIWritingSettings: { [weak self] in self?.select(.ai) }, resized: resized)

@@ -127,7 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         // Keys moved out of Settings › Windows, which now has one part.
         if UISnapshots.directory == nil { UserDefaults.standard.removeObject(forKey: "settingsWindowsPart") }
         model.openSettingsTab = { [weak self] name in
-            if name == "dictation" { self?.showSettings(tab: .voice, voicePart: .dictation); return }
+            if name == "dictation" { self?.showSettings(tab: .voice); return }
             if let tab = SettingsWindow.Tab(rawValue: name) { self?.showSettings(tab: tab) }
         }
         model.openMail = { [weak self] rowID in self?.showMail(select: rowID) }
@@ -299,7 +299,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             self.settings?.window?.orderFrontRegardless()
         }))
         // Panes with parts render each part. The stored choice is put back after the last capture.
-        let partKeys = ["settingsGeneralPart", "settingsAIPart", "settingsLibraryPart", "settingsAutomationsPart", "settingsVoicePart"]
+        let partKeys = ["settingsGeneralPart", "settingsAIPart", "settingsLibraryPart", "settingsAutomationsPart"]
         let storedParts = partKeys.map { UserDefaults.standard.string(forKey: $0) }
         for tab in SettingsWindow.Tab.allCases {
             let parts: (key: String, values: [String])? = switch tab {
@@ -307,7 +307,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
             case .ai: ("settingsAIPart", AISettings.Part.allCases.map(\.rawValue))
             case .library: ("settingsLibraryPart", CommandSettings.Part.allCases.map(\.rawValue))
             case .automations: ("settingsAutomationsPart", AutomationSettingsPane.Part.allCases.map(\.rawValue))
-            case .voice: ("settingsVoicePart", VoicePane.Part.shown.map(\.rawValue))
             default: nil
             }
             guard let parts else {
@@ -666,9 +665,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
               runWindow: { [weak self] run in self?.showRun(run) },
               terminal: { [weak self] in self?.runningTerminal() })
     }
-    func showSettings(tab: SettingsWindow.Tab, aiPart: AISettings.Part? = nil, voicePart: VoicePane.Part? = nil) {
+    func showSettings(tab: SettingsWindow.Tab, aiPart: AISettings.Part? = nil) {
         if let aiPart { UserDefaults.standard.set(aiPart.rawValue, forKey: "settingsAIPart") }
-        if let voicePart { UserDefaults.standard.set(voicePart.rawValue, forKey: "settingsVoicePart") }
         showSettings()
         settings?.select(tab)
     }

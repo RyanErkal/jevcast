@@ -4,6 +4,7 @@ import LauncherCore
 /// Settings › Mail › Accounts: where mail comes from, and the accounts Jevcast syncs itself.
 struct MailAccountsSection: View {
     @ObservedObject private var center = NativeMailCenter.shared
+    var openMail: (() -> Void)? = nil
     @State private var adding = false
     @State private var passwordFor: NativeMailAccount?
     @State private var removing: NativeMailAccount?
@@ -30,6 +31,7 @@ struct MailAccountsSection: View {
                 Button("Add Account…") { adding = true }
                 Spacer()
                 if center.backend == .jevcast, !center.accounts.isEmpty { Button("Check Now") { center.syncNow() } }
+                if let openMail { Button("Open Mail", action: openMail) }
             }
             if let problem = center.problem { Text(problem).font(.caption).foregroundStyle(.red) }
         } header: { Text("Accounts") }
@@ -43,7 +45,6 @@ struct MailAccountsSection: View {
         } message: { _ in
             Text("Its mail is deleted from this Mac. The mail stays on the server.")
         }
-        MailOAuthSetupSection()
         if center.backend == .jevcast, !center.accounts.isEmpty { DefaultMailAppSection() }
     }
 
@@ -155,7 +156,7 @@ struct AddMailAccountSheet: View {
                     if let oauthProvider {
                         Text("Sign in in your browser. Jevcast requests access to this account's incoming and outgoing mail.").font(.caption).foregroundStyle(.secondary)
                         if (try? MailOAuthSetup.client(oauthProvider)) == nil {
-                            Text("First save the " + oauthProvider.title + " OAuth client ID below Accounts in Settings › Mail.").font(.caption).foregroundStyle(.orange)
+                            Text("First save the " + oauthProvider.title + " OAuth client ID at the bottom of Settings › Mail.").font(.caption).foregroundStyle(.orange)
                             Link("Open " + oauthProvider.title + " App Setup", destination: oauthProvider.setupURL).font(.caption)
                         }
                     } else {

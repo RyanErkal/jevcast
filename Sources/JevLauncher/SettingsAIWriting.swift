@@ -20,19 +20,18 @@ struct AIWritingSettings: View {
 
     var body: some View {
         Group {
-            Section("AI Writing") {
+            Section {
                 Toggle("Use AI for answers and writing", isOn: $preferences.aiWritingEnabled)
-                InfoCaption("Writes text. Never runs actions.",
-                            detail: "Jev decides what a request means. The writing model you choose, through OpenRouter, writes text when a request needs it: “ask …”, rewrites of selected text, and mail summaries and replies. It never runs actions.")
                 Picker("Model", selection: $preferences.aiWritingModel) {
                     ForEach(AIWritingModel.catalog) { Text($0.title).tag($0.id) }
                 }
                 Picker("Reasoning effort", selection: $preferences.aiWritingEffort) {
                     ForEach(ReasoningEffort.aiWritingChoices, id: \.self) { Text($0.title).tag($0) }
                 }
-                Text("Low answers in seconds. Higher efforts think longer and cost more.").font(.caption).foregroundStyle(.secondary)
                 Toggle("Fast", isOn: $preferences.aiWritingFast)
-                Text("Faster replies. Uses more credits.").font(.caption).foregroundStyle(.secondary)
+            } footer: {
+                InfoCaption("Writes text. Never runs actions. Higher efforts and Fast cost more.",
+                            detail: "Jev decides what a request means. The writing model you choose, through OpenRouter, writes text when a request needs it: “ask …”, rewrites of selected text, and mail summaries and replies. It never runs actions. Low effort answers in seconds; higher efforts think longer. Fast gives faster replies and uses more credits.")
             }
             Section("Key") {
                 if usesJevKey {
@@ -50,9 +49,7 @@ struct AIWritingSettings: View {
                 }
                 if !keyMessage.isEmpty { Text(keyMessage).font(.caption).foregroundStyle(.orange) }
             }
-            Section("What AI writing may read") {
-                Text("Text after “ask” is always sent. Everything else is off until you turn it on.")
-                    .font(.caption).foregroundStyle(.secondary)
+            Section {
                 Toggle("Selected text, for rewrites and explanations", isOn: $preferences.aiWritingSendsSelection)
                 Toggle("Mail messages, for summaries and reply drafts", isOn: $preferences.aiWritingSendsMail)
                 Toggle("Calendar and reminders, for scheduled briefs", isOn: $preferences.aiWritingSendsCalendar)
@@ -60,11 +57,13 @@ struct AIWritingSettings: View {
                 if DictationEngines.isSupported {
                     Toggle("Dictation transcripts, to fix punctuation and remove fillers", isOn: $preferences.aiWritingSendsDictation)
                 }
-                InfoCaption("File paths, clipboard history, and audio are never sent.",
-                            detail: "Results stay in Brief Results. Only a failed brief shows an alert below the notch.")
+            } header: { Text("What AI writing may read") } footer: {
+                InfoCaption("Text after “ask” is always sent. The rest is off until you turn it on.",
+                            detail: "File paths, clipboard history, and audio are never sent. Brief results stay in Brief Results. Only a failed brief shows an alert below the notch.")
             }
-            Section("Scheduled Briefs") {
+            Section {
                 ScheduledBriefSettings(center: tasks)
+            } header: { Text("Scheduled Briefs") } footer: {
                 Text("For background work that runs when Jevcast is closed, use Settings › Automations.")
                     .font(.caption).foregroundStyle(.secondary)
             }

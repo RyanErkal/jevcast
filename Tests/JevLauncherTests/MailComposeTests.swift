@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 import LauncherCore
 @testable import JevLauncher
@@ -185,6 +186,38 @@ final class MailComposeTests: XCTestCase {
         page.read(other)
         XCTAssertEqual(model.selectedID, other, "A double click reads the row it hit")
         XCTAssertTrue(page.expanded)
+    }
+
+    /// A real click on the list, sent to a hidden window of the test's own. A drag handler on the
+    /// row once took the click, so the list selected nothing and the preview did not change.
+    func testAClickOnARowShowsItInThePreview() async throws {
+        let model = try await rig.model(delay: 0)
+        let page = MailPage(mail: model)
+        let first = try XCTUnwrap(model.conversationGroups.first?.latest.summary.rowID)
+        let last = try XCTUnwrap(model.conversationGroups.last?.latest.summary.rowID)
+        XCTAssertNotEqual(first, last, "The fixture needs two conversations")
+        page.pick(last)
+        var picked: [Int64] = []
+        let list = MailMessageList(model: model, pick: { picked.append($0); page.pick($0) })
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 400), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: list)
+        window.alphaValue = 0; window.ignoresMouseEvents = true
+        window.orderFrontRegardless()
+        defer { window.orderOut(nil) }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+        // The first row, 24 points below the top edge. Window points start at the bottom.
+        let point = NSPoint(x: 80, y: 400 - 24)
+        func mouse(_ type: NSEvent.EventType) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                             windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        }
+        // The table waits for the mouse to come up, so that event is queued in this process first.
+        NSApp.postEvent(try mouse(.leftMouseUp), atStart: false)
+        window.sendEvent(try mouse(.leftMouseDown))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+        XCTAssertEqual(picked, [first], "The click picks the row it hit")
+        XCTAssertEqual(model.selectedID, first, "The preview shows the clicked message")
     }
 
     func testPickingAMailboxKeepsTheOpenDraftOnScreen() async throws {

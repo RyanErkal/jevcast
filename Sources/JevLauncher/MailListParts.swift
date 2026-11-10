@@ -28,7 +28,8 @@ struct MailMessageList: View {
                         .tag(conversation.latest.summary.rowID).id(conversation.latest.summary.rowID)
                         .listRowBackground(activeRow == conversation.latest.summary.rowID
                             ? Color.accentColor.opacity(0.22) : Color.clear)
-                        .onDrag { NSItemProvider(object: NSString(string: String(conversation.latest.summary.rowID))) }
+                        // Not .onDrag: on a List row it takes the mouse click, so a click selects nothing.
+                        .itemProvider { NSItemProvider(object: NSString(string: String(conversation.latest.summary.rowID))) }
                         .onAppear {
                             if conversation.messages.contains(where: { $0.summary.rowID == model.pageTriggerID }) { model.loadNextPage() }
                         }

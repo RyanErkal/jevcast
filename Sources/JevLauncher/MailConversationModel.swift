@@ -23,15 +23,14 @@ extension MailModel {
         }
     }
 
-    /// A short name for each account, as the sidebar shows it.
-    var accountShortLabels: [String: String] {
-        MailSidebarAccounts.labels(accounts.map { (id: $0, address: accountTitle($0)) })
+    /// Two or three letters for each account, made from its address.
+    var accountCodes: [String: String] {
+        MailSidebarAccounts.codes(accounts.map { (id: $0, address: accountTitle($0)) })
     }
 
-    func accountMark(_ accountID: String, labels: [String: String]) -> MailAccountMark? {
-        guard !accountID.isEmpty else { return nil }
-        let title = accountTitle(accountID)
-        return MailAccountMark(title: title, label: labels[accountID] ?? title, color: MailAccountMark.color(for: accountID))
+    func accountMark(_ accountID: String, codes: [String: String]) -> MailAccountMark? {
+        guard !accountID.isEmpty, let code = codes[accountID] else { return nil }
+        return MailAccountMark(title: accountTitle(accountID), code: code, color: MailAccountMark.color(for: accountID))
     }
 
     var selectedConversation: MailConversation? {

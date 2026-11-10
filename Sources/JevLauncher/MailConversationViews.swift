@@ -2,11 +2,11 @@ import SwiftUI
 import LauncherCore
 
 /// One selectable row per conversation. Replies live in the reader, not nested list rows.
-/// The account a row belongs to, in a list that holds mail of several accounts: a short name in the
-/// account's own color.
+/// The account a row belongs to, in a list that holds mail of several accounts: two or three
+/// letters from its address, on the account's own color.
 struct MailAccountMark: Equatable {
     let title: String
-    let label: String
+    let code: String
     let color: Color
 
     /// A steady color per account: the same account has the same color after every launch.
@@ -64,12 +64,10 @@ struct MailConversationSummaryRow: View, Equatable {
                         Text(marked(preview)).font(.system(size: MailStyle.preview)).foregroundStyle(.tertiary).lineLimit(1)
                         Spacer(minLength: 4)
                         if let account {
-                            // Darker on a light list, so a pale color still reads.
-                            Text(account.label).font(.system(size: 10, weight: .medium)).foregroundStyle(account.color)
-                                .brightness(scheme == .light ? -0.3 : 0)
-                                .lineLimit(1).padding(.horizontal, 5).padding(.vertical, 1)
-                                .background(account.color.opacity(0.14), in: Capsule())
-                                .fixedSize().help(account.title).accessibilityLabel("Account " + account.title)
+                            Text(account.code).font(.system(size: account.code.count > 2 ? 7.5 : 8.5, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white).lineLimit(1)
+                                .frame(width: 18, height: 18).background(Circle().fill(account.color.gradient))
+                                .help(account.title).accessibilityLabel("Account " + account.title)
                         }
                     }
                 }

@@ -208,6 +208,9 @@ final class MailModel: ObservableObject {
     var bodyCursor: MailStore.Cursor?
     var reloading = false
     var refreshing = false
+    /// True from the moment a new list is asked for until its first page is in. Reading the same
+    /// list again leaves it off, so an empty list does not flash the loading rows at each change.
+    var awaitingFirstPage = false
     private let statusProvider: @Sendable () -> MailStore.Status
     private var statusWork: Task<Void, Never>?
     private var indexIdentity: MailStore.FileIdentity?
@@ -454,7 +457,7 @@ final class MailModel: ObservableObject {
                 self.activeFilterRecipientMetadataUnknownRows.removeAll(); self.activeFilterAttachmentMetadataUnknownRows.removeAll()
                 self.activeFilterOffset = 0
                 self.pendingOpen = nil
-                self.loadingMore = false; self.refreshing = false; self.reloading = false
+                self.loadingMore = false; self.refreshing = false; self.reloading = false; self.awaitingFirstPage = false
                 return
             }
             self.fingerprint = MailStore.fingerprint(root: root)
@@ -509,6 +512,7 @@ final class MailModel: ObservableObject {
         listStop = stop
         generation += 1
         loadingMore = false; refreshing = false; reloading = true
+        if !keepSelection { awaitingFirstPage = true }
         bodySearch = .off; bodyCursor = nil
         // A new list may hold older server mail until its first page says. The same list read
         // again keeps its answer, so an empty mailbox does not flicker at every store change.
@@ -524,7 +528,7 @@ final class MailModel: ObservableObject {
                 return (page, boxes, identity, states)
             }.value
             guard !Task.isCancelled, !stop.isStopped, let self, self.generation == generation else { return }
-            self.reloading = false
+            self.reloading = false; self.awaitingFirstPage = false
             let previous = self.selectedID
             guard let (page, boxes, identity, states) = result else {
                 self.fingerprint = ""

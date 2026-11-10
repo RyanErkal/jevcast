@@ -100,6 +100,7 @@ extension MailModel {
         listStop = stop
         generation += 1
         loadingMore = false; refreshing = false; reloading = true
+        if !keepSelection { awaitingFirstPage = true }
         bodySearch = .off; bodyCursor = nil
         activeFilterRows = nil; activeFilterMetadata.removeAll(); activeFilterMetadataUnknownRows.removeAll()
         activeFilterRecipientMetadataUnknownRows.removeAll(); activeFilterAttachmentMetadataUnknownRows.removeAll()
@@ -112,7 +113,7 @@ extension MailModel {
                 try? MailFilterLoader.read(root: root, query: query, boxes: boxesForQuery, filter: filter, stop: { stop.check() })
             }.value
             guard let self, !stop.isStopped, self.generation == generation else { return }
-            self.reloading = false
+            self.reloading = false; self.awaitingFirstPage = false
             guard let result else {
                 self.fingerprint = ""
                 self.banner = "Mail's filtered index could not be read. Try again in a moment."

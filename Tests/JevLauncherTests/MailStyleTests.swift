@@ -45,7 +45,22 @@ final class MailStyleTests: XCTestCase {
 
     func testAccountColorsAreSteady() {
         XCTAssertEqual(MailAccountMark.color(for: "acct-1"), MailAccountMark.color(for: "acct-1"))
-        let mark = MailAccountMark(title: "alex@example.com", label: "Example", color: .blue)
-        XCTAssertEqual(mark, MailAccountMark(title: "alex@example.com", label: "Example", color: .blue))
+        let mark = MailAccountMark(title: "alex@example.com", code: "AE", color: .blue)
+        XCTAssertEqual(mark, MailAccountMark(title: "alex@example.com", code: "AE", color: .blue))
+    }
+
+    func testEachAccountHasItsOwnShortCode() {
+        let codes = MailSidebarAccounts.codes([(id: "a", address: "sam.lee@gmail.com"), (id: "b", address: "sam@acme.example"),
+            (id: "c", address: "morgan@gmail.com"), (id: "d", address: "x@icloud.com")])
+        XCTAssertEqual(codes, ["a": "SL", "b": "SA", "c": "MO", "d": "XI"])
+        // The same two letters: the later account gets a third, and no two codes match.
+        let same = MailSidebarAccounts.codes([(id: "a", address: "sam@acme.example"), (id: "b", address: "sam@apex.example"),
+            (id: "c", address: "sam@acme.example"), (id: "d", address: "sa@gmail.com"), (id: "e", address: "")])
+        XCTAssertEqual(same["a"], "SA")
+        XCTAssertEqual(same["b"], "SAA")
+        XCTAssertEqual(Set(same.values).count, 5)
+        XCTAssertTrue(same.values.allSatisfy { (2...3).contains($0.count) })
+        let many = MailSidebarAccounts.codes((0..<30).map { (id: String(format: "%02d", $0), address: "sam@acme.example") })
+        XCTAssertEqual(Set(many.values).count, 30)
     }
 }

@@ -5,14 +5,16 @@ import LauncherCore
 @MainActor
 final class JevUsageLog: ObservableObject {
     static let shared = JevUsageLog()
+    /// Empty counts in the snapshot suite, so `--snapshot-ui` never shows this Mac's usage.
+    static let snapshot = JevUsageLog(defaults: UserDefaults(suiteName: LauncherSnapshotRig.suite) ?? .standard, empty: true)
 
     @Published private(set) var ledger: [String: JevDayUsage]
     private let defaults: UserDefaults
     private static let key = "jevUsage"
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, empty: Bool = false) {
         self.defaults = defaults
-        ledger = defaults.data(forKey: Self.key).flatMap { try? JSONDecoder().decode([String: JevDayUsage].self, from: $0) } ?? [:]
+        ledger = empty ? [:] : defaults.data(forKey: Self.key).flatMap { try? JSONDecoder().decode([String: JevDayUsage].self, from: $0) } ?? [:]
     }
 
     /// `cost` is the amount the service reported. Without one, the list price for the input tokens is used.

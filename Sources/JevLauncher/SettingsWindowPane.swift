@@ -5,6 +5,7 @@ struct WindowSettings: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var model: LauncherModel
     let changed: () -> Void
+    let resized: () -> Void
     var body: some View {
         Form { windowSections }.formStyle(.grouped)
     }
@@ -14,9 +15,7 @@ private extension WindowSettings {
     private var captionStyle: HierarchicalShapeStyle { preferences.windowShortcuts ? .secondary : .tertiary }
     @ViewBuilder var windowSections: some View {
         Group {
-            Section("Permissions") {
-                PermissionRow(permission: .accessibility) { model.windows.requestPermission() }
-            }
+            MissingPermissions([.init(.accessibility) { model.windows.requestPermission() }], changed: resized)
             Section {
                 Toggle("Snap windows dragged to screen edges", isOn: $preferences.edgeSnapping)
                 Toggle("Use direct window shortcuts", isOn: $preferences.windowShortcuts)

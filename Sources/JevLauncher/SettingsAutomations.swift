@@ -2,10 +2,10 @@ import AppKit
 import LauncherCore
 import SwiftUI
 
-/// Settings › Automations: the background runner, agent defaults, alerts, runs, and Codex.
+/// Settings › Automations: the background runner and runs, agent defaults with Codex import, and alerts.
 /// App-only choices are in Preferences; values the runner reads go through `AutomationCenter.saveSettings`.
 struct AutomationSettingsPane: View {
-    enum Part: String, CaseIterable { case runner = "Runner", agents = "Agents", alerts = "Alerts", codex = "Codex" }
+    enum Part: String, CaseIterable { case runner = "Runner", agents = "Agents", alerts = "Alerts" }
     @ObservedObject var preferences: Preferences
     @ObservedObject var center: AutomationCenter
     let resized: () -> Void
@@ -18,9 +18,10 @@ struct AutomationSettingsPane: View {
             case .runner:
                 RunnerSettingsSection(center: center)
                 RunSettingsSection(preferences: preferences, center: center)
-            case .agents: AgentSettingsSection(preferences: preferences, center: center)
+            case .agents:
+                AgentSettingsSection(preferences: preferences, center: center)
+                CodexSettingsSection(preferences: preferences, center: center)
             case .alerts: AlertSettingsSection(preferences: preferences, center: center)
-            case .codex: CodexSettingsSection(preferences: preferences, center: center)
             }
             if let message = center.message {
                 Section { Label(message, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange) }
@@ -67,8 +68,8 @@ private struct RunnerSettingsSection: View {
                 }
             }
         } header: { Text("Background runner") } footer: {
-            Text("Runs even when Jevcast is closed. It does not run while you are logged out, the Mac is off, or the Mac sleeps. After wake or login, each automation's Missed runs setting decides what happens to missed times.")
-                .font(.caption).foregroundStyle(.secondary)
+            InfoCaption("Runs while Jevcast is closed, but not while the Mac sleeps or you are logged out.",
+                        detail: "After wake or login, each automation's Missed runs setting decides what happens to missed times.")
         }
     }
 
@@ -107,21 +108,17 @@ private struct RunSettingsSection: View {
 
     var body: some View {
         Section {
-            Picker("Runs at once", selection: center.setting(\.maxConcurrentRuns)) {
+            Picker("Runs at the same time", selection: center.setting(\.maxConcurrentRuns)) {
                 ForEach(1...4, id: \.self) { Text("\($0)").tag($0) }
             }
-            Picker("Stop a run after", selection: $preferences.automationTimeoutMinutes) {
+            Picker("Time limit for new automations", selection: $preferences.automationTimeoutMinutes) {
                 ForEach(Preferences.automationTimeoutChoices, id: \.self) { Text($0 == 60 ? "1 hour" : "\($0) minutes").tag($0) }
             }
             Picker("Keep history", selection: center.setting(\.historyDays)) {
                 Text("7 days").tag(7); Text("30 days").tag(30); Text("90 days").tag(90)
             }
-            Toggle("Keep Mac awake while running", isOn: center.setting(\.preventIdleSleep))
-            VStack(alignment: .leading, spacing: 4) {
-                Toggle("Keep awake on power for automations", isOn: center.setting(\.keepAwakeOnPower))
-                Text("While the Mac is on power and an automation is on a schedule, it does not idle sleep, so runs start on time. The display still sleeps and locks. On battery it sleeps as usual. Closing the lid, choosing Sleep, or shutting down still stops runs. After wake or login, each automation's Missed runs setting runs the newest missed time once or skips it.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
+            Toggle("Keep the Mac awake during a run", isOn: center.setting(\.preventIdleSleep))
+            Toggle("Stay awake on power so runs start on time", isOn: center.setting(\.keepAwakeOnPower))
             HStack {
                 Button("Open Automations Folder") {
                     try? center.store.ensureRoot()
@@ -133,15 +130,16 @@ private struct RunSettingsSection: View {
             .controlSize(.small)
             if !note.isEmpty { Text(note).font(.caption).foregroundStyle(.secondary) }
         } header: { Text("Runs") } footer: {
-            Text("The timeout applies to new automations. Each automation can change it in its editor.")
-                .font(.caption).foregroundStyle(.secondary)
+            InfoCaption("Closing the lid, Sleep, or shutting down still stops runs.",
+                        detail: "With Stay awake on power, the Mac does not idle sleep while it is on power and an automation is on a schedule. The display still sleeps and locks. On battery the Mac sleeps as usual. After wake or login, each automation's Missed runs setting runs the newest missed time once or skips it. Each automation can change its time limit in its editor.")
         }
-        Section("Advanced") {
+        Section {
             HStack {
                 TextField("PATH for scripts", text: center.setting(\.scriptPath))
                 Button("Reset") { var s = center.settings; s.scriptPath = defaultPath; center.saveSettings(s) }
                     .controlSize(.small).disabled(center.settings.scriptPath == defaultPath)
             }
+        } header: { Text("Advanced") } footer: {
             Text("Scripts get only this PATH. \(AppIdentity.name) never reads it from a login shell.").font(.caption).foregroundStyle(.secondary)
         }
         .confirmationDialog("Delete all finished run history?", isPresented: $confirmDelete) {
@@ -256,24 +254,26 @@ private struct AlertSettingsSection: View {
                 }
             }
             .disabled(!preferences.automationAlerts)
-            LabeledContent("Test alerts") {
-                HStack(spacing: 6) {
+            LabeledContent("Test alert") {
+                Menu("Show") {
                     ForEach(NotchAlert.Kind.allCases, id: \.self) { kind in
-                        Button(kind.testTitle) { center.showTestAlert(kind) }.controlSize(.small)
+                        Button(kind.testTitle) { center.showTestAlert(kind) }
                     }
                 }
+                .fixedSize()
             }
-        } header: { Text("Alerts") } footer: {
+        } footer: {
             Text("Questions and changes to approve stay until you answer or choose Later. The live indicator shows after 10 seconds and makes no sound. Hyper-N shows the last alert again.")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        Section("Quiet hours") {
+        Section {
             Toggle("Hold alerts during quiet hours", isOn: $preferences.automationQuietHours)
             Group {
                 DatePicker("From", selection: minutes($preferences.automationQuietStart), displayedComponents: .hourAndMinute)
                 DatePicker("Until", selection: minutes($preferences.automationQuietEnd), displayedComponents: .hourAndMinute)
             }
             .disabled(!preferences.automationQuietHours)
+        } header: { Text("Quiet hours") } footer: {
             Text("Work still runs. Alerts show when quiet hours end.").font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -315,7 +315,7 @@ private struct CodexSettingsSection: View {
                 let active = center.codex.filter { $0.status == .active }.count
                 Text(center.codex.isEmpty ? "None" : "\(center.codex.count) (\(active) active)").foregroundStyle(.secondary)
             }
-        } header: { Text("Codex") } footer: {
+        } header: { Text("Codex automations") } footer: {
             Text("Read only. Jevcast never changes Codex's files. Import a copy in the Automations window; it starts paused.")
                 .font(.caption).foregroundStyle(.secondary)
         }

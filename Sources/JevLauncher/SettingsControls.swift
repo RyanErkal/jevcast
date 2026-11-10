@@ -29,6 +29,47 @@ struct PermissionRow: View {
     }
 }
 
+/// Permission rows for a feature pane: only the ones still missing, so a pane that has what it needs shows none.
+/// Settings › General lists every permission.
+struct MissingPermissions: View {
+    struct Item {
+        let permission: Permission
+        /// Shown below the rows while this permission is missing.
+        let note: String?
+        let request: (() -> Void)?
+        init(_ permission: Permission, note: String? = nil, request: (() -> Void)? = nil) {
+            self.permission = permission; self.note = note; self.request = request
+        }
+    }
+    private let items: [Item]
+    private let changed: () -> Void
+    @State private var missing: Set<Permission>
+    private let refresh = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
+
+    @MainActor init(_ items: [Item], changed: @escaping () -> Void = {}) {
+        self.items = items; self.changed = changed
+        // Read now, not on appear, so the window measures the pane without rows it will not show.
+        _missing = State(initialValue: Set(items.map(\.permission).filter { !$0.isGranted }))
+    }
+    var body: some View {
+        let shown = items.filter { missing.contains($0.permission) }
+        if !shown.isEmpty {
+            Section {
+                ForEach(shown, id: \.permission) { item in
+                    PermissionRow(permission: item.permission, request: item.request)
+                }
+            } header: { Text("Permissions") } footer: {
+                let notes = shown.compactMap(\.note)
+                if !notes.isEmpty { Text(notes.joined(separator: " ")).font(.caption).foregroundStyle(.secondary) }
+            }
+            .onReceive(refresh) { _ in
+                let now = Set(items.map(\.permission).filter { !$0.isGranted })
+                if now != missing { missing = now; changed() }
+            }
+        }
+    }
+}
+
 /// "Open at login", the approval hint, and any error, for Settings and the welcome window.
 struct LoginItemRows: View {
     @ObservedObject var preferences: Preferences

@@ -12,7 +12,7 @@ struct MailOfflineSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Text("Choose what Jevcast keeps on this Mac. Recent mail preserves the current bounded behavior. Folder history and bodies continue in small background steps.")
+                Text("Choose what Jevcast keeps on this Mac. Recent mail keeps only the newest messages. Longer history and message text download in the background, a little at a time.")
                     .font(.callout).foregroundStyle(.secondary)
             }
             ForEach(center.accounts) { account in
@@ -81,8 +81,8 @@ private struct MailOfflineAccountPolicyRow: View {
                 }
             }
             Toggle("Index message bodies", isOn: $policy.indexBodies)
-            Toggle("Keep attachment bytes for offline reading", isOn: $policy.downloadAttachments)
-            Toggle("Pause background offline work", isOn: $policy.paused)
+            Toggle("Keep attachments for offline reading", isOn: $policy.downloadAttachments)
+            Toggle("Pause offline downloads", isOn: $policy.paused)
             VStack(alignment: .leading, spacing: 8) {
                 Text("Offline coverage").font(.headline)
                 if coverage.isEmpty {

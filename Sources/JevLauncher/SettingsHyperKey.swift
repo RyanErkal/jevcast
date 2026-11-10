@@ -26,7 +26,7 @@ struct HyperBindingRow: View {
                 }
                 Section("Send a key") {
                     ForEach(HyperLayer.sendableKeys, id: \.self) { code in
-                        Button("Send " + HyperLayer.keyName(code)) { binding.action = .sendKey(code) }
+                        Button(HyperActionTitle.sentKey(code)) { binding.action = .sendKey(code) }
                     }
                 }
                 Button("Open App…") { if let id = Self.chooseApp() { binding.action = .openApp(id) } }
@@ -53,10 +53,16 @@ struct HyperBindingRow: View {
 }
 
 enum HyperActionTitle {
+    /// A key the Hyper layer sends, in words: "Left arrow" reads better in a menu than "Send ←".
+    static func sentKey(_ code: UInt16) -> String {
+        let words: [UInt16: String] = [123: "Left arrow", 124: "Right arrow", 126: "Up arrow", 125: "Down arrow", 36: "Return",
+                                       53: "Escape", 51: "Delete", 117: "Forward delete", 48: "Tab"]
+        return words[code] ?? HyperLayer.keyName(code)
+    }
     @MainActor static func of(_ action: HyperAction) -> String {
         switch action {
         case .builtIn(let id): return HyperBuiltIn(rawValue: id)?.title ?? "Unknown action"
-        case .sendKey(let code): return "Send " + HyperLayer.keyName(code)
+        case .sendKey(let code): return sentKey(code)
         case .openApp(let id):
             guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) else { return "Open \(id) (not found)" }
             return "Open " + FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")

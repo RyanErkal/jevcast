@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Settings › Voice › Voice input: the sections for voice input and its permissions.
+/// Settings › Voice: the voice input section.
 struct VoiceSettings: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var speech: SpeechService
@@ -12,18 +12,14 @@ struct VoiceSettings: View {
     }
 
     var body: some View {
-            Section("Voice input") {
-                Toggle("Listen when the launcher opens", isOn: $preferences.voiceEnabled)
-                Text("Uses on-device speech recognition. Audio is not saved.")
-                    .font(.caption).foregroundStyle(.secondary)
+        Section {
+            Toggle("Listen when the launcher opens", isOn: $preferences.voiceEnabled)
+            if let speechStatus {
+                Text(speechStatus).font(.caption).foregroundStyle(speech.errorMessage == nil ? Color.secondary : Color.orange)
             }
-            Section("Permissions") {
-                PermissionRow(permission: .microphone, request: VoicePermissions.request(.microphone, speech: speech))
-                PermissionRow(permission: .speech, request: VoicePermissions.request(.speech, speech: speech))
-                if let speechStatus {
-                    Text(speechStatus).font(.caption).foregroundStyle(speech.errorMessage == nil ? Color.secondary : Color.orange)
-                }
-            }
+        } header: { Text("Voice input") } footer: {
+            Text("Speech is changed to text on this Mac. Audio is not saved.").font(.caption).foregroundStyle(.secondary)
+        }
     }
 }
 
@@ -60,22 +56,20 @@ struct JevSettings: View {
             InfoCaption(sharedWithAIWriting ? "Used by Jev and AI writing." : "Optional. A TypeSafe or OpenRouter key.",
                         detail: "Jev, a model from TypeSafe, matches loose requests such as “make this window bigger”. Use a TypeSafe key, or an OpenRouter key (sk-or-…) to run Jev through OpenRouter. AI writing uses an OpenRouter Jev key when it has no key of its own.")
         }
-        Section("Natural language") {
+        Section {
             // Without a key the toggle reads off, whatever the stored preference is.
-            Toggle("Use Jev for natural-language matching", isOn: Binding(
+            Toggle("Understand loose requests", isOn: Binding(
                 get: { keys.hasKey && preferences.jevEnabled }, set: { preferences.jevEnabled = $0 }
             )).disabled(!keys.hasKey)
+            Toggle("More accurate matching", isOn: $preferences.jevLayered).disabled(!keys.hasKey || !preferences.jevEnabled)
+        } header: { Text("Matching") } footer: {
             if keys.hasKey {
-                InfoCaption("Reads each request after a short pause.",
-                            detail: "Jev gets the typed or spoken text and candidate names, never file paths, command text, or audio.")
+                InfoCaption("Jev matches a request such as “make this window bigger” to an action.",
+                            detail: "Jev reads each request after a short pause. It gets the typed or spoken text and candidate names, never file paths, command text, or audio. With more accurate matching, Jev also names the kind of request, such as “open an app” or “move a window”. When that disagrees with its first pick, it chooses again among every item of that kind. Most requests then cost two small calls at once; a disagreement adds a third.")
             } else {
-                Text("Add a key to turn this on.").font(.caption).foregroundStyle(.secondary)
+                Text("Jev matches a request such as “make this window bigger” to an action. Add a key to turn this on.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
-        }
-        Section("Advanced") {
-            Toggle("Check the kind of request first", isOn: $preferences.jevLayered).disabled(!keys.hasKey || !preferences.jevEnabled)
-            InfoCaption("More accurate. Usually two small calls.",
-                        detail: "Jev also names the kind of request, such as “open an app” or “move a window”. When that disagrees with its first pick, it chooses again among every item of that kind. Most requests cost two small calls at once; a disagreement adds a third.")
         }
     }
 

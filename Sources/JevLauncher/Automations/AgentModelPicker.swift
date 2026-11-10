@@ -31,11 +31,9 @@ struct AgentProviderFields: View {
             ForEach(effortChoices, id: \.self) { Text($0.title).tag($0) }
         }
         if AgentModelCatalog.supportsFast(runner) {
-            Picker("Speed", selection: $fast) { Text("Normal").tag(false); Text("Fast").tag(true) }
-                .pickerStyle(.segmented)
+            Toggle("Fast", isOn: $fast)
         } else {
-            Picker("Speed", selection: .constant(false)) { Text("Normal").tag(false) }
-                .pickerStyle(.segmented).disabled(true)
+            Toggle("Fast", isOn: .constant(false)).disabled(true)
             Text("Only normal speed for now.").font(.caption).foregroundStyle(.secondary)
         }
     }

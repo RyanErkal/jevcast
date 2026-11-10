@@ -85,9 +85,9 @@ Press **Option–Space** and type. If another app already uses that shortcut, ch
 
 ## Optional: Jev by TypeSafe AI
 
-Jevcast finds apps, files, and actions locally. To match a loose request to one of those actions, add your own [TypeSafe AI](https://typesafe.ai) API key, or an [OpenRouter](https://openrouter.ai/typesafe/jev-1.13) key to run Jev through OpenRouter, in Settings › AI › Jev and turn on **Use Jev for natural-language matching**. Jevcast picks the service from the key: an `sk-or-` key goes to OpenRouter. The key is kept in your macOS Keychain. Local results never wait for Jev.
+Jevcast finds apps, files, and actions locally. To match a loose request to one of those actions, add your own [TypeSafe AI](https://typesafe.ai) API key, or an [OpenRouter](https://openrouter.ai/typesafe/jev-1.13) key to run Jev through OpenRouter, in Settings › AI › Jev and turn on **Understand loose requests**. Jevcast picks the service from the key: an `sk-or-` key goes to OpenRouter. The key is kept in your macOS Keychain. Local results never wait for Jev.
 
-**Two steps.** Jev also names the kind of request, such as "open an app", "move a window", or "calendar", in a second small call at the same time. When the kind and the pick agree, the pick stands. When they differ, Jev chooses again among every item of that kind, for example all your apps rather than the first 120 candidates. A window move that loosely names a running app, such as "put the chrom one on the left", then asks which app. Turn this off in Settings › AI › Jev.
+**Two steps.** Jev also names the kind of request, such as "open an app", "move a window", or "calendar", in a second small call at the same time. When the kind and the pick agree, the pick stands. When they differ, Jev chooses again among every item of that kind, for example all your apps rather than the first 120 candidates. A window move that loosely names a running app, such as "put the chrom one on the left", then asks which app. **More accurate matching** in Settings › AI › Jev turns this off.
 
 Jev reads each request after a short pause, typed or spoken. It receives that text and a short list of candidate names: apps, System Settings panes, window actions, built-in commands, your own commands, workflows, Shortcuts, and snippets by name, menu item names from the app you were using, sites, files, and folders. It can only choose from that list or return no match. It never writes a command. A whole-name match you typed stays first. Jevcast does not add file or folder paths, clipboard text, or audio to the request. Any path you type yourself is part of the text sent. See [Privacy](#privacy) for the full network details.
 
@@ -207,7 +207,7 @@ History is saved in `~/Library/Application Support/Jevcast/Clipboard`, readable 
 
 ### Dictation
 
-On macOS 26 or later, turn on **Hold Right Command to dictate** in Settings › Voice › Dictation. Hold Right Command, speak, and let go: the text goes into the app in front. Speech is changed to text on this Mac. Audio stays in memory and is never saved or sent. Transcripts are kept as text in `~/Library/Application Support/Jevcast/Dictation` for 30 days by default, and `dictation history` lists them. AI writing can also fix punctuation, but only after you turn on **Dictation transcripts** in Settings › AI › Writing.
+On macOS 26 or later, turn on **Hold Right Command to dictate** in Settings › Voice. Hold Right Command, speak, and let go: the text goes into the app in front. Speech is changed to text on this Mac. Audio stays in memory and is never saved or sent. Transcripts are kept as text in `~/Library/Application Support/Jevcast/Dictation` for 30 days by default, and `dictation history` lists them. AI writing can also fix punctuation, but only after you turn on **Dictation transcripts** in Settings › AI › Writing.
 
 ### Hyper key
 

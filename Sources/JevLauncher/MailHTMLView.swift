@@ -34,7 +34,7 @@ struct MailHTMLView: NSViewRepresentable {
     /// For a message that is only text: no layout, images, or colors of its own. It follows the
     /// Mac's light or dark appearance and keeps lines to a width that reads well. A designed message
     /// never gets this, so it shows on the white page its sender expected.
-    static let plainStyle = "<style>:root{color-scheme:light dark}:where(body){max-width:760px}"
+    static let plainStyle = "<style>:root{color-scheme:light dark}:where(body){max-width:760px;font-size:14.5px;line-height:1.45}"
         + "@media (prefers-color-scheme:dark){:where(body){background:#1c1c1e;color:#e8e8ea}:where(a){color:#6cb4ff}}</style>"
     /// Without fitting, the page still scrolls both ways when it is wider than the pane.
     static let scrollStyle = "<style>html,body{overflow:auto!important}</style>"

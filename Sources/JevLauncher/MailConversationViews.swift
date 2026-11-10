@@ -28,6 +28,7 @@ struct MailConversationSummaryRow: View, Equatable {
     var highlight = ""
     var delete: () -> Void = {}
     @State private var hovering = false
+    @Environment(\.colorScheme) private var scheme
 
     nonisolated static func == (lhs: MailConversationSummaryRow, rhs: MailConversationSummaryRow) -> Bool {
         lhs.conversation == rhs.conversation && lhs.isVIP == rhs.isVIP && lhs.account == rhs.account && lhs.highlight == rhs.highlight
@@ -63,7 +64,9 @@ struct MailConversationSummaryRow: View, Equatable {
                         Text(marked(preview)).font(.system(size: MailStyle.preview)).foregroundStyle(.tertiary).lineLimit(1)
                         Spacer(minLength: 4)
                         if let account {
+                            // Darker on a light list, so a pale color still reads.
                             Text(account.label).font(.system(size: 10, weight: .medium)).foregroundStyle(account.color)
+                                .brightness(scheme == .light ? -0.3 : 0)
                                 .lineLimit(1).padding(.horizontal, 5).padding(.vertical, 1)
                                 .background(account.color.opacity(0.14), in: Capsule())
                                 .fixedSize().help(account.title).accessibilityLabel("Account " + account.title)

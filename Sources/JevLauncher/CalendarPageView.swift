@@ -270,20 +270,26 @@ struct CalendarEventButton: View {
     var selected = false
     var style = Style.title
     var fillsHeight = false
+    /// The room across, when the caller knows it. A narrow event, as in Week, drops what does not
+    /// fit before it cuts the title: the call mark first, then the time.
+    var width: CGFloat?
     let select: () -> Void
+
+    private var narrow: Bool { (width ?? .infinity) < 96 }
+    private var tiny: Bool { (width ?? .infinity) < 62 }
 
     var body: some View {
         Button(action: select) {
-            HStack(alignment: .top, spacing: 5) {
+            HStack(alignment: .top, spacing: narrow ? 3 : 5) {
                 RoundedRectangle(cornerRadius: 1.5).fill(event.color).frame(width: 3)
                     .frame(maxHeight: style == .block ? .infinity : 14)
                 content
                 Spacer(minLength: 0)
-                if event.meetingURL != nil && style != .title {
+                if event.meetingURL != nil && style != .title && !narrow {
                     Image(systemName: "video.fill").font(.system(size: 8)).foregroundStyle(.secondary).padding(.top, 3)
                 }
             }
-            .padding(.leading, 3).padding(.trailing, 5).padding(.vertical, 3)
+            .padding(.leading, 3).padding(.trailing, narrow ? 2 : 5).padding(.vertical, 3)
             .frame(maxWidth: .infinity, maxHeight: fillsHeight ? .infinity : nil, alignment: .topLeading)
             .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(event.color.opacity(selected ? 0.34 : event.allDay ? 0.24 : 0.16)))
             .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(event.color.opacity(selected ? 0.85 : 0), lineWidth: 1))
@@ -295,7 +301,7 @@ struct CalendarEventButton: View {
     }
 
     @ViewBuilder private var content: some View {
-        let title = Text(event.title).font(.system(size: 11.5, weight: .semibold))
+        let title = Text(event.title).font(.system(size: narrow ? 10.5 : 11.5, weight: .semibold)).allowsTightening(true)
         switch style {
         case .title: title.lineLimit(1)
         case .line:
@@ -306,10 +312,12 @@ struct CalendarEventButton: View {
             }
         case .block:
             VStack(alignment: .leading, spacing: 1) {
-                title.lineLimit(2)
+                // In a very narrow column one cut line reads better than a word split across two.
+                title.lineLimit(tiny ? 1 : 2)
                 ViewThatFits(in: .horizontal) {
                     time(start + " – " + event.end.formatted(date: .omitted, time: .shortened))
                     time(start)
+                    Color.clear.frame(width: 0, height: 0)
                 }
             }
         }

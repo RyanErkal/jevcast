@@ -109,6 +109,13 @@ sends the list's own email and the web option only opens the browser. `MailtoLin
 default mail app (the `mailto` URL type is in the Info.plist that `scripts/build.sh` writes). Folder changes
 are in `MailAccountSync+Folders`: CREATE, RENAME, and DELETE only after STATUS reports no messages.
 
+`MailStyle` holds Mail's text sizes, reading width, motion, and small shared views (avatar, icon button
+style, empty state, loading rows). `MailUndo.swift` records the last archive, delete, or move as a
+`MailUndoableChange`; `undoLastChange` waits for the change, then reuses the bulk undo path. For a Jevcast
+account the move back goes through `NativeMailEngine.moveBack`, which finds the message by exact Message-ID,
+because the server gives a moved message a new UID and the old row is gone. `MailActionsMenu` (⌘K) and
+`MailMoveMenu` (⇧⌘M) are AppKit menus opened from the keyboard.
+
 The conversation reader document (`MailThreadHTML`) uses `<details>` for each reply, so older read replies
 start closed without any script. `MailModel.conversationGroups` is cached until the rows, mailboxes, or
 learned headers change, and `MailConversationSummaryRow` is `Equatable`, so a redraw of the model does not

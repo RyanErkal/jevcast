@@ -2,6 +2,30 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.23.0] - 2026-11-10
+
+### Added
+
+- **Undo in Mail.** Archive, Delete, and Move show a note with Undo for eight seconds, and ⌘Z puts the message back. A Jevcast account finds the moved message by its exact Message-ID and moves it only when exactly one message matches. A delete in Trash is permanent and has no undo.
+- **Actions menu.** ⌘K lists every action for the selected message with its key. The footer shows three keys in place of seven.
+- **Search feedback.** The list says how many results there are and where it looked, and marks the search words in each row.
+
+### Changed
+
+- **Composer.** Cc and Bcc show when asked for or when they hold an address. The quoted original stays behind one line with Show Original; it is still sent. Discard is quiet beside Send.
+- **One text scale in Mail.** The list, reader, and conversation use larger, consistent sizes. A plain message wraps at a width that reads well and follows dark appearance; a designed message keeps its white page.
+- **Reader.** The sender has initials on a steady color, attachments say "PDF document" in place of a MIME type, and Reply is the labelled main action.
+- **Account in a mixed list.** A short account name in the account's color replaces the dot under the unread mark.
+- **Motion and hover.** A removed row slides away, the composer and the Undo note move in and out, and toolbar buttons light up under the pointer. Nothing moves with Reduce Motion on.
+- **Empty and loading states.** An empty list says what is true and what to do next. The first page shows placeholder rows while it loads.
+- **Calendar Week.** A narrow event drops the call mark and the time before it cuts its title.
+- **Settings › Mail.** The Google and Microsoft sign-in setup stays closed until asked for, and its fields have visible boxes.
+- **Mail tools.** Rules and Smart Mailboxes use the pane's width. Delete sits apart from Save, and the notes use plain words.
+
+### Verification limits
+
+- Checked with the offline test suite, including a fake-server test of Undo, a universal build, and demo snapshots. Not checked live: Undo against a real server, the ⌘K and ⇧⌘M menus with a real keyboard, and the motion itself.
+
 ## [1.22.0] - 2026-11-09
 
 ### Added

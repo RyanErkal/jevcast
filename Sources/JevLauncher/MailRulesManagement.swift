@@ -180,7 +180,7 @@ struct MailRulesView: View {
                 }
             }
             }
-            .frame(width: 220)
+            .frame(width: 260)
             Divider()
             Form {
                 Section("Rule") {
@@ -219,25 +219,28 @@ struct MailRulesView: View {
                             Text(folder.name).tag(String(folder.id))
                         }
                     }
-                    Text("Move identity is checked again when the action runs.").font(.caption).foregroundStyle(.secondary)
+                    Text("Before a rule moves a message, Jevcast checks that it is still the same message.").font(.caption).foregroundStyle(.secondary)
                 }
                 HStack {
-                    Button("Save") { save() }.keyboardShortcut(.defaultAction)
+                    Button("Save") { save() }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
                     Button("Preview Matches") { preview() }
                     if controller.preview != nil {
                         Button("Apply to Preview…") { Task { await controller.applyPreview() } }
                     }
-                    if let id = selectedID { Button("Delete", role: .destructive) { controller.delete(id: id); newRule() } }
+                    // Away from Save, so a slip of the pointer does not remove the rule.
+                    Spacer()
+                    if let id = selectedID { Button("Delete Rule", role: .destructive) { controller.delete(id: id); newRule() } }
                 }
                 if let preview = controller.preview {
-                    Text("Preview: \(preview.count) exact match\(preview.count == 1 ? "" : "es"). Apply is explicit and runs only for these messages.")
+                    Text("\(preview.count) message\(preview.count == 1 ? " matches" : "s match"). Apply to Preview changes only these messages.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if let message = controller.message { Text(message).font(.caption).foregroundStyle(.orange) }
             }
             .formStyle(.grouped)
             .padding()
-            .frame(width: 400)
+            .frame(minWidth: 360, maxWidth: 640)
+            Spacer(minLength: 0)
         }
         .onAppear { selectFirst() }
         .onChange(of: selectedID) { _, id in load(id) }

@@ -7,20 +7,39 @@ struct MailOAuthSetupSection: View {
     @State private var secret = ""
     @State private var secretStatus: String?
     @State private var note: String?
+    /// The setup steps stay closed until asked for. Most accounts never need them.
+    @State private var expanded = false
     var body: some View {
-        Section("Google and Microsoft Sign-In") {
-            setup(.google, value: $google)
-            SecureField("Google desktop client secret (optional)", text: $secret)
-            Text("Leave this empty to keep the saved secret. Secrets and mail tokens stay in the Keychain.").font(.caption).foregroundStyle(.secondary)
-            if let secretStatus { Text(secretStatus).font(.caption).foregroundStyle(.secondary) }
-            setup(.microsoft, value: $microsoft)
+        Section {
             HStack {
-                Button("Save Sign-In Setup") { save() }
-                if let note { Text(note).font(.caption).foregroundStyle(.secondary) }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sign-in setup for Gmail and Outlook")
+                    Text(summary).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(expanded ? "Done" : "Set Up…") { expanded.toggle() }
             }
-            Text("Saving setup does not connect a mailbox. Add an account to start sign-in.").font(.caption).foregroundStyle(.secondary)
-        }
+            if expanded {
+                setup(.google, value: $google)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Google client secret (optional)").font(.system(size: 13, weight: .medium))
+                    SecureField("", text: $secret, prompt: Text("Leave empty to keep the saved secret")).textFieldStyle(.roundedBorder).labelsHidden()
+                    Text(secretStatus ?? "Secrets and mail tokens stay in the Keychain.").font(.caption).foregroundStyle(.secondary)
+                }
+                setup(.microsoft, value: $microsoft)
+                HStack {
+                    Button("Save Sign-In Setup") { save() }.buttonStyle(.borderedProminent)
+                    if let note { Text(note).font(.caption).foregroundStyle(.secondary) }
+                }
+                Text("Saving setup does not connect a mailbox. Add an account to start sign-in.").font(.caption).foregroundStyle(.secondary)
+            }
+        } header: { Text("Google and Microsoft Sign-In") }
         .task { await readSecretStatus() }
+    }
+    /// "Google is set up. Microsoft is not set up." Yahoo, iCloud, and others need neither.
+    private var summary: String {
+        let state = { (value: String) in value.isEmpty ? "is not set up" : "is set up" }
+        return "Google \(state(google)). Microsoft \(state(microsoft)). Other mail providers need no setup here."
     }
     private func readSecretStatus() async {
         guard UISnapshots.directory == nil else { return }
@@ -33,8 +52,11 @@ struct MailOAuthSetupSection: View {
     }
     private func setup(_ provider: MailOAuthProvider, value: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            TextField(provider.title + " OAuth client ID", text: value)
-            Text(provider.instructions).font(.caption).foregroundStyle(.secondary)
+            Text(provider.title + " client ID").font(.system(size: 13, weight: .medium))
+            // A visible box: an empty field with no border looks like no field at all.
+            TextField("", text: value, prompt: Text("Paste the client ID")).textFieldStyle(.roundedBorder).labelsHidden()
+                .accessibilityLabel(provider.title + " OAuth client ID")
+            Text(provider.instructions).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Link("Open " + provider.title + " App Setup", destination: provider.setupURL).font(.caption)
         }
     }

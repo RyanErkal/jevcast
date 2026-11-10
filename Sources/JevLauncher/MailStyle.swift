@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// One scale for Mail's text, spacing, and motion, close to the launcher's own, so Mail reads as
 /// part of the same app.
@@ -19,14 +18,32 @@ enum MailStyle {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .easeOut(duration: 0.18)
     }
 
-    /// "PDF document · 2 KB" in place of a MIME type.
+    /// "PDF document · 2 KB" in place of a MIME type. The names come from a fixed table, not from
+    /// macOS, so drawing a row never waits for another process.
     static func kind(mimeType: String, filename: String) -> String {
-        let fromName = (filename as NSString).pathExtension
-        if let type = UTType(mimeType: mimeType) ?? UTType(filenameExtension: fromName), let name = type.localizedDescription, !name.isEmpty {
-            return name.prefix(1).uppercased() + name.dropFirst()
+        let ext = (filename as NSString).pathExtension.lowercased()
+        if let name = kinds[ext] { return name }
+        let type = mimeType.lowercased()
+        if let name = kinds[String(type.split(separator: "/").last ?? "")] { return name }
+        switch type.split(separator: "/").first.map(String.init) ?? "" {
+        case "image": return "Image"
+        case "audio": return "Audio"
+        case "video": return "Video"
+        case "text": return "Text file"
+        default: return ext.isEmpty || ext.count > 8 ? "File" : ext.uppercased() + " file"
         }
-        return fromName.isEmpty ? "File" : fromName.uppercased() + " file"
     }
+
+    private static let kinds: [String: String] = [
+        "pdf": "PDF document", "doc": "Word document", "docx": "Word document", "pages": "Pages document", "rtf": "Rich text",
+        "xls": "Spreadsheet", "xlsx": "Spreadsheet", "numbers": "Numbers spreadsheet", "csv": "CSV file",
+        "ppt": "Presentation", "pptx": "Presentation", "key": "Keynote presentation",
+        "png": "Image", "jpg": "Image", "jpeg": "Image", "gif": "Image", "heic": "Image", "webp": "Image", "tiff": "Image", "svg": "Image",
+        "mp4": "Video", "mov": "Video", "m4v": "Video", "mp3": "Audio", "m4a": "Audio", "wav": "Audio",
+        "zip": "ZIP archive", "gz": "Archive", "tar": "Archive", "7z": "Archive", "dmg": "Disk image",
+        "txt": "Text file", "md": "Text file", "html": "Web page", "htm": "Web page", "json": "JSON file", "xml": "XML file",
+        "ics": "Calendar file", "calendar": "Calendar file", "vcf": "Contact card", "eml": "Email message", "rfc822": "Email message"
+    ]
 
     /// One or two letters for a sender with no picture: "Sam Lee" gives "SL".
     static func initials(_ name: String) -> String {

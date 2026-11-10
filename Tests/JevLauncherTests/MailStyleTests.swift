@@ -5,8 +5,10 @@ import SwiftUI
 @MainActor
 final class MailStyleTests: XCTestCase {
     func testAnAttachmentShowsAKindOfFileNotAMIMEType() {
-        XCTAssertFalse(MailStyle.kind(mimeType: "application/pdf", filename: "Agenda.pdf").contains("/"))
-        XCTAssertTrue(MailStyle.kind(mimeType: "application/pdf", filename: "Agenda.pdf").localizedCaseInsensitiveContains("PDF"))
+        XCTAssertEqual(MailStyle.kind(mimeType: "application/pdf", filename: "Agenda.pdf"), "PDF document")
+        XCTAssertEqual(MailStyle.kind(mimeType: "application/pdf", filename: "scan"), "PDF document", "The type names the file when its name does not.")
+        XCTAssertEqual(MailStyle.kind(mimeType: "application/octet-stream", filename: "Budget.XLSX"), "Spreadsheet")
+        XCTAssertEqual(MailStyle.kind(mimeType: "image/x-custom", filename: "photo.raw2"), "Image")
         XCTAssertEqual(MailStyle.kind(mimeType: "application/x-unknown-thing", filename: "data.zzq"), "ZZQ file")
         XCTAssertEqual(MailStyle.kind(mimeType: "application/x-unknown-thing", filename: "noextension"), "File")
     }

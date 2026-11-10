@@ -36,15 +36,16 @@ enum DefaultMailApp {
 
 /// Settings › Mail: make Jevcast open mail links. The row states the current app and changes nothing by itself.
 struct DefaultMailAppSection: View {
-    @State private var name = DefaultMailApp.currentName
-    @State private var isDefault = DefaultMailApp.isJevcast
+    // Asked once when the row shows, not each time the pane draws: the answer comes from macOS.
+    @State private var name = ""
+    @State private var isDefault = false
     @State private var problem: String?
 
     var body: some View {
         Section {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(isDefault ? "Jevcast opens mail links" : "Mail links open in " + name)
+                    Text(isDefault ? "Jevcast opens mail links" : name.isEmpty ? "Mail links" : "Mail links open in " + name)
                     Text("A mail address clicked in another app starts a new message in the default mail app.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -60,5 +61,6 @@ struct DefaultMailAppSection: View {
             }
             if let problem { Text(problem).font(.caption).foregroundStyle(.red) }
         } header: { Text("Default mail app") }
+        .task { name = DefaultMailApp.currentName; isDefault = DefaultMailApp.isJevcast }
     }
 }

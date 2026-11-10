@@ -13,7 +13,6 @@ struct MailMessageList: View {
 
     var body: some View {
         let groups = model.conversationGroups
-        let activeRow = model.selectedConversationRowID
         // In a list of several accounts, each row carries its account's mark.
         let codes = model.showsAccountMarks ? model.accountCodes : nil
         let highlight = model.search.trimmingCharacters(in: .whitespaces)
@@ -25,9 +24,9 @@ struct MailMessageList: View {
                         account: codes.flatMap { model.accountMark(conversation.accountID, codes: $0) }, highlight: highlight,
                         delete: { model.delete(conversation.latest.summary.rowID) })
                         .equatable()
+                        // The list draws the selection itself: one rounded wash. A row background
+                        // under it showed as a second, wider box.
                         .tag(conversation.latest.summary.rowID).id(conversation.latest.summary.rowID)
-                        .listRowBackground(activeRow == conversation.latest.summary.rowID
-                            ? Color.accentColor.opacity(0.22) : Color.clear)
                         // Not .onDrag: on a List row it takes the mouse click, so a click selects nothing.
                         .itemProvider { NSItemProvider(object: NSString(string: String(conversation.latest.summary.rowID))) }
                         .onAppear {

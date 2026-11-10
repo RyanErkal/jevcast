@@ -15,14 +15,14 @@ struct MailMessageList: View {
         let groups = model.conversationGroups
         let activeRow = model.selectedConversationRowID
         // In a list of several accounts, each row carries its account's mark.
-        let labels = model.showsAccountMarks ? model.accountShortLabels : nil
+        let codes = model.showsAccountMarks ? model.accountCodes : nil
         let highlight = model.search.trimmingCharacters(in: .whitespaces)
         return ScrollViewReader { proxy in
             List(selection: selection) {
                 ForEach(groups) { conversation in
                     MailConversationSummaryRow(conversation: conversation,
                         isVIP: !model.vipAddresses.isEmpty && conversation.messages.contains { model.isVIP($0.summary) },
-                        account: labels.flatMap { model.accountMark(conversation.accountID, labels: $0) }, highlight: highlight,
+                        account: codes.flatMap { model.accountMark(conversation.accountID, codes: $0) }, highlight: highlight,
                         delete: { model.delete(conversation.latest.summary.rowID) })
                         .equatable()
                         .tag(conversation.latest.summary.rowID).id(conversation.latest.summary.rowID)
@@ -71,7 +71,7 @@ struct MailMessageList: View {
             }
             .listStyle(.inset)
             .overlay {
-                if model.messages.isEmpty, model.isLoading, model.search.isEmpty {
+                if model.messages.isEmpty, model.awaitingFirstPage, model.search.isEmpty {
                     MailLoadingRows()
                 } else if model.messages.isEmpty && model.bodySearch != .more && !model.olderOnServer && !model.canSearchServer {
                     MailEmptyState(symbol: emptySymbol, title: emptyText, detail: emptyDetail)

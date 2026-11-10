@@ -71,6 +71,45 @@ enum MailSidebarAccounts {
         return labels
     }
 
+    private static let consumerDomains: Set<String> = ["gmail.com", "googlemail.com", "icloud.com", "me.com", "mac.com", "outlook.com", "hotmail.com", "live.com", "yahoo.com", "yahoo.co.uk", "aol.com", "proton.me", "protonmail.com"]
+
+    /// Two letters for each account, made from its address: "sam.lee@gmail.com" gives "SL" and
+    /// "sam@acme.example" gives "SA". Two accounts never share a code: the later one, in ID order,
+    /// gets a third character.
+    static func codes(_ accounts: [(id: String, address: String)]) -> [String: String] {
+        var codes: [String: String] = [:]
+        var used = Set<String>()
+        for account in accounts.sorted(by: { $0.id < $1.id }) where codes[account.id] == nil {
+            let code = codeCandidates(account.address.isEmpty ? account.id : account.address).first { !used.contains($0) } ?? "?"
+            used.insert(code)
+            codes[account.id] = code
+        }
+        return codes
+    }
+
+    /// The two-letter code first, then that code with each third character that can tell it apart.
+    static func codeCandidates(_ address: String) -> [String] {
+        let parts = address.uppercased().split(separator: "@", omittingEmptySubsequences: false).map(String.init)
+        let domain = parts.count == 2 ? parts[1] : ""
+        let words = (parts.first ?? "").split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+        let local = words.joined()
+        let host = (domain.split(separator: ".").first.map(String.init) ?? "").filter { $0.isLetter || $0.isNumber }
+        var base: String
+        if words.count >= 2 {
+            base = String(words[0].prefix(1) + words[1].prefix(1))
+        } else if !consumerDomains.contains(domain.lowercased()), let first = local.first, let second = host.first {
+            base = String([first, second])
+        } else {
+            base = String(local.prefix(2))
+        }
+        if base.count < 2 { base += (host + "XX").prefix(2 - base.count) }
+        var candidates = [base]
+        for extra in local.dropFirst() + host + "23456789ABCDEFGHIJKLMNOPQRSTUVWXYZ" where !candidates.contains(base + String(extra)) {
+            candidates.append(base + String(extra))
+        }
+        return candidates
+    }
+
     private static func shortLabel(_ id: String, _ address: String) -> String {
         if id.isEmpty { return "On My Mac" }
         let parts = address.split(separator: "@", omittingEmptySubsequences: false)
@@ -78,8 +117,7 @@ enum MailSidebarAccounts {
             return UUID(uuidString: id) == nil ? id : "Account " + id.suffix(4)
         }
         let domain = parts[1].lowercased()
-        let consumer = ["gmail.com", "googlemail.com", "icloud.com", "me.com", "mac.com", "outlook.com", "hotmail.com", "live.com", "yahoo.com", "yahoo.co.uk", "aol.com", "proton.me", "protonmail.com"]
-        let value = consumer.contains(domain) ? String(parts[0]) : String(parts[1].split(separator: ".").first ?? parts[1])
+        let value = consumerDomains.contains(domain) ? String(parts[0]) : String(parts[1].split(separator: ".").first ?? parts[1])
         return value.prefix(1).uppercased() + value.dropFirst()
     }
 }

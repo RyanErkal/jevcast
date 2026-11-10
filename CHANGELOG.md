@@ -22,6 +22,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - **Settings › Mail.** The Google and Microsoft sign-in setup stays closed until asked for, and its fields have visible boxes.
 - **Mail tools.** Rules and Smart Mailboxes use the pane's width. Delete sits apart from Save, and the notes use plain words.
 
+### Fixed
+
+- **Commands that never started.** A command run by Jevcast, its time limit, and an automation's output readers now run on their own threads. On a small Mac with a busy shared thread pool, the pool could accept the work and never start it, and the caller then waited for good. An automation's final wait for its output readers also has a limit.
+
 ### Verification limits
 
 - Checked with the offline test suite, including a fake-server test of Undo, a universal build, and demo snapshots. Not checked live: Undo against a real server, the ⌘K and ⇧⌘M menus with a real keyboard, and the motion itself.

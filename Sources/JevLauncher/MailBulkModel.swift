@@ -183,8 +183,6 @@ extension MailModel {
     }
 
     private func moveBack(_ snapshot: MailBulkSnapshot, from: MailMailbox, to: MailMailbox) async throws {
-        var message = snapshot.message
-        message.mailbox = from.rowID
-        try await MailActions.move(message, from: from, to: to)
+        try await MailActions.moveBack(snapshot.message, messageID: snapshot.expectedMessageID, from: from, to: to)
     }
 }

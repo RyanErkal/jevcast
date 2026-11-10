@@ -394,7 +394,9 @@ final class MailServerDraftCoordinatorTests: XCTestCase {
         }, remove: { _ in }, cleanupStore: MailServerDraftCleanupStore(file: directory.appendingPathComponent("cleanup.json")), debounceNanoseconds: 1_000_000)
         var draft = fixtureDraft(body: "one")
         model.draft = draft; coordinator.changed(draft)
-        try await eventually { saves == 1 }
+        // The save is counted before the coordinator records its reference, and only a recorded
+        // reference blocks the switch. Waiting for the count alone made this test fail at times.
+        try await eventually { saves == 1 && model.draft?.serverDraftReference != nil }
         draft.fromAccountID = "other"; draft.fromAddress = "other@example.com"
         model.draft = draft; coordinator.changed(draft)
         try await Task.sleep(nanoseconds: 30_000_000)

@@ -2,12 +2,16 @@ import SwiftUI
 import LauncherCore
 
 /// Writing a reply, forward, or new message, laid out like Apple Mail's composer: To, Cc, Bcc,
-/// Subject, and From, a formatting bar, your text, and below it the original exactly as it is
-/// sent. It fills the reading pane in the launcher panel. Send looks
-/// dimmed until the draft can go; pressing it then says what is missing.
+/// Subject, and From, your text, and below it the original exactly as it is sent. The header
+/// keeps only what you need: From shows when you have more than one account (or with Cc/Bcc),
+/// and what you are writing is named in the footer. The formatting bar shows after Aa. It fills
+/// the reading pane in the launcher panel. Send looks dimmed until the draft can go; pressing it
+/// then says what is missing.
 struct ComposeView: View {
     @ObservedObject var model: MailModel
     var schedules: MailScheduleCenter? = nil
+    /// Whether the formatting bar shows. The page keeps it, so it stays as you left it.
+    @ObservedObject var preferences = MailComposerPreferences(defaults: nil)
     /// A reply starts in its text, so typing goes there and not to a search or filter field.
     @FocusState private var bodyFocused: Bool
     @StateObject private var editorCommands = MailEditorCommands()
@@ -17,10 +21,14 @@ struct ComposeView: View {
     @State private var showsCopies = false
     /// The original stays out of the way until asked for. It is still sent below your text.
     @State private var showsQuote = false
+    /// The footer's width. Below `MailComposerFooter.compactWidth`, Send Later shows as its icon.
+    @State private var footerWidth: CGFloat = 0
 
     /// Labels sit in this column; the fields line up after it.
     private static let labelWidth: CGFloat = 62
     private static let gutter: CGFloat = 14
+    /// The To field's placeholder: short, so it fits beside Cc/Bcc in the narrowest panel (860).
+    static let recipientPlaceholder = "Name or email"
 
     var body: some View {
         if let current = model.draft {
@@ -36,12 +44,16 @@ struct ComposeView: View {
                 // A light band, so the headers read apart from the text.
                 .background(Color.primary.opacity(0.05))
                 Divider()
-                composeTools(current)
+                if native(current) && preferences.showsFormatting {
+                    formattingBar
+                        .transition(.opacity)
+                    Divider()
+                }
                 if let reason = current.serverDraftBlockedReason {
                     MailServerDraftStatusRow(coordinator: model.serverDrafts, draft: current, reason: reason)
+                    Divider()
                 }
-                if !current.attachments.isEmpty { attachments(current) }
-                Divider()
+                if !current.attachments.isEmpty { attachments(current); Divider() }
                 content(current, binding)
                 Divider()
                 footer(current)
@@ -70,11 +82,8 @@ struct ComposeView: View {
     // MARK: Headers
 
     private func header(_ draft: MailModel.Draft, _ binding: Binding<MailModel.Draft>) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            row(symbol: symbol(draft.mode)) {
-                Text(title(draft)).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.tail)
-            }
-            Divider().padding(.leading, Self.gutter)
+        let copies = showsCopies || !draft.cc.isEmpty || !draft.bcc.isEmpty
+        return VStack(alignment: .leading, spacing: 0) {
             if isReply(draft) && !native(draft) {
                 // Apple Mail picks a reply's recipients and subject itself when it sends.
                 let line = draft.replyLine
@@ -83,12 +92,11 @@ struct ComposeView: View {
                         .help((line?.detail ?? draft.to) + "\nApple Mail sets the final list when it sends.")
                 }
             } else {
-                let copies = showsCopies || !draft.cc.isEmpty || !draft.bcc.isEmpty
                 row("To:") {
-                    recipientField(value: binding.to, placeholder: "Name or email address")
+                    recipientField(value: binding.to, placeholder: Self.recipientPlaceholder)
                     if !copies {
                         Button(native(draft) ? "Cc/Bcc" : "Cc") { showsCopies = true }.buttonStyle(.borderless).font(.system(size: 12))
-                            .fixedSize().help("Add people in copy")
+                            .fixedSize().help(model.senders.count > 1 ? "Add people in copy" : "Add people in copy, or see the sending account")
                     }
                 }
                 if copies {
@@ -104,23 +112,21 @@ struct ComposeView: View {
                     row("Subject:") { field("", text: binding.subject) }
                 }
             }
-            Divider().padding(.leading, Self.gutter)
-            row("From:") {
-                Picker("Sending account", selection: Binding(get: {
-                    model.senders.first { $0.accountID == draft.fromAccountID && $0.address == draft.fromAddress }?.id ?? ""
-                }, set: { model.selectSender($0) })) {
-                    if !model.senders.contains(where: { $0.accountID == draft.fromAccountID && $0.address == draft.fromAddress }) {
-                        Text("Select an account").tag("")
-                    }
-                    ForEach(model.senders) { Text($0.title).lineLimit(1).tag($0.id) }
-                }.labelsHidden().pickerStyle(.menu).frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                if native(draft) {
-                    Button("Insert Signature") { model.insertSignature() }.buttonStyle(.borderless).font(.system(size: 12))
-                        .fixedSize()
-                        .help("Adds this account's signature at the end of your text. Set it in Settings › Mail.")
-                }
+            if Self.showsFrom(senders: model.senders.count, copies: copies, hasSender: hasSender(draft)) {
+                Divider().padding(.leading, Self.gutter)
+                row("From:") { MailComposeFromMenu(model: model, draft: draft) }
             }
         }
+    }
+
+    /// From shows with more than one account to choose from, with Cc and Bcc, or when the draft
+    /// has no account yet. With one account it is the only choice, so it stays out of the way.
+    static func showsFrom(senders: Int, copies: Bool, hasSender: Bool) -> Bool {
+        senders > 1 || copies || !hasSender
+    }
+
+    private func hasSender(_ draft: MailModel.Draft) -> Bool {
+        model.senders.contains { $0.accountID == draft.fromAccountID && $0.address == draft.fromAddress }
     }
 
     private func row<Content: View>(_ label: String = "", symbol: String? = nil, @ViewBuilder _ content: () -> Content) -> some View {
@@ -159,20 +165,12 @@ struct ComposeView: View {
 
     // MARK: Formatting
 
-    private func composeTools(_ draft: MailModel.Draft) -> some View {
-        HStack(spacing: 10) {
-            if native(draft) {
-                MailFormattingBar(commands: editorCommands, addLink: { link = ""; showsLink = true },
-                                  insertImage: { model.pickAttachments(inline: true) }, attach: { model.pickAttachments() })
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                Button { model.pickAttachments() } label: { Image(systemName: "paperclip") }.help("Attach files")
-            }
-            Spacer(minLength: 0)
-            // Outbox shows in the list column, beside this draft.
-            Button("Outbox") { model.place = .outbox }.font(.caption)
-        }
-        .buttonStyle(.borderless).padding(.horizontal, Self.gutter).padding(.vertical, 6)
+    /// Font, size, colour, styles, alignment, lists, link, and image. Attach is in the footer.
+    private var formattingBar: some View {
+        MailFormattingBar(commands: editorCommands, addLink: { link = ""; showsLink = true },
+                          insertImage: { model.pickAttachments(inline: true) })
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Self.gutter).padding(.vertical, 6)
     }
 
     private func attachments(_ draft: MailModel.Draft) -> some View {
@@ -227,7 +225,8 @@ struct ComposeView: View {
     private func editor(_ binding: Binding<MailModel.Draft>) -> some View {
         ZStack(alignment: .topLeading) {
             if native(binding.wrappedValue) {
-                MailRichEditor(text: binding.body, rtf: binding.richText, commands: editorCommands, focus: bodyFocused)
+                MailRichEditor(text: binding.body, rtf: binding.richText, commands: editorCommands, focus: bodyFocused,
+                               cursor: MailSignatureText.cursor(in: binding.wrappedValue.body, signature: binding.wrappedValue.automaticSignature))
             } else {
                 TextEditor(text: binding.body)
                 .font(.system(size: 14))
@@ -275,25 +274,45 @@ struct ComposeView: View {
 
     // MARK: Footer
 
+    /// In a narrow pane what you are writing gives way first, then Send Later shows as its icon.
+    /// Send and Discard keep their whole names.
     private func footer(_ draft: MailModel.Draft) -> some View {
         HStack(spacing: 10) {
-            // Why Send did nothing, or that Escape again discards, in place of the usual note.
-            if let note = model.composeNote {
-                Label(note, systemImage: "exclamationmark.circle").font(.caption).foregroundStyle(.orange).lineLimit(2)
-            } else if let note = note(draft) {
-                Text(note).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            // Why Send did nothing, or that Discard again discards, in place of what you are writing.
+            Group {
+                if let note = model.composeNote {
+                    Label(note, systemImage: "exclamationmark.circle").font(.caption).foregroundStyle(.orange).lineLimit(2)
+                } else {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Label(title(draft), systemImage: symbol(draft.mode))
+                            .font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                            .help(title(draft))
+                        if let note = note(draft) { Text(note).font(.caption).foregroundStyle(.tertiary).lineLimit(1).help(note) }
+                    }
+                }
             }
+            .layoutPriority(-1)
             Spacer(minLength: 8)
+            HStack(spacing: 2) {
+                Button { model.pickAttachments() } label: { Image(systemName: "paperclip") }
+                    .help("Attach files (⇧⌘A)").accessibilityLabel("Attach Files")
+                if native(draft) { formattingToggle }
+            }
+            .buttonStyle(MailIconButtonStyle()).foregroundStyle(.secondary)
             if let schedules, native(draft), let id = draft.fromAccountID, let address = draft.fromAddress {
                 MailScheduleButton(draft: draft, account: .init(accountID: id, address: address), center: schedules) { entry in
                     model.didSchedule(entry)
-                }.disabled(model.aiWritingBusy || !draft.canSend)
+                }
+                .labelStyle(MailComposerFooter.compact(footerWidth) ? AnyLabelStyle(.iconOnly) : AnyLabelStyle(.titleAndIcon))
+                .fixedSize()
+                .disabled(model.aiWritingBusy || !draft.canSend)
             }
-            // Quiet beside Send, so the two are never mistaken for each other.
+            // Quiet beside Send, so the two are never mistaken for each other. Escape never
+            // discards: it closes the composer and keeps the draft. The panel handles ⇧⌘⌫.
             Button("Discard") { model.discardDraft() }
             .buttonStyle(.borderless).foregroundStyle(.secondary)
-            .keyboardShortcut(.cancelAction)
-            .help("Discard (Escape)")
+            .fixedSize()
+            .help("Discard (⇧⌘⌫)")
             Button { model.send() } label: {
                 HStack(spacing: 6) {
                     Text("Send")
@@ -301,6 +320,7 @@ struct ComposeView: View {
                 }
             }
             .buttonStyle(.borderedProminent)
+            .fixedSize()
             .keyboardShortcut(.return, modifiers: .command)
             // Enabled but dimmed while something is missing, so pressing it says what.
             .opacity(draft.canSend ? 1 : 0.5)
@@ -309,6 +329,22 @@ struct ComposeView: View {
         }
         .controlSize(.regular)
         .padding(.horizontal, Self.gutter).padding(.vertical, 9)
+        .background { GeometryReader { geo in Color.clear.onAppear { footerWidth = geo.size.width }
+            .onChange(of: geo.size.width) { _, width in footerWidth = width } } }
+    }
+
+    /// Aa shows or hides the formatting bar. The keys (⌘B, ⌘I, ⌘U) work either way.
+    private var formattingToggle: some View {
+        let on = preferences.showsFormatting
+        return Button { withAnimation(MailStyle.motion) { preferences.showsFormatting.toggle() } } label: {
+            Text("Aa").font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(on ? Color.accentColor : Color.secondary)
+                .frame(minWidth: 18)
+        }
+        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(on ? Color.accentColor.opacity(0.15) : Color.clear))
+        .help(on ? "Hide formatting" : "Show formatting")
+        .accessibilityLabel("Formatting")
+        .accessibilityValue(on ? "Shown" : "Hidden")
     }
 
     // MARK: Words
@@ -372,4 +408,20 @@ struct MailQuotePreview: View {
             }.value
         }
     }
+}
+
+/// The composer footer's layout rule.
+enum MailComposerFooter {
+    /// Below this width, Send Later shows as its icon with its name in the tooltip.
+    static let compactWidth: CGFloat = 520
+
+    /// True when the footer is too narrow for Send Later's name. Zero means not measured yet.
+    static func compact(_ width: CGFloat) -> Bool { width > 0 && width < compactWidth }
+}
+
+/// One of two label styles, chosen while the view runs.
+struct AnyLabelStyle: LabelStyle {
+    private let make: (Configuration) -> AnyView
+    init<Style: LabelStyle>(_ style: Style) { make = { AnyView(style.makeBody(configuration: $0)) } }
+    func makeBody(configuration: Configuration) -> some View { make(configuration) }
 }

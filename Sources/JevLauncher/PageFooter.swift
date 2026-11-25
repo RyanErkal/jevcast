@@ -2,7 +2,7 @@ import Combine
 import SwiftUI
 
 /// The keys under a view in the panel. It draws again when the view says its keys changed, such
-/// as when a mail reply opens and Escape now discards.
+/// as when a mail reply opens and Escape now saves the draft.
 struct PageFooter: View {
     let page: LauncherPage
     let escapeClosesLauncher: Bool

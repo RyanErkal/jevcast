@@ -30,6 +30,8 @@ struct MailRichEditor: NSViewRepresentable {
     @Binding var rtf: Data?
     let commands: MailEditorCommands
     var focus: Bool
+    /// Where the cursor starts, in UTF-16 units: above an automatic signature. Nil leaves it.
+    var cursor: Int? = nil
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
@@ -43,7 +45,9 @@ struct MailRichEditor: NSViewRepresentable {
         view.allowsUndo = true; view.isAutomaticQuoteSubstitutionEnabled = false
         view.delegate = context.coordinator; scroll.documentView = view
         commands.textView = view
+        view.commands = commands
         view.textStorage?.setAttributedString(MailRichText.attributed(rtf, plain: text))
+        if let cursor { view.setSelectedRange(NSRange(location: min(cursor, view.string.utf16.count), length: 0)) }
         context.coordinator.lastRTF = rtf
         return scroll
     }
@@ -77,7 +81,17 @@ struct MailRichEditor: NSViewRepresentable {
 }
 
 /// A paste inserts text only. Files and images require the explicit attachment picker.
+/// ⌘B, ⌘I, ⌘U, ⌘], and ⌘[ format the text while it has the keys, with or without the bar.
 private final class MailCompositionTextView: NSTextView {
+    weak var commands: MailEditorCommands?
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if window?.firstResponder === self, let commands,
+           let key = MailFormattingKey.command(characters: event.charactersIgnoringModifiers, flags: event.modifierFlags) {
+            key.run(commands)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
     override func paste(_ sender: Any?) {
         if let text = NSPasteboard.general.string(forType: .string) { insertText(text, replacementRange: selectedRange()) }
     }

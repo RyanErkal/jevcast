@@ -11,6 +11,8 @@ extension MailModel {
             accounts[message.mailbox] ?? message.labels.lazy.compactMap { accounts[$0] }.first ?? ""
         }, headers: conversationHeaders, attachments: conversationAttachments)
         conversationCache = groups
+        conversationIndex = MailConversationIndex(groups)
+        conversationRevision &+= 1
         return groups
     }
 
@@ -23,19 +25,26 @@ extension MailModel {
         }
     }
 
-    /// Two or three letters for each account, made from its address.
-    var accountCodes: [String: String] {
-        MailSidebarAccounts.codes(accounts.map { (id: $0, address: accountTitle($0)) })
-    }
-
-    func accountMark(_ accountID: String, codes: [String: String]) -> MailAccountMark? {
-        guard !accountID.isEmpty, let code = codes[accountID] else { return nil }
-        return MailAccountMark(title: accountTitle(accountID), code: code, color: MailAccountMark.color(for: accountID))
+    /// The mark of each account in `groups`, only when the list really holds mail of more than
+    /// one account. Empty otherwise, so a list of one account shows no marks.
+    func accountMarks(for groups: [MailConversation]) -> [String: MailAccountMark] {
+        guard showsAccountMarks else { return [:] }
+        let present = Set(groups.map(\.accountID).filter { !$0.isEmpty })
+        guard present.count > 1 else { return [:] }
+        return Dictionary(uniqueKeysWithValues: present.map { id in
+            (id, MailAccountMark(title: accountTitle(id), color: MailAccountMark.color(for: id)))
+        })
     }
 
     var selectedConversation: MailConversation? {
         guard let selectedID else { return nil }
-        return conversationGroups.first { $0.messages.contains { $0.summary.rowID == selectedID } }
+        return conversation(containing: selectedID)
+    }
+
+    /// The conversation a message belongs to, by its row ID, without a search of the list.
+    func conversation(containing messageID: Int64) -> MailConversation? {
+        let groups = conversationGroups
+        return conversationIndex.byMessage[messageID].map { groups[$0] }
     }
 
     /// Rows without a provider conversation key and without a cached MIME header remain
@@ -46,18 +55,28 @@ extension MailModel {
         }
     }
 
+    /// The selected conversation when it has more than one message: the reader shows it as one document.
+    var shownThread: MailConversation? {
+        selectedConversation.flatMap { $0.messages.count > 1 ? $0 : nil }
+    }
+
+    /// True while the conversation on screen shows every reply's quoted text.
+    var quotesShown: Bool { shownThread.map { quotesShownIn == $0.id } ?? false }
+
+    /// Show Quoted Text or Hide Quoted Text, for the conversation on screen.
+    func toggleQuotedText() {
+        guard let thread = shownThread else { return }
+        quotesShownIn = quotesShownIn == thread.id ? nil : thread.id
+    }
+
     var selectedConversationRowID: Int64? { selectedConversation?.latest.summary.rowID }
 
     var selectedConversationRowIDs: Set<Int64> {
-        Set(conversationGroups.compactMap { conversation in
-            conversation.messages.contains { selectedMessageIDs.contains($0.summary.rowID) }
-                ? conversation.latest.summary.rowID : nil
-        })
+        Set(selectedMessageIDs.compactMap { conversation(containing: $0)?.latest.summary.rowID })
     }
 
     func selectConversationRows(_ ids: Set<Int64>) {
-        let members = conversationGroups.filter { ids.contains($0.latest.summary.rowID) }
-            .flatMap { $0.messages.map(\.summary.rowID) }
+        let members = ids.compactMap { conversation(row: $0) }.flatMap { $0.messages.map(\.summary.rowID) }
         setSelectedMessageIDs(Set(members))
     }
 

@@ -6,7 +6,7 @@ import SwiftUI
 @MainActor
 enum MailLinkRouter {
     /// Starts a new message from the link. False when Mail is not set up here, so the link goes
-    /// to the Mac's default mail app.
+    /// to the Mac's default mail app. True also when an open draft stays; Mail says why.
     static var compose: ((MailtoLink) -> Bool)?
 
     /// Opens a link clicked in a message: a mail address in Jevcast, anything else in the browser.

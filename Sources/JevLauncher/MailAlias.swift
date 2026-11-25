@@ -82,11 +82,13 @@ struct MailAliasSettingsView: View {
     @State private var signature = ""
     @State private var authorized = false
     @State private var error: String?
+    @State private var automaticSignatures: Bool
 
     init(accounts: [NativeMailAccount], defaults: UserDefaults = .standard) {
         self.accounts = accounts
         self.defaults = defaults
         _selectedAccountID = State(initialValue: accounts.first?.id ?? "")
+        _automaticSignatures = State(initialValue: MailSignatures.isAutomatic(defaults))
     }
 
     private var aliases: [MailAlias] {
@@ -96,6 +98,12 @@ struct MailAliasSettingsView: View {
 
     var body: some View {
         Form {
+            Section("Signatures") {
+                Toggle("Add my signature to new messages, replies, and forwards", isOn: $automaticSignatures)
+                    .onChange(of: automaticSignatures) { _, on in defaults.set(on, forKey: MailSignatures.automaticKey) }
+                Text("Set each account's signature in Settings › Mail › Signature…, and an alias's signature below. Changing From swaps the signature until you edit it. Insert Signature in the From menu adds one by hand.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Provider-authorized aliases") {
                 if accounts.isEmpty {
                     Text("Add a mail account before configuring an alias.").foregroundStyle(.secondary)

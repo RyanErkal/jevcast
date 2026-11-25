@@ -95,29 +95,33 @@ final class MailComposeTests: XCTestCase {
         XCTAssertNil(model.banner)
     }
 
-    func testAReplyKeyAfterShowingAnotherMessageBringsBackTheKeptReply() async throws {
+    /// A reply you closed by showing another message stays in Drafts and never blocks the next one.
+    func testAReplyKeyAfterShowingAnotherMessageKeepsTheClosedReplyInDrafts() async throws {
         let model = try await rig.model(delay: 0)
         let page = MailPage(mail: model)
         let other = try XCTUnwrap(model.messages.last?.rowID)
         model.reply(all: false)
         model.draft?.body = "Kept"
+        let kept = try XCTUnwrap(model.draft?.id)
         page.show(other)
         XCTAssertTrue(page.draftHidden)
         XCTAssertFalse(page.isTyping)
+        try await rig.wait { model.selectedID == other }
         XCTAssertTrue(page.handleEvent(MailComposeRig.key("r", .command)))
-        XCTAssertEqual(model.draft?.body, "Kept", "The kept reply is not replaced")
-        XCTAssertFalse(page.draftHidden, "The kept reply shows again")
-        XCTAssertEqual(model.banner, "Finish or discard your open reply first.")
+        XCTAssertNotEqual(model.draft?.id, kept, "The new reply opens")
+        XCTAssertFalse(page.draftHidden)
+        XCTAssertEqual(model.savedDrafts.first { $0.id == kept }?.body, "Kept", "The closed reply stays in Drafts")
+        XCTAssertNil(model.banner)
     }
 
-    func testANewDraftShowsEvenWhenTheKeptOneWasHidden() async throws {
+    func testANewDraftShowsAfterAnUntouchedOneClosed() async throws {
         let model = try await rig.model(delay: 0)
         let page = MailPage(mail: model)
         model.reply(all: false)
         page.show(try XCTUnwrap(model.messages.last?.rowID))
-        XCTAssertTrue(page.draftHidden)
+        XCTAssertNil(model.draft, "An untouched reply closes as Escape closes it, without a copy")
         model.forward()
-        XCTAssertEqual(model.draft?.mode, .forward, "An empty reply makes way")
+        XCTAssertEqual(model.draft?.mode, .forward)
         XCTAssertFalse(page.draftHidden, "A new draft never starts hidden")
     }
 
@@ -139,10 +143,12 @@ final class MailComposeTests: XCTestCase {
         model.search = "re"
         XCTAssertTrue(page.handleEvent(MailComposeRig.key("f", [.command, .shift])), "⇧⌘F forwards, also with text in the filter")
         XCTAssertEqual(model.draft?.mode, .forward)
-        XCTAssertEqual(page.footerHints.first?.key, "⌘↩")
-        XCTAssertEqual(page.backTitle, "Discard")
+        XCTAssertEqual(page.footerHints.map(\.key), ["⇧⌘A", "⇧⌘⌫"], "No Send: the composer shows it")
+        XCTAssertEqual(page.backTitle, "Close", "Escape closes an untouched forward")
+        model.draft?.to = "ann@example.com"
+        XCTAssertEqual(page.backTitle, "Save Draft", "Escape keeps a draft with text")
         model.draft = nil
-        XCTAssertEqual(page.footerHints.map(\.key), ["⌘R", "⌃⌘A", "⌘K"])
+        XCTAssertEqual(page.footerHints.map(\.key), ["⌘R", "⌘E", "⌘K"])
         XCTAssertEqual(page.footerHints.first?.title, "Reply")
         XCTAssertNil(page.backTitle)
     }
@@ -258,9 +264,13 @@ final class MailComposeTests: XCTestCase {
         page.pick(other)
         XCTAssertEqual(model.selectedID, other)
         XCTAssertTrue(page.draftHidden)
-        XCTAssertEqual(model.banner, "Your unsent reply is kept. Press Escape to go back to it.")
-        XCTAssertTrue(page.back())
-        XCTAssertFalse(page.draftHidden, "Escape brings the kept reply back")
+        await model.finishDraftCheckpoint()
+        XCTAssertEqual(model.draftNote, "Draft saved.")
+        XCTAssertFalse(page.back(), "Escape leaves Mail; it does not reopen the kept reply")
+        XCTAssertTrue(page.draftHidden)
+        model.reopenDraft()
+        XCTAssertFalse(page.draftHidden, "The note's Open button brings the kept reply back")
+        XCTAssertNil(model.draftNote)
         XCTAssertEqual(model.draft?.body, "Kept")
     }
 
@@ -280,31 +290,65 @@ final class MailComposeTests: XCTestCase {
 
     // MARK: Escape
 
-    func testEscapeAsksTwiceForAnyDraftWithText() async throws {
+    func testEscapeSavesADraftWithTextAndNeverDeletesIt() async throws {
         let model = try await rig.model(delay: 0)
         let page = MailPage(mail: model)
 
         model.compose(to: "ann@example.com")
+        model.draft?.body = "Half written"
+        let id = try XCTUnwrap(model.draft?.id)
         XCTAssertTrue(page.back())
-        XCTAssertNotNil(model.draft, "A new message with only To is kept after one Escape")
-        XCTAssertEqual(model.composeNote, "Press Escape or click Discard again to discard this message.")
-        model.draft?.subject = "Lunch"
-        XCTAssertTrue(page.back())
-        XCTAssertNotNil(model.draft, "An edit asks again")
-        XCTAssertTrue(page.back())
-        XCTAssertNil(model.draft)
+        XCTAssertEqual(model.draft?.id, id, "Escape keeps the draft")
+        XCTAssertFalse(page.composing, "The composer closes")
+        await model.finishDraftCheckpoint()
+        XCTAssertEqual(model.draftNote, "Draft saved.")
+        XCTAssertNil(model.composeNote)
+        XCTAssertEqual(model.savedDrafts.map(\.id), [id], "The draft is listed in Drafts")
+        XCTAssertFalse(page.back(), "A second Escape leaves Mail")
+        XCTAssertFalse(page.back())
+        XCTAssertEqual(model.draft?.body, "Half written", "No number of Escapes deletes the draft")
 
-        model.forward()
-        model.draft?.to = "bob@example.com"
+        // Opened again, the draft is as it was, and Escape saves it again.
+        model.reopenDraft()
+        XCTAssertTrue(page.composing)
         XCTAssertTrue(page.back())
-        XCTAssertNotNil(model.draft, "A forward with a recipient is kept after one Escape")
+        XCTAssertEqual(model.draft?.id, id)
+    }
+
+    func testEscapeClosesAnEmptyDraftWithoutACopy() async throws {
+        let model = try await rig.model(delay: 0)
+        let page = MailPage(mail: model)
+        model.reply(all: false)
+        XCTAssertEqual(page.backTitle, "Close")
         XCTAssertTrue(page.back())
+        XCTAssertNil(model.draft, "An untouched reply closes without a saved copy")
+        XCTAssertNil(model.draftNote)
+        XCTAssertFalse(page.back())
+    }
+
+    func testDiscardAndCommandDeleteAskTwiceForADraftWithText() async throws {
+        let model = try await rig.model(delay: 0)
+        let page = MailPage(mail: model)
+        let commandDelete = MailComposeRig.key("\u{7f}", [.command, .shift], keyCode: 51)
+
+        model.compose(to: "ann@example.com")
+        XCTAssertTrue(page.isTyping)
+        XCTAssertTrue(page.handleTypingEvent(commandDelete))
+        XCTAssertNotNil(model.draft, "The first ⇧⌘⌫ only asks")
+        XCTAssertEqual(model.composeNote, "Click Discard or press ⇧⌘⌫ again to discard this message.")
+        model.draft?.subject = "Lunch"
+        XCTAssertTrue(model.discardDraft() == false, "An edit asks again")
+        XCTAssertTrue(model.discardDraft())
         XCTAssertNil(model.draft)
 
         model.reply(all: false)
-        XCTAssertTrue(page.back())
+        XCTAssertTrue(page.handleTypingEvent(commandDelete))
         XCTAssertNil(model.draft, "An empty reply goes at once")
-        XCTAssertFalse(page.back())
+        // With no composer, Mail still takes ⇧⌘⌫ and does nothing, so it never reaches Delete.
+        XCTAssertTrue(page.handleTypingEvent(commandDelete))
+        XCTAssertTrue(page.handleEvent(commandDelete))
+        XCTAssertNil(model.draft)
+        XCTAssertFalse(page.handleTypingEvent(MailComposeRig.key("\u{7f}", [], keyCode: 51)))
     }
 
     // MARK: Who gets a reply

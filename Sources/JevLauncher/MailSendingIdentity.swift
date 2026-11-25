@@ -99,7 +99,11 @@ extension MailModel {
                 guard let self, backend == MailBackend.current else { return }
                 self.senders = identities
                 if var draft = self.draft, draft.fromAccountID == nil {
+                    // Filled in by Jevcast before you changed anything: it still counts as untouched.
+                    let untouched = draft.isUntouched
                     self.selectInitialSender(&draft)
+                    self.applyAutomaticSignature(&draft)
+                    if untouched { draft.markGenerated() }
                     self.draft = draft
                 }
             } catch {
@@ -134,18 +138,37 @@ extension MailModel {
         draft.fromAccountID = identity.accountID; draft.fromAddress = identity.address
         draft.fromName = identity.name; draft.fromIdentityID = identity.id
         draft.senderWasChosen = true
+        applyAutomaticSignature(&draft)
         self.draft = draft
         if draft.mode == .new { UserDefaults.standard.set(id, forKey: "mailDefaultSender." + draft.backend) }
     }
 
+    /// Insert Signature in the From menu: adds this account's signature at the end of your text,
+    /// below a blank line, also when automatic signatures are off, in place of an unchanged one
+    /// Jevcast put in before. It is tracked like the automatic one, so a signature alone is still
+    /// not a message, until you change it.
     func insertSignature() {
-        guard var draft, let sender = senders.first(where: { $0.accountID == draft.fromAccountID && $0.address == draft.fromAddress }),
-              !sender.signature.isEmpty else { return }
-        let text = NSMutableAttributedString(attributedString: MailRichText.attributed(draft.richText, plain: draft.body))
-        text.append(NSAttributedString(string: (draft.body.isEmpty ? "" : "\n\n") + sender.signature,
-                                       attributes: [.font: NSFont.systemFont(ofSize: 14), .foregroundColor: NSColor.textColor]))
-        draft.body = text.string
-        draft.richText = try? text.data(from: NSRange(location: 0, length: text.length), documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
+        guard var draft, let sender = senders.first(where: { $0.accountID == draft.fromAccountID && $0.address == draft.fromAddress }) else { return }
+        let signature = MailSignatureText.clean(sender.signature)
+        guard !signature.isEmpty else { return }
+        // The text already ends with this signature, below its blank line: nothing to add, so a
+        // second press never turns the first signature into text of yours.
+        guard MailSignatureText.typedPart(of: draft.body, signature: signature) == nil else { return }
+        if let old = draft.automaticSignature, let typed = MailSignatureText.typedPart(of: draft.body, signature: old) {
+            // An unchanged signature Jevcast put in, such as another account's before From
+            // changed, makes way for this one: the text never holds two, and signatures alone are
+            // still not a message.
+            replaceSignature(in: &draft, typedLength: (typed as NSString).length, signature: signature)
+        } else {
+            let text = NSMutableAttributedString(attributedString: MailRichText.attributed(draft.richText, plain: draft.body))
+            text.append(NSAttributedString(string: MailSignatureText.separator + signature,
+                                           attributes: [.font: NSFont.systemFont(ofSize: 14), .foregroundColor: NSColor.textColor]))
+            draft.body = text.string
+            draft.richText = try? text.data(from: NSRange(location: 0, length: text.length), documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
+        }
+        // A signature you changed stays as your text; this one is the tracked one now.
+        draft.automaticSignature = signature
+        if draft.signsAutomatically == nil { draft.signsAutomatically = false }
         self.draft = draft
     }
 }

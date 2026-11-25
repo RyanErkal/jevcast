@@ -136,6 +136,9 @@ struct MailRecipientEditingState {
 /// A compact chip field that keeps the draft's persisted representation as a normal header string.
 /// Invalid tokens stay visible in red and can be removed or edited; they are never silently fixed.
 struct MailRecipientChipField: View {
+    /// The typing field's least width. Its placeholder fits in it, so a narrow composer never
+    /// runs the placeholder under the button beside it.
+    static let minimumWidth: CGFloat = 100
     let placeholder: String
     @Binding var value: String
     let suggestionProvider: (String) -> [MailRecipientSuggestion]
@@ -175,7 +178,7 @@ struct MailRecipientChipField: View {
                     }))
                         .textFieldStyle(.plain)
                         .focused($focused)
-                        .frame(minWidth: 100)
+                        .frame(minWidth: Self.minimumWidth)
                         .onSubmit { commit() }
                 }
                 .padding(.vertical, 2)

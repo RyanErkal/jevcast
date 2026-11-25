@@ -1,43 +1,51 @@
+import AppKit
 import SwiftUI
 import LauncherCore
 
 /// The message list in the panel. Rows keep their message IDs, and the next page loads when a
-/// row near the end appears.
+/// row near the end appears. Date labels sit between rows; they are rows of their own that cannot
+/// be selected, so the keys, Select All, and paging step over them.
 struct MailMessageList: View {
     @ObservedObject var model: MailModel
+    /// The panel, for Snooze and its account checks. Nil in tests of the list alone.
+    var page: MailPage?
     /// The panel scrolls to a message the keyboard selects.
     var scrollsToSelection = false
     /// A row the user clicked. The panel picks it through its page, so an open draft is kept.
     var pick: ((Int64) -> Void)?
     var onDoubleClick: ((Int64) -> Void)?
+    /// The table under the list, once found: only a click or key in it changes the selection.
+    @State private var table = MailListTable()
 
     var body: some View {
         let groups = model.conversationGroups
-        // In a list of several accounts, each row carries its account's mark.
-        let codes = model.showsAccountMarks ? model.accountCodes : nil
+        // Date labels, account colours, VIP marks, and row buttons, worked out once per change of the rows.
+        let meta = model.listMetadata
         let highlight = model.search.trimmingCharacters(in: .whitespaces)
+        let selected = model.selectedConversationRowIDs
+        let focused = model.selectedConversationRowID
         return ScrollViewReader { proxy in
             List(selection: selection) {
                 ForEach(groups) { conversation in
-                    MailConversationSummaryRow(conversation: conversation,
-                        isVIP: !model.vipAddresses.isEmpty && conversation.messages.contains { model.isVIP($0.summary) },
-                        account: codes.flatMap { model.accountMark(conversation.accountID, codes: $0) }, highlight: highlight,
-                        delete: { model.delete(conversation.latest.summary.rowID) })
+                    let rowID = conversation.latest.summary.rowID
+                    let wash: MailRowHighlight = rowID == focused ? .focused : selected.contains(rowID) ? .member : .none
+                    if let section = meta.sections[conversation.id] {
+                        MailDateSectionLabel(section: section).selectionDisabled().listRowSeparator(.hidden)
+                    }
+                    MailConversationSummaryRow(conversation: conversation, isVIP: meta.vip.contains(rowID),
+                        account: meta.marks[conversation.accountID], highlight: highlight,
+                        selection: wash, hoverActions: meta.hoverActions(conversation.latest.summary),
+                        act: { action in model.runRowAction(action, on: [rowID], page: page) }, day: meta.key.day)
                         .equatable()
-                        // The list draws the selection itself: one rounded wash. A row background
-                        // under it showed as a second, wider box.
-                        .tag(conversation.latest.summary.rowID).id(conversation.latest.summary.rowID)
+                        // A plain click also shows a row that is already selected, such as while
+                        // connection details or a draft cover the reader. ⇧ and ⌘ clicks only select.
+                        // One wash per selected row, drawn here; the table's own is off.
+                        .listRowBackground(MailListWash.background(wash))
+                        .tag(rowID).id(rowID)
                         // Not .onDrag: on a List row it takes the mouse click, so a click selects nothing.
-                        .itemProvider { NSItemProvider(object: NSString(string: String(conversation.latest.summary.rowID))) }
+                        .itemProvider { NSItemProvider(object: NSString(string: String(rowID))) }
                         .onAppear {
                             if conversation.messages.contains(where: { $0.summary.rowID == model.pageTriggerID }) { model.loadNextPage() }
-                        }
-                        .contextMenu {
-                            Button("Delete", role: .destructive) { model.delete(conversation.latest.summary.rowID) }
-                            Button("Delete All from " + conversation.latest.summary.sender, role: .destructive) {
-                                model.select(conversation.latest.summary.rowID, byUser: false)
-                                model.deleteAllFromSender()
-                            }
                         }
                 }
                 if model.hasMore {
@@ -65,11 +73,21 @@ struct MailMessageList: View {
                     EmptyView()
                 }
             }
-            .contextMenu(forSelectionType: Int64.self, menu: { _ in }) { ids in
+            // The menu acts on the whole selection when the clicked row is in it, otherwise on that row.
+            .contextMenu(forSelectionType: Int64.self) { ids in
+                MailRowMenuContent(model: model, page: page, ids: ids)
+            } primaryAction: { ids in
                 guard let id = ids.first, let onDoubleClick else { return }
                 onDoubleClick(id)
             }
             .listStyle(.inset)
+            .background(MailListPlainSelection(found: table))
+            // A click on the row already selected, such as while connection details or a draft
+            // cover the reader, shows it again. ⇧- and ⌘-clicks only select.
+            .onAppear { table.clickedSelectedRow = { [weak model, weak page] in
+                guard let model, model.selectedConversationRowIDs.count == 1, let id = model.selectedConversationRowIDs.first else { return }
+                page?.activate(id)
+            } }
             .overlay {
                 if model.messages.isEmpty, model.awaitingFirstPage, model.search.isEmpty {
                     MailLoadingRows()
@@ -86,13 +104,48 @@ struct MailMessageList: View {
         }
     }
 
+    /// The date labels, by the conversation each one stands above. None in Outbox, and none when
+    /// the list is short or not newest first.
+    static func sections(_ groups: [MailConversation], place: MailModel.Place, now: Date = Date(),
+                         calendar: Calendar = .current) -> [MailConversationID: MailDateSection] {
+        guard place != .outbox else { return [:] }
+        let starts = MailDateSections.starts(groups.map(\.latest.summary.date), now: now, calendar: calendar)
+        return Dictionary(uniqueKeysWithValues: starts.map { (groups[$0.key].id, $0.value) })
+    }
+
     private var selection: Binding<Set<Int64>> {
         Binding(get: { model.selectedConversationRowIDs }, set: { ids in
+            // Only the user's own change counts. The model's selection stays the truth, and the
+            // table shows it again.
+            guard Self.isUserSelection(ids, current: model.selectedConversationRowIDs, event: NSApp.currentEvent, table: table.view) else { return }
             model.selectConversationRows(ids)
             // A single click also gives the page draft/reader handling. Multi-selection stays
             // in the list so the page's one-message selection cannot collapse the set.
             if ids.count <= 1, let id = ids.sorted().last, let pick { pick(id) }
+            // After ⇧- or ⌘-click the filter takes the keys again, so letters still type there.
+            else if ids.count > 1, let focusFilter = page?.focusFilter { DispatchQueue.main.async { focusFilter() } }
         })
+    }
+
+    /// True when a selection change from the table is the user's. The table also writes the
+    /// selection back by itself, such as while it lays out or when connection details or a draft
+    /// show beside it; that must not pick a row, which would close them.
+    static func isUserSelection(_ ids: Set<Int64>, current: Set<Int64>, event: NSEvent?, table: NSTableView?) -> Bool {
+        ids != current && isUserInput(event, in: table)
+    }
+
+    /// A click in the list's table, or a key while the table has the keys: the only events during
+    /// which the user changes the list's selection. A click elsewhere in the app never counts.
+    static func isUserInput(_ event: NSEvent?, in table: NSTableView?) -> Bool {
+        guard let event, let table, let window = table.window, event.window === window else { return false }
+        switch event.type {
+        case .leftMouseDown, .leftMouseUp, .leftMouseDragged, .rightMouseDown, .otherMouseDown:
+            return table.visibleRect.contains(table.convert(event.locationInWindow, from: nil))
+        case .keyDown:
+            return window.firstResponder === table
+        default:
+            return false
+        }
     }
 
     private var emptySymbol: String {

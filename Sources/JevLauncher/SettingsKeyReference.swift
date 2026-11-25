@@ -30,7 +30,7 @@ struct KeyReference: View {
             row(["⌘", "Z"], "Undo a Jev or remembered pick", note: "Jevcast forgets that answer.")
             row(["⎋"], "Go back, or close")
             row(["⌘", "O"], "Open a view in its own window")
-            row(["Space"], "Expand mail, or Quick Look a clip", note: "Mail and Clipboard views.")
+            row(["Space"], "Page through mail, or Quick Look a clip", note: "Mail and Clipboard views. ⇧Space pages up in mail.")
         } header: { Text("In the launcher") }
     }
 

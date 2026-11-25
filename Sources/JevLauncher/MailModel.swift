@@ -38,6 +38,14 @@ final class MailModel: ObservableObject {
     /// The list grouped into conversations. Grouping reads every loaded row, so it runs once per
     /// change of the rows, mailboxes, or learned headers, and not on every redraw.
     var conversationCache: [MailConversation]?
+    /// Each list row's and each message's place in `conversationCache`, built with it.
+    var conversationIndex = MailConversationIndex()
+    /// Counts the groupings made, so what the list works out from them is kept until the next.
+    var conversationRevision = 0
+    /// The list's date labels, account marks, and row buttons for one grouping. See `listMetadata`.
+    var listMetadataCache: MailListMetadata?
+    /// How many times the list's metadata was worked out. Tests read it to see the cache is used.
+    var listMetadataBuilds = 0
     @Published var place: Place = .inbox { didSet { if oldValue != place { selectedID = nil; reload(); syncPlace() } } }
     @Published var search = "" { didSet { if oldValue != search { reloadSoon() } } }
     /// Structured filters are applied to the complete source range before the visible page.
@@ -47,7 +55,7 @@ final class MailModel: ObservableObject {
         didSet { UserDefaults.standard.set(loadsImages, forKey: "mailLoadsImages") }
     }
     /// True while Mail is on screen in the panel, so a message counts as read only when seen.
-    /// Coming back to Mail counts the message on screen.
+    /// Coming back to Mail counts the message on screen only when you chose it.
     var windowIsKey = false { didSet { if windowIsKey != oldValue { armRead() } } }
     private var readTimer: Task<Void, Never>?
     @Published var messages: [MailSummary] = [] {
@@ -69,34 +77,92 @@ final class MailModel: ObservableObject {
     }
     @Published var emptyRequest: EmptyRequest?
     @Published private(set) var preparingEmpty = false
+    /// Delete All from a sender: exactly the messages counted, waiting for your yes.
+    @Published var senderDeleteRequest: MailSenderDeleteRequest?
+    /// The Undo note's time. It stops while the pointer is on the note.
+    var undoCountdown: MailUndoCountdown?
+    /// Seconds the Undo note stays. Tests make it shorter.
+    var undoSeconds = MailUndoCountdown.seconds
+    /// A note that the draft you closed is saved, with a button that opens it again.
+    @Published var draftNote: String?
+    /// The write of a draft you closed, while it runs. Quitting waits for it.
+    var draftCheckpoint: Task<Void, Never>?
+    var draftCheckpointTicket: UUID?
+    /// The open draft is closed but kept, such as after Escape or a click on another message.
+    /// It lives here so Mail opens again as you left it.
+    @Published var draftSetAside = false {
+        didSet {
+            if !draftSetAside, draftNote != nil { draftNote = nil }
+            // Kept with the draft, so after a restart a closed draft still blocks nothing.
+            if oldValue != draftSetAside { persistComposition() }
+        }
+    }
+    /// Opens the Snooze editor of the message on screen, such as with its key.
+    @Published var snoozeEditorOpen = false
+    /// The conversation whose quoted text shows in full, from Show Quoted Text in the ⋯ menu or
+    /// ⌘K. Any other conversation starts with its quotes closed again.
+    @Published var quotesShownIn: MailConversationID?
+    /// The open message's scroll view, for Space and ⇧Space.
+    let readerScroll = MailReaderScroll()
 
     /// True while a Jevcast account's server may hold older mail than this Mac has for the list.
     @Published var olderOnServer = false
     private var loadingOlder = false
     /// False when Apple Mail is not running, so new mail is not reaching its index.
     @Published private(set) var mailRunning = true
-    /// The message on screen counts as read however it got there: from the list, the keyboard, or
-    /// the model's own selection after a reload or a delete. `select(_:byUser:)` with false marks
-    /// the model's own selections, which wait for a search to settle.
+    /// True while a check for new mail you asked for runs. The sidebar's status line says "Checking…".
+    @Published var checkingMail = false
+    /// When Jevcast last asked Apple Mail for new mail without an error. Checks of Jevcast's own
+    /// accounts never set it; their sync times are their own.
+    @Published var lastAppleMailCheck: Date?
+
+    /// A check for new mail finished at `date`. Only a check that went to Apple Mail counts.
+    func recordMailCheck(at date: Date, native: Bool) {
+        if !native { lastAppleMailCheck = date }
+    }
+    /// The message on screen. It counts as read only when you chose it: a click, the arrow keys,
+    /// Return, or another action on it. The model's own selection, such as when Mail opens, after a
+    /// reload, a search, or a delete, shows the message and leaves it unread.
     @Published var selectedID: Int64? {
         didSet {
             guard oldValue != selectedID else { return }
             keptUnread = nil
             loadSelected()
-            armRead(searchPick: selectingQuietly && !search.isEmpty)
+            armRead()
         }
     }
+    /// True when you chose the message on screen or acted on it, so its read timer may run.
+    private(set) var selectionIsUsers = false
     /// Multi-selection is separate from the reader's one-message selection. The set is always
     /// limited to rows currently loaded in the launcher, making Select All an explicit scope.
     @Published var selectedMessageIDs: Set<Int64> = []
     var selectionAnchorID: Int64?
     @Published var bulkResult: MailBulkResult?
     @Published var bulkBusy = false
+    /// The running bulk action or bulk undo, so an Undo pressed meanwhile can wait for it.
+    var bulkWork: Task<Void, Never>?
+    /// Moves one message back for Undo. Tests put a fake here; nothing then reaches Mail.
+    var moveBackAction: (MailBulkSnapshot, MailMailbox, MailMailbox) async throws -> Void = { snapshot, from, to in
+        try await MailActions.moveBack(snapshot.message, messageID: snapshot.expectedMessageID, from: from, to: to)
+    }
+    /// Reads rows again from Mail's index by row ID, for a check at the moment a change runs.
+    /// Nil when the index cannot be read. Tests put a fake here.
+    lazy var readRows: ([Int64]) async -> [MailSummary]? = { [weak self] ids in
+        guard let root = self?.root else { return nil }
+        return await Task.detached(priority: .userInitiated) { () -> [MailSummary]? in
+            var rows: [MailSummary] = []
+            for start in stride(from: 0, to: ids.count, by: 500) {
+                let chunk = Array(ids[start..<min(start + 500, ids.count)])
+                guard let found = try? MailStore.messages(root: root, .init(mailboxes: [], rowIDs: chunk, limit: chunk.count)) else { return nil }
+                rows += found
+            }
+            return rows
+        }.value
+    }
     @Published var bulkUndoAvailable = false
     /// Scheduling owns the persisted duplicate check. The default keeps existing callers safe
     /// until the schedule center installs its lookup.
     var scheduledDraftIsProtected: (UUID) -> Bool = { _ in false }
-    private var selectingQuietly = false
     /// The message you marked unread while it is on screen. It stays unread until you move away.
     private var keptUnread: Int64?
     /// Read changes made here, until Mail's index shows them. Mail writes the index a moment after
@@ -106,7 +172,7 @@ final class MailModel: ObservableObject {
     private var changedAccounts: Set<String> = []
     private let setReadAction: (Bool, MailSummary, MailMailbox, MailMailbox?) async throws -> Void
     /// A message to select once the list that holds it loads, such as one picked in the launcher.
-    private var pending: MailSummary?
+    var pending: MailSummary?
     private var pendingOpen: Int64?
     private var openWork: Task<Void, Never>?
     @Published private(set) var detail: MIMEMessage? {
@@ -122,6 +188,8 @@ final class MailModel: ObservableObject {
     private(set) var unsubscribe: MailUnsubscribe?
     /// The last archive, delete, or move, while ⌘Z can still put it back. It shows as a note with Undo.
     @Published var lastChange: MailUndoableChange?
+    /// What each undoable change moved so far, by change. It outlives the note until Undo is done.
+    var changeProgress: [UUID: MailChangeProgress] = [:]
     /// A folder to make, rename, or remove, waiting for its name or for a yes.
     @Published var folderRequest: MailFolderRequest?
     /// True while an answer to an invitation or an unsubscribe email is being sent.
@@ -135,19 +203,23 @@ final class MailModel: ObservableObject {
     // MARK: Compose state. MailModel+Compose.swift changes these; views only read them.
 
     /// The open reply, forward, or new message. Changing what it says clears the footer note and
-    /// the first Escape of a discard.
+    /// the first press of a discard.
     @Published var draft: Draft? {
         didSet {
+            // A changed signature is yours from now on. Setting the draft here does not run didSet again.
+            if var changed = draft, changed.releaseChangedSignature() { draft = changed }
             persistComposition()
             serverDrafts.changed(draft)
+            // A new draft, or none, never starts set aside.
+            if oldValue?.id != draft?.id { draftSetAside = false; draftNote = nil }
             guard oldValue?.id != draft?.id || oldValue?.fields != draft?.fields else { return }
             discardArmed = false
             if composeNote != nil { composeNote = nil }
         }
     }
-    /// A note in the composer's footer, such as why Send did nothing or that Escape again discards.
+    /// A note in the composer's footer, such as why Send did nothing or that Discard again discards.
     @Published var composeNote: String?
-    /// Set by the first Escape on a draft with text. The second discards it.
+    /// Set by the first Discard or ⇧⌘⌫ on a draft with text. The second discards it.
     var discardArmed = false
     /// Counts refused new drafts and picks of the open one, so a view that hid it shows it again.
     @Published var draftNudge = 0
@@ -273,7 +345,11 @@ final class MailModel: ObservableObject {
         if let draftStore {
             do {
                 let stored = try draftStore.load()
-                draft = stored.active; unsent = stored.unsent; deliveries = stored.deliveries
+                // A restored draft always counts as changed: what Jevcast filled in is not kept.
+                var active = stored.active
+                active?.generated = nil
+                draft = active; unsent = stored.unsent; deliveries = stored.deliveries
+                draftSetAside = active != nil && stored.activeSetAside == true
                 try draftStore.save(stored)
             } catch {
                 persistenceProblem = "Saved drafts could not be read: " + error.localizedDescription
@@ -412,9 +488,11 @@ final class MailModel: ObservableObject {
         guard !checking else { return }
         checking = true
         Task { @MainActor [weak self] in
+            let native = NativeMailCenter.isActive
             do {
                 try await MailActions.checkForNewMail()
                 self?.reportedCheckFailure = false
+                self?.recordMailCheck(at: Date(), native: native)
             } catch {
                 if self?.reportedCheckFailure == false { self?.banner = "Could not check for new mail: " + error.localizedDescription }
                 self?.reportedCheckFailure = true
@@ -608,12 +686,6 @@ final class MailModel: ObservableObject {
         }
     }
 
-    /// Selects the newest message of the list, as the launcher panel opens on it.
-    func showNewest() {
-        if selectedID != nil { select(nil, byUser: false) }
-        reload()
-    }
-
     /// A Jevcast account reads a folder when it opens; until then the folder costs nothing.
     private func syncPlace() {
         guard !isDemo else { return }
@@ -760,14 +832,47 @@ final class MailModel: ObservableObject {
             removing[$0.rowID] == nil && (!(place == .inbox || place == .unread) || !isSnoozed($0))
         }
         if messages != rows { messages = rows }
+        let hadSelection = !selectedMessageIDs.isEmpty
         selectedMessageIDs.formIntersection(Set(rows.map(\.rowID)))
         if selectionAnchorID.map(selectedMessageIDs.contains) != true { selectionAnchorID = selectedMessageIDs.first }
         if let selectedID, let current = rows.first(where: { $0.rowID == selectedID }) {
+            // The message on screen is always one of the selected rows, so ⌫ never acts on a row
+            // outside what you selected.
+            if !selectionHoldsFocus, let inside = rows.first(where: { selectedMessageIDs.contains($0.rowID) }) {
+                select(inside.rowID, byUser: false)
+                return
+            }
             if old?.mailbox != current.mailbox || (detail == nil && !detailMissing && loadingID != selectedID) { loadSelected() }
             return
         }
         let replacement = old.flatMap { old in rows.first { $0.messageKey == old.messageKey } }
-        select(replacement?.rowID ?? rows.first?.rowID, byUser: false)
+        if !selectedMessageIDs.isEmpty {
+            // The message on screen left the list: the focus moves to a row that is still selected.
+            let inside = replacement.flatMap { selectedMessageIDs.contains($0.rowID) ? $0.rowID : nil }
+                ?? rows.first { selectedMessageIDs.contains($0.rowID) }?.rowID
+            select(inside, byUser: false)
+            return
+        }
+        let next = replacement?.rowID ?? rows.first?.rowID
+        select(next, byUser: false)
+        // Nothing selected is left: the selection is the one row on screen.
+        if hadSelection, let next, let row = conversation(containing: next)?.latest.summary.rowID { selectConversationRows([row]) }
+    }
+
+    /// True when the message on screen is in the selection, or nothing is selected.
+    var selectionHoldsFocus: Bool {
+        guard !selectedMessageIDs.isEmpty else { return true }
+        guard let selectedID, let row = conversation(containing: selectedID)?.latest.summary.rowID else { return false }
+        return selectedConversationRowIDs.contains(row)
+    }
+
+    /// True when a delete for good may act on `message`: it is the message on screen, and no other
+    /// row is selected. Every caller passes here, so one press never removes a row you did not choose.
+    func mayDeleteForGood(_ message: MailSummary) -> Bool {
+        guard message.rowID == selectedID else { return false }
+        let rows = selectedConversationRowIDs
+        guard !rows.isEmpty else { return true }
+        return rows.count == 1 && rows.first == conversation(containing: message.rowID)?.latest.summary.rowID
     }
 
     /// Rows with a read change Mail's index does not show yet keep that change, for up to a minute.
@@ -804,21 +909,36 @@ final class MailModel: ObservableObject {
         }
     }
 
+    /// `byUser` is true for a selection you made. Only such a selection starts the read timer.
     func select(_ rowID: Int64?, byUser: Bool) {
         let unchanged = rowID == selectedID
-        selectingQuietly = !byUser
         if byUser { selectedMessageIDs = rowID.map { [$0] } ?? [] }
+        if !unchanged { selectionIsUsers = byUser }
         selectedID = rowID
-        selectingQuietly = false
         guard unchanged else { return }
         // The same row again, such as a message the list just inserted, still needs its body.
         if detail == nil, !detailMissing { loadSelected() }
         // Picking the message on screen again, such as in the launcher, opens it.
-        if byUser { keptUnread = nil; armRead() }
+        if byUser { keptUnread = nil; selectionIsUsers = true; armRead() }
+    }
+
+    /// You acted on the message on screen, such as scrolling it or replying: it may count as read now.
+    func noteUserAction() {
+        guard !selectionIsUsers, selectedID != nil else { return }
+        selectionIsUsers = true
+        armRead()
+    }
+
+    /// The message on screen stays as it is, but counts as the model's own choice again, such as
+    /// when Mail opens on the message you left. It stays unread until you act on it.
+    func treatSelectionAsAutomatic() {
+        selectionIsUsers = false
+        readTimer?.cancel(); readTimer = nil
     }
 
     /// Queues a launcher selection. The lookup runs off the main thread, including when access
-    /// is still being checked on the first opening of Mail.
+    /// is still being checked on the first opening of Mail. The next list that loads selects it,
+    /// or, filtered, drops the request, so a later reload never acts on it.
     @discardableResult
     func open(_ rowID: Int64) -> Bool {
         if statusWork != nil { pendingOpen = rowID; return true }
@@ -831,6 +951,13 @@ final class MailModel: ObservableObject {
             guard !Task.isCancelled, let self, self.root == root else { return }
             guard let found else { self.banner = "This message is no longer in Mail's index."; return }
             self.pending = found
+            // You asked for this message: filters that could hide it go, and the note says so.
+            if !self.filter.isEmpty {
+                self.filter = MailFilter()
+                self.banner = "Filters cleared to show this message."
+            }
+            // The reload just below replaces the one a filter or search change would start later.
+            self.searchWork?.cancel()
             // A Gmail row lives in All Mail; it opens in its Inbox when it has that label.
             let inbox = found.labels.first { id in self.mailboxes.contains { $0.rowID == id && $0.role == .inbox } }
             let target = Place.mailbox(inbox ?? found.mailbox)
@@ -861,6 +988,8 @@ final class MailModel: ObservableObject {
             return
         }
         detail = nil; detailHTML = nil; detailMissing = false
+        // A demo render of the reader while a body loads.
+        if isDemo && demoHoldsBodies { return }
         Task { @MainActor [weak self] in
             var loaded = await Task.detached(priority: .userInitiated) { Self.loadBody(root: root, box: box, rowID: rowID) }.value
             // A Jevcast account downloads a body the first time it is shown.
@@ -887,17 +1016,16 @@ final class MailModel: ObservableObject {
         loadSelected()
     }
 
-    /// The message on screen, in the window you are using, counts as read after the time set in
-    /// Settings › Mail. With a delay, moving past it quickly with ↓ leaves it unread.
-    /// `searchPick`: the model picked the first match of a search, which changes as you type.
-    private func armRead(searchPick: Bool = false) {
+    /// The message you chose, in the window you are using, counts as read after the time set in
+    /// Settings › Mail. With a delay, moving past it quickly with ↓ leaves it unread. A message the
+    /// model selected by itself waits until you act on it.
+    private func armRead() {
         readTimer?.cancel(); readTimer = nil
         let delay = MailReading.markRead.rawValue
-        guard delay >= 0, windowIsKey, let message = selected, !message.read, message.rowID != keptUnread else { return }
-        let wait = searchPick ? max(delay, 1.5) : delay
+        guard delay >= 0, windowIsKey, selectionIsUsers, let message = selected, !message.read, message.rowID != keptUnread else { return }
         readTimer = Task { @MainActor [weak self] in
-            if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
-            guard !Task.isCancelled, let self, self.windowIsKey, let current = self.selected, current.rowID == message.rowID,
+            if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
+            guard !Task.isCancelled, let self, self.windowIsKey, self.selectionIsUsers, let current = self.selected, current.rowID == message.rowID,
                   !current.read, current.rowID != self.keptUnread else { return }
             self.setRead(true, current)
         }
@@ -938,6 +1066,9 @@ final class MailModel: ObservableObject {
         if let loaded { remember(loaded, for: message.rowID) }
         return loaded
     }
+
+    /// Demo only: a body that is not cached stays loading, for the reader's loading snapshot.
+    var demoHoldsBodies = false
 
     func installDemoBody(_ detail: MIMEMessage, rowID: Int64) {
         guard isDemo else { return }
@@ -986,7 +1117,9 @@ final class MailModel: ObservableObject {
     // MARK: Actions
 
     /// Runs a Mail action. `update` changes the row at once; the index confirms it later.
-    func perform(_ name: String, message target: MailSummary? = nil, removes: Bool = false, _ action: @escaping () async throws -> Void, update: ((inout MailSummary) -> Void)? = nil) {
+    /// `failed` runs after a failure, such as to keep Undo only for what moved.
+    func perform(_ name: String, message target: MailSummary? = nil, removes: Bool = false, failed: (() -> Void)? = nil,
+                 _ action: @escaping () async throws -> Void, update: ((inout MailSummary) -> Void)? = nil) {
         guard let message = target ?? selected else { return }
         if let account = mailbox(message.mailbox)?.accountID { changedAccounts.insert(account) }
         let index = messages.firstIndex { $0.rowID == message.rowID }
@@ -994,7 +1127,7 @@ final class MailModel: ObservableObject {
             removing[message.rowID] = .distantFuture
             // The row slides away, so the eye sees what left the list.
             withAnimation(MailStyle.motion) { _ = messages.remove(at: index) }
-            // The next message shows and counts as read, as in Mail.
+            // The next message shows. It stays unread until you act on it.
             selectedMessageIDs.remove(message.rowID)
             if selectedID == message.rowID {
                 select(messages.indices.contains(index) ? messages[index].rowID : messages.last?.rowID, byUser: false)
@@ -1013,7 +1146,7 @@ final class MailModel: ObservableObject {
                 // After a failed change the index decides the row again.
                 self?.removing.removeValue(forKey: message.rowID)
                 self?.readChanges.removeValue(forKey: message.rowID)
-                self?.lastChange = nil
+                failed?()
                 self?.banner = "Could not \(name): \(error.localizedDescription)"
                 self?.reload(keepSelection: true)
             }
@@ -1028,7 +1161,7 @@ final class MailModel: ObservableObject {
     }
 
     func archive() {
-        guard let message = selected, let box = actionBox(message) else { return }
+        guard let message = selected, let box = actionBox(message), !refuses(.archive) else { return }
         guard let archive = MailMailbox.archive(for: box.accountID, in: mailboxes), archive.rowID != box.rowID else {
             banner = "This account has no Archive mailbox."; return
         }
@@ -1040,9 +1173,14 @@ final class MailModel: ObservableObject {
         deleteMessages(deletionTargets(for: message))
     }
 
+    /// ⌫, the reader's Delete, ⌘K, and Delete in the menus. With several rows selected it acts on
+    /// all of them, except in Trash: there a delete is permanent and goes one message at a time.
     func delete() {
+        let several = selectedConversationRowIDs.count > 1
         guard let message = selected else { return }
-        let targets = actionBox(message)?.role != .trash && selectedConversationRowIDs.count > 1
+        // Several rows: every one of their mailboxes must allow it, so none is deleted for good.
+        if let refusal = several ? bulkRefusal(.trash) : refusal(.delete) { banner = refusal; return }
+        let targets = actionBox(message)?.role != .trash && several
             ? conversationGroups.filter { selectedConversationRowIDs.contains($0.latest.summary.rowID) }.flatMap { $0.messages.map(\.summary) }
             : deletionTargets(for: message)
         deleteMessages(targets)
@@ -1054,47 +1192,53 @@ final class MailModel: ObservableObject {
         return conversationGroups.first { $0.messages.contains { $0.summary.rowID == message.rowID } }?.messages.map(\.summary) ?? [message]
     }
 
-    private func deleteMessages(_ targets: [MailSummary]) {
+    /// Deletes `targets`: to Trash with Undo, or for good when they are in a Jevcast account's Trash.
+    func deleteMessages(_ targets: [MailSummary]) {
         let reviewed = targets.compactMap { message in actionBox(message).map { (message, $0) } }
         guard reviewed.count == targets.count else {
             banner = "A mailbox is no longer available. Refresh Mail before deleting these messages."
             return
         }
-        let ids = Set(targets.map(\.rowID))
-        if let selectedID, ids.contains(selectedID) {
-            let index = messages.firstIndex { $0.rowID == selectedID } ?? 0
-            let next = messages.dropFirst(index).first { !ids.contains($0.rowID) }
-                ?? messages.prefix(index).last { !ids.contains($0.rowID) }
-            select(next?.rowID, byUser: false)
-        }
-        let action = deleteAction
         // A delete in Trash removes the message for good, so it has no undo.
         let permanent = reviewed.filter { $0.1.role == .trash && NativeMailCenter.isActive }
         let toTrash = reviewed.filter { !($0.1.role == .trash && NativeMailCenter.isActive) }
+        // For good only one message at a time: the one on screen, with no other row selected.
+        if !permanent.isEmpty, reviewed.count != 1 || !mayDeleteForGood(permanent[0].0) {
+            banner = "Select one message to delete it for good."
+            return
+        }
+        selectAway(from: Set(targets.map(\.rowID)))
+        let action = deleteAction
         for (message, box) in permanent {
             perform("delete permanently", message: message, removes: true) { try await action(message, box, true) }
         }
         if !toTrash.isEmpty {
-            undoably(.trash, title: toTrash.count == 1 ? "Moved to Trash" : "Moved \(toTrash.count) messages to Trash", toTrash, name: "delete") { message, box in
-                try await action(message, box, false)
-            }
+            moveToTrash(toTrash, title: toTrash.count == 1 ? "Moved to Trash" : "Moved \(toTrash.count) messages to Trash")
         }
+    }
+
+    /// Moves messages to Trash with Undo. It never deletes for good, also for a message that is
+    /// in Trash. `title` names the change in the Undo note, such as "Moved 12 messages from Ada to Trash".
+    func moveToTrash(_ items: [(MailSummary, MailMailbox)], title: String) {
+        selectAway(from: Set(items.map(\.0.rowID)))
+        let action = deleteAction
+        undoably(.trash, title: title, items, name: "delete") { message, box in
+            try await action(message, box, false)
+        }
+    }
+
+    /// The message on screen is leaving: the next one that stays shows, unread.
+    private func selectAway(from ids: Set<Int64>) {
+        guard let selectedID, ids.contains(selectedID) else { return }
+        let index = messages.firstIndex { $0.rowID == selectedID } ?? 0
+        let next = messages.dropFirst(index).first { !ids.contains($0.rowID) }
+            ?? messages.prefix(index).last { !ids.contains($0.rowID) }
+        select(next?.rowID, byUser: false)
     }
 
     /// Waits for submitted mail changes, including their failure handling.
     func waitForActions() async { await actionChain?.value }
 
-    /// Deletes every message in the list from the selected message's sender: for clearing out junk.
-    func deleteAllFromSender() {
-        if let message = selected, actionBox(message)?.role == .trash {
-            banner = "In \(actionBox(message)?.name ?? "Trash"), delete messages one at a time, or use Empty."
-            return
-        }
-        guard let sender = selected?.senderAddress, !sender.isEmpty else { return }
-        let targets = messages.filter { $0.senderAddress.caseInsensitiveCompare(sender) == .orderedSame }
-        deleteMessages(targets)
-        banner = "Deleting \(targets.count) message" + (targets.count == 1 ? "" : "s") + " from \(sender)."
-    }
     var selectedSender: String? { selected?.senderAddress }
 
     /// True when the selected message is in its account's Junk mailbox.
@@ -1102,7 +1246,7 @@ final class MailModel: ObservableObject {
 
     /// Moves the selected message into its account's one Junk mailbox, or from Junk to its Inbox.
     func setJunk(_ junk: Bool) {
-        guard let message = selected, let box = actionBox(message) else { return }
+        guard let message = selected, let box = actionBox(message), !refuses(.junkToggle) else { return }
         let targets = mailboxes.filter { $0.accountID == box.accountID && $0.role == (junk ? .junk : .inbox) }
         guard targets.count == 1, let target = targets.first, target.rowID != box.rowID else {
             banner = junk ? "This account has no single Junk mailbox." : "This account has no single Inbox."; return
@@ -1145,12 +1289,12 @@ final class MailModel: ObservableObject {
         }
     }
     func toggleFlag() {
-        guard let message = selected, let box = actionBox(message) else { return }
+        guard let message = selected, let box = actionBox(message), !refuses(.flagToggle) else { return }
         let flagged = !message.flagged
         perform(flagged ? "flag" : "unflag") { try await MailActions.setFlagged(flagged, message, in: box) } update: { $0.flagged = flagged }
     }
     func toggleRead() {
-        guard let message = selected, actionBox(message) != nil else { return }
+        guard let message = selected, actionBox(message) != nil, !refuses(.readToggle) else { return }
         readTimer?.cancel()
         // Marked unread, the message stays unread while it stays on screen, also when you come back to the window.
         keptUnread = message.read ? message.rowID : nil
@@ -1162,7 +1306,7 @@ final class MailModel: ObservableObject {
         return mailboxes.filter { $0.accountID == box.accountID && $0.rowID != box.rowID }.sorted { $0.path < $1.path }
     }
     func move(to destination: MailMailbox) {
-        guard let message = selected, let box = actionBox(message) else { return }
+        guard let message = selected, let box = actionBox(message), !refuses(.move) else { return }
         undoably(.move(mailboxID: destination.rowID), title: "Moved to " + destination.name, [(message, box)]) { message, box in
             try await MailActions.move(message, from: box, to: destination)
         }
@@ -1175,10 +1319,18 @@ final class MailModel: ObservableObject {
             do { try await MailActions.openInMail(message, in: box) } catch { self?.banner = error.localizedDescription }
         }
     }
-    func checkMail() {
+    /// The list's Check button. The sidebar's status line shows "Checking…"; with the sidebar
+    /// hidden, `announce` shows the note instead. Errors always show.
+    func checkMail(announce: Bool = true) {
+        checkingMail = true
+        let native = NativeMailCenter.isActive
         Task { @MainActor [weak self] in
-            do { try await MailActions.checkForNewMail(); self?.banner = "Checking for new mail…" }
-            catch { self?.banner = error.localizedDescription }
+            do {
+                try await MailActions.checkForNewMail()
+                self?.recordMailCheck(at: Date(), native: native)
+                if announce { self?.banner = "Checking for new mail…" }
+            } catch { self?.banner = error.localizedDescription }
+            self?.checkingMail = false
         }
     }
 

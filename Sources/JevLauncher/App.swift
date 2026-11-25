@@ -227,7 +227,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         MailFeatureCenter.shared.openMessage = { [weak self] in self?.showMail(select: $0) }
         MailFeatureCenter.shared.start(model: mailModel)
         CalendarAlertCenter.shared.openCalendar = { [weak self] in self?.showView(.calendar) }
-        MailLinkRouter.compose = { [weak self] link in self?.composeMail(link) ?? false }
+        // Handled here whenever Jevcast writes mail: a link refused for an open draft stays here
+        // with Mail's note and never goes on to another mail app.
+        MailLinkRouter.compose = { [weak self] link in
+            guard let self, self.writesMailLinks else { return false }
+            self.composeMail(link)
+            return true
+        }
         mailLinksReady = true
         if let link = pendingMailLink {
             pendingMailLink = nil
@@ -618,13 +624,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
     }
     private var mailLinksReady = false
     private var pendingMailLink: MailtoLink?
-    /// A `mailto:` link as a new message in the panel. False when Jevcast's own mail accounts are not in use.
+    /// True when mail links open as new messages here: Jevcast's own mail accounts are in use.
+    private var writesMailLinks: Bool { NativeMailCenter.isActive && !NativeMailCenter.shared.accounts.isEmpty && UISnapshots.directory == nil }
+    /// A `mailto:` link as a new message in the panel. False when Jevcast's own mail accounts are
+    /// not in use, or when the new message did not open because an open draft you changed stays.
     @discardableResult
     func composeMail(_ link: MailtoLink) -> Bool {
-        guard NativeMailCenter.isActive, !NativeMailCenter.shared.accounts.isEmpty, UISnapshots.directory == nil else { return false }
+        guard writesMailLinks else { return false }
         showView(.mail)
-        mailModel.compose(link: link)
-        return true
+        return mailModel.compose(link: link)
     }
     /// macOS sends mail links here when Jevcast is the default mail app.
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -634,7 +642,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         openMailLink(link)
     }
     private func openMailLink(_ link: MailtoLink) {
-        if !composeMail(link) { model.showFailure("Add a mail account in Settings › Mail to write mail in Jevcast.") }
+        guard writesMailLinks else { model.showFailure("Add a mail account in Settings › Mail to write mail in Jevcast."); return }
+        // Refused only while a draft you changed is open; Mail shows it with a note.
+        composeMail(link)
     }
     /// The running shell, or a new one. When the shell exits, the view closes and the next
     /// Hyper–T starts a new shell. Nil when libghostty cannot start.
@@ -717,8 +727,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         // Save pending clipboard work, but never let a stalled save block quitting. While AppKit waits for
         // the reply it runs the loop in modal mode, so the reply is scheduled in that mode too; 2 s at most.
         // A message in its undo time goes to Mail now, and quitting waits for it: 90 s at most, longer
-        // than the 30 s limit of one Mail script.
+        // than the 30 s limit of one Mail script. A draft you just closed is written first, with the same limit.
         let sends = madeMailModel.flatMap { $0.sending ? $0 : nil }
+        let drafts = madeMailModel.flatMap { $0.savingDraft ? $0 : nil }
         let scheduled = !MailFeatureCenter.shared.schedules.dispatching.isEmpty
         MailFeatureCenter.shared.stop()
         quitting = true
@@ -733,10 +744,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, AppC
         Task { @MainActor in
             await model.clipboard.prepareForQuit()
             await sends?.finishSends()
+            await drafts?.finishDraftCheckpoint()
             await MailFeatureCenter.shared.schedules.waitForDispatches()
             RunLoop.main.perform(inModes: modes) { MainActor.assumeIsolated { reply() } }
         }
-        let timer = Timer(timeInterval: sends == nil && !scheduled ? 2 : 90, repeats: false) { _ in MainActor.assumeIsolated { reply() } }
+        let timer = Timer(timeInterval: sends == nil && drafts == nil && !scheduled ? 2 : 90, repeats: false) { _ in MainActor.assumeIsolated { reply() } }
         for mode in modes { RunLoop.main.add(timer, forMode: mode) }
         return .terminateLater
     }

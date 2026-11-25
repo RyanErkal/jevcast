@@ -120,6 +120,74 @@ struct MailFilterCoverageText: View {
     }
 }
 
+/// One-click filters under the list's title: Unread, Flagged, and Attachments set the same fields
+/// as the filter form and apply at once. "+N" counts the form's other filters and opens it; × clears
+/// every filter. The row is always there, so the list never moves when a filter turns on.
+struct MailFilterChips: View {
+    @ObservedObject var model: MailModel
+    @State private var showingForm = false
+
+    static let height: CGFloat = 22
+
+    var body: some View {
+        HStack(spacing: 5) {
+            ViewThatFits(in: .horizontal) {
+                chips(titles: true)
+                chips(titles: false)
+            }
+            Spacer(minLength: 0)
+            if model.filterIsActive {
+                Button { model.clearFilters() } label: { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain).foregroundStyle(.secondary).help("Clear filters").accessibilityLabel("Clear filters")
+            }
+        }
+        .frame(height: Self.height)
+    }
+
+    private func chips(titles: Bool) -> some View {
+        HStack(spacing: 5) {
+            ForEach(MailFilterChip.allCases, id: \.self) { chip in
+                let on = chip.isOn(model.filter)
+                Button { model.setFilter(chip.toggled(model.filter)) } label: {
+                    if titles { Text(chip.title) } else { Image(systemName: Self.symbol(chip)) }
+                }
+                .buttonStyle(MailChipStyle(on: on))
+                .help(on ? "Show all mail again" : "Show only \(chip.title.lowercased()) mail")
+                .accessibilityLabel(chip.title).accessibilityAddTraits(on ? [.isSelected] : [])
+            }
+            let others = MailFilterChip.otherCount(model.filter)
+            if others > 0 {
+                Button("+\(others)") { showingForm = true }
+                    .buttonStyle(MailChipStyle(on: true))
+                    .help("\(others) more filter\(others == 1 ? "" : "s"). Click to edit them.")
+                    .popover(isPresented: $showingForm, arrowEdge: .bottom) { MailFilterEditor(model: model) }
+            }
+        }
+    }
+
+    static func symbol(_ chip: MailFilterChip) -> String {
+        switch chip {
+        case .unread: return "envelope.badge"
+        case .flagged: return "flag"
+        case .attachments: return "paperclip"
+        }
+    }
+}
+
+/// A small capsule that reads as on or off.
+struct MailChipStyle: ButtonStyle {
+    let on: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: MailStyle.meta, weight: on ? .semibold : .regular)).lineLimit(1).fixedSize()
+            .foregroundStyle(on ? Color.accentColor : Color.secondary)
+            .padding(.horizontal, 8).frame(height: 20)
+            .background(Capsule().fill(on ? Color.accentColor.opacity(configuration.isPressed ? 0.3 : 0.18)
+                                          : Color.primary.opacity(configuration.isPressed ? 0.14 : 0.06)))
+            .contentShape(Capsule())
+    }
+}
+
 struct MailFilterButton: View {
     @ObservedObject var model: MailModel
     @State private var showing = false

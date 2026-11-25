@@ -30,15 +30,62 @@ final class MailReadTests: XCTestCase {
         try FileManager.default.removeItem(atPath: root)
     }
 
-    @MainActor func testMessageShownOnOpenCountsAsRead() async throws {
+    @MainActor func testMessageShownOnOpenStaysUnreadUntilYouActOnIt() async throws {
         let calls = Calls()
         let model = try makeModel(calls)
         model.windowIsKey = true
         model.refreshStatus()
         try await wait { model.selectedID != nil && !model.isLoading }
         let top = try XCTUnwrap(model.selectedID)
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertTrue(calls.all.isEmpty, "Opening Mail selects the newest message but marks nothing read.")
+        XCTAssertEqual(model.selected?.read, false)
+        model.noteUserAction()
         try await wait { calls.contains(true, top) }
-        XCTAssertEqual(model.selected?.read, true)
+        XCTAssertEqual(model.selected?.read, true, "Acting on it, such as scrolling it, counts.")
+    }
+
+    /// Mail opens again where you left it, and the message you left stays unread until you act on it.
+    @MainActor func testOpeningMailAgainKeepsThePlaceAndTheMessageUnread() async throws {
+        let calls = Calls()
+        let model = try makeModel(calls)
+        model.refreshStatus()
+        try await wait { model.selectedID != nil && !model.isLoading }
+        model.place = .allMail
+        try await wait { model.selectedID != nil && !model.isLoading }
+        let second = try XCTUnwrap(model.messages.dropFirst().first?.rowID)
+        UserDefaults.standard.set(MailReading.MarkRead.threeSeconds.rawValue, forKey: MailReading.markReadKey)
+        model.windowIsKey = true
+        model.select(second, byUser: true)
+        // Mail closes before the read time. A new page opens on the same model, as the launcher does.
+        model.windowIsKey = false
+        UserDefaults.standard.set(MailReading.MarkRead.onOpen.rawValue, forKey: MailReading.markReadKey)
+        let page = MailPage(mail: model)
+        model.refreshStatus()
+        page.resume()
+        try await Task.sleep(nanoseconds: 50_000_000)
+        try await wait { !model.isLoading }
+        XCTAssertEqual(model.place, .allMail, "Mail opens on the mailbox you left")
+        XCTAssertEqual(model.selectedID, second, "Mail opens on the message you left")
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertTrue(calls.all.isEmpty, "Opening Mail never marks a message read")
+        model.moveSelection(1)
+        model.moveSelection(-1)
+        try await wait { calls.contains(true, second) }
+    }
+
+    @MainActor func testTheModelsOwnSelectionsStayUnread() async throws {
+        let calls = Calls()
+        let model = try makeModel(calls)
+        model.windowIsKey = true
+        model.refreshStatus()
+        try await wait { model.selectedID != nil && !model.isLoading }
+        XCTAssertTrue(model.refresh())
+        try await wait { !model.isLoading }
+        model.reload()
+        try await wait { !model.isLoading && model.selectedID != nil }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertTrue(calls.all.isEmpty, "A reload keeps or picks a message without marking it read")
     }
 
     @MainActor func testMessageCountsAsReadOnlyOnceTheWindowIsInUse() async throws {
@@ -46,10 +93,11 @@ final class MailReadTests: XCTestCase {
         let model = try makeModel(calls)
         model.refreshStatus()
         try await wait { model.selectedID != nil && !model.isLoading }
+        let top = try XCTUnwrap(model.selectedID)
+        model.select(top, byUser: true)
         try await Task.sleep(nanoseconds: 100_000_000)
         XCTAssertTrue(calls.all.isEmpty, "A window in the background marks nothing read.")
         model.windowIsKey = true
-        let top = try XCTUnwrap(model.selectedID)
         try await wait { calls.contains(true, top) }
     }
 
@@ -60,6 +108,7 @@ final class MailReadTests: XCTestCase {
         model.refreshStatus()
         try await wait { model.selectedID != nil && !model.isLoading }
         let top = try XCTUnwrap(model.selectedID)
+        model.select(top, byUser: true)
         try await wait { calls.contains(true, top) }
 
         // Mail has not written the change to its index yet.
@@ -84,6 +133,7 @@ final class MailReadTests: XCTestCase {
         model.refreshStatus()
         try await wait { model.selectedID != nil && !model.isLoading }
         let top = try XCTUnwrap(model.selectedID)
+        model.select(top, byUser: true)
         try await wait { calls.contains(true, top) }
 
         model.toggleRead()
@@ -99,7 +149,7 @@ final class MailReadTests: XCTestCase {
         try await wait { calls.all.filter { $0.rowID == top }.map(\.read) == [true, false, true] }
     }
 
-    @MainActor func testSearchPickCountsAsReadOnceTheSearchSettles() async throws {
+    @MainActor func testSearchPickStaysUnreadUntilYouActOnIt() async throws {
         let calls = Calls()
         let model = try makeModel(calls)
         model.windowIsKey = true
@@ -110,8 +160,31 @@ final class MailReadTests: XCTestCase {
         try await wait { model.messages.count == 1 && !model.isLoading && model.selectedID != top }
         let match = try XCTUnwrap(model.selectedID)
         try await Task.sleep(nanoseconds: 500_000_000)
-        XCTAssertFalse(calls.contains(true, match), "The first match of a search waits while the search may still change.")
+        XCTAssertFalse(calls.contains(true, match), "The first match of a search is the model's own pick.")
+        model.select(match, byUser: true)
         try await wait { calls.contains(true, match) }
+    }
+
+    /// A message you ask to open, such as from the launcher's search, opens even when a filter
+    /// would hide it, and the request never waits for a later reload.
+    @MainActor func testOpeningAMessageClearsAFilterThatHidesIt() async throws {
+        try write("UPDATE messages SET read = 1 WHERE ROWID IN (3, 4)")
+        let calls = Calls()
+        let model = try makeModel(calls)
+        model.windowIsKey = true
+        model.refreshStatus()
+        try await wait { model.selectedID != nil && !model.isLoading }
+        var filter = MailFilter()
+        filter.unreadOnly = true
+        model.filter = filter
+        try await wait { !model.isLoading && model.activeFilterRows != nil && !model.messages.contains { $0.rowID == 3 } }
+        let page = MailPage(mail: model)
+        page.show(3)
+        try await wait { model.selectedID == 3 && !model.isLoading }
+        XCTAssertTrue(model.filter.isEmpty, "The Unread filter would hide it, so it went")
+        XCTAssertEqual(model.banner, "Filters cleared to show this message.")
+        XCTAssertTrue(model.selectionIsUsers, "You chose it")
+        XCTAssertNil(model.pending, "Nothing is left for a later reload")
     }
 
     @MainActor func testFailedChangeShowsIndexState() async throws {
@@ -121,6 +194,7 @@ final class MailReadTests: XCTestCase {
         model.windowIsKey = true
         model.refreshStatus()
         try await wait { model.selectedID != nil && !model.isLoading }
+        model.select(try XCTUnwrap(model.selectedID), byUser: true)
         try await wait { model.banner != nil }
         try await wait { !model.isLoading }
         XCTAssertEqual(model.selected?.read, false, "A change Mail refused must not stay on screen.")

@@ -49,13 +49,16 @@ protocol LauncherPage: AnyObject {
     var openTitle: String { get }
     /// More keys for the footer, before Return.
     var footerHints: [(title: String, key: String)] { get }
-    /// What Escape does, when the view names it, such as "Discard" while writing. Nil shows Back or Close.
+    /// What Escape does, when the view names it, such as "Save Draft" while writing. Nil shows Back or Close.
     var backTitle: String? { get }
     /// Fires when the footer's keys may have changed, so the footer draws them again.
     var footerChanges: AnyPublisher<Void, Never> { get }
     func handle(_ key: PageKey) -> Bool
     /// Keys a view reads before the plain keys, such as ⌘P or ⇧↓. True when used.
     func handleEvent(_ event: NSEvent) -> Bool
+    /// Keys a view reads while its text box has the keys, before the text box, such as ⇧⌘⌫ to
+    /// discard a draft. Escape never comes here. True when used.
+    func handleTypingEvent(_ event: NSEvent) -> Bool
     func filter(_ text: String)
     /// Leaves a detail level, such as a message back to the list. False at the top level.
     func back() -> Bool
@@ -80,6 +83,7 @@ extension LauncherPage {
     var backTitle: String? { nil }
     var footerChanges: AnyPublisher<Void, Never> { Empty().eraseToAnyPublisher() }
     func handleEvent(_ event: NSEvent) -> Bool { false }
+    func handleTypingEvent(_ event: NSEvent) -> Bool { false }
     func popOut() {}
     func opened() {}
     func closed(handingOff: Bool) {}
@@ -179,7 +183,7 @@ extension LauncherModel {
             return true
         }
         if page.isTyping {
-            guard event.keyCode == 53 else { return false }
+            guard event.keyCode == 53 else { return page.handleTypingEvent(event) }
             if !page.back() { leaveView() }
             return true
         }
@@ -197,9 +201,11 @@ extension LauncherModel {
         case 36, 76: return page.handle(.open(shift: event.modifierFlags.contains(.shift)))
         case 51:
             // ⌫ edits the filter while it has text; ⌘⌫ always goes to the view. A held ⌫ that
-            // empties the filter never goes on to delete.
+            // empties the filter never goes on to delete. Only ⌫ and ⌘⌫ delete: a chord with ⇧, ⌥,
+            // or ⌃ never does, such as a second ⇧⌘⌫ after Discard closed a draft.
             guard !event.isARepeat else { return query.isEmpty }
-            guard query.isEmpty || flags == .command else { return false }
+            let chord = event.modifierFlags.intersection([.command, .control, .option, .shift])
+            guard chord == .command || (chord.isEmpty && query.isEmpty) else { return false }
             return page.handle(.delete)
         // Tab would move focus out of the filter.
         case 48: return true

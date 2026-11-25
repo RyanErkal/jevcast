@@ -50,15 +50,19 @@ enum LauncherPages {
     static func make(_ id: ViewID, model: LauncherModel, links: Links, snapshot: Bool) -> LauncherPage? {
         switch id {
         case .mail:
-            return MailPage(mail: snapshot ? nil : links.mail?(), focusFilter: { [weak model] in model?.focusInput() }, features: snapshot ? nil : .shared)
+            return MailPage(mail: snapshot ? nil : links.mail?(), focusFilter: { [weak model] in model?.focusInput() },
+                            clearQuery: { [weak model] in model?.filterView("") }, features: snapshot ? nil : .shared,
+                            sidebarDefaults: snapshot ? nil : .standard)
         case .calendar:
             let list = SourcePage(.calendar, source: snapshot ? nil : CalendarSource(), model: model, scope: "week", hasDetail: true,
                                   emptyText: "Nothing in the next seven days.",
                                   popOut: snapshot ? nil : { [weak model] in model?.onClose?(false); CalendarSource.openApp("com.apple.iCal") })
             return CalendarPage(list: list, readsEvents: !snapshot, hideLauncher: { [weak model] in model?.onClose?(false) },
                                 openMail: snapshot ? nil : { [weak model] text in
-                                    // The invitation is a message. Mail opens with the event's title as its search.
-                                    model?.closeAllViews(); model?.showView(.mail); model?.filterView(text)
+                                    // The invitation is a message. Mail opens on the inbox with the event's title as its search.
+                                    model?.closeAllViews(); model?.showView(.mail)
+                                    (model?.page as? MailPage)?.showInbox()
+                                    model?.filterView(text)
                                 })
         case .tasks:
             let center = model.scheduledBriefs

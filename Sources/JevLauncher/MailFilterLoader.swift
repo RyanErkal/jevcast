@@ -136,6 +136,12 @@ extension MailModel {
             let kept = Set(keptIDs).intersection(Set(result.messages.map(\.rowID)))
             self.selectedMessageIDs = self.selectedMessageIDs.intersection(Set(result.messages.map(\.rowID)))
             self.install(first)
+            // A message you asked to open is chosen when the filter shows it. Either way the
+            // request ends here, so a later reload never acts on it.
+            if let pending = self.pending {
+                self.pending = nil
+                if self.messages.contains(where: { $0.rowID == pending.rowID }) { self.select(pending.rowID, byUser: true); return }
+            }
             if let previous = self.selectedID, kept.contains(previous) { self.select(previous, byUser: false) }
         }
     }

@@ -84,7 +84,7 @@ extension MailModel {
             changed.serverDraftBlockKind = blockKind
             changed.serverDraftAcknowledgementUncertain = acknowledgementUncertain ? true : nil
             if reference != nil { changed.serverDraftImported = nil }
-            item = Unsent(draft: changed, reason: item.reason)
+            item = Unsent(draft: changed, reason: item.reason, kept: item.kept)
             unsent[index] = item
             found = true
         }
@@ -107,7 +107,11 @@ extension MailModel {
     @discardableResult
     func editSelectedServerDraft() async throws -> Bool {
         switch try await importSelectedServerDraft() {
-        case .imported, .alreadyOpen: return true
+        case .imported: return true
+        case .alreadyOpen:
+            // The draft you closed is this one: it shows again.
+            reopenDraft()
+            return true
         case .conflict: return false
         }
     }
@@ -148,6 +152,30 @@ extension MailModel {
         let remote = MailDraftImportBuilder.build(raw: loaded.raw, message: message,
                                                     reference: loaded.reference, identity: identity,
                                                     senders: senders)
+        return try openServerDraft(remote)
+    }
+
+    /// Opens an imported server draft. When a local draft on this Mac already holds the same
+    /// server message, that one opens again, with any review block it has; a second local copy
+    /// of one server draft is never made.
+    func openServerDraft(_ remote: Draft) throws -> MailDraftImportResult {
+        if let reference = remote.serverDraftReference, let existing = try localServerDraft(reference) {
+            if existing.id == draft?.id {
+                // The open or set-aside draft holds it: it shows again, with its review. The server
+                // copy is the same or older (an edit there would have a new UID), so nothing is
+                // imported, and no second draft can send the same message.
+                if existing.fields != remote.fields { composeNote = "This draft has newer edits on this Mac than the server copy." }
+                return .alreadyOpen(existing)
+            }
+            if let local = draft, local.needsKeeping, !draftSetAside {
+                unsent.removeAll { $0.id == local.id }
+                unsent.append(.init(draft: local, reason: "Kept while opening a server Drafts message."))
+                self.draft = nil
+            }
+            guard startDraft(existing) else { return .conflict(local: draft ?? existing, remote: existing) }
+            unsent.removeAll { $0.id == existing.id }
+            return .alreadyOpen(existing)
+        }
         if let local = draft, local.hasContent {
             if local.serverDraftReference == remote.serverDraftReference {
                 if local.fields == remote.fields { return .alreadyOpen(local) }
@@ -163,5 +191,26 @@ extension MailModel {
         }
         guard startDraft(remote) else { return .conflict(local: draft ?? remote, remote: remote) }
         return .imported(remote)
+    }
+
+    /// The local draft that owns `reference` (the open or set-aside draft, a saved one, or one in
+    /// Outbox), or nil when none does. Throws when a send of it is in progress or may have gone,
+    /// also while a local copy holds it: Outbox decides about that one. The send state is checked
+    /// first, so nothing opens or is imported before it.
+    func localServerDraft(_ reference: MailServerDraftReference) throws -> Draft? {
+        func owns(_ draft: Draft) -> Bool {
+            draft.serverDraftReference == reference || draft.previousServerDraftReference == reference
+        }
+        if let pendingSend, owns(pendingSend) { throw LauncherError("This draft is being sent. Check Outbox.") }
+        for delivery in deliveries where delivery.draft.map(owns) == true {
+            switch delivery.state {
+            case .failed: continue
+            case .uncertain: throw LauncherError("This draft may already be sent. Review it in Outbox first.")
+            default: throw LauncherError("This draft is being sent. Check Outbox.")
+            }
+        }
+        if let draft, owns(draft) { return draft }
+        if let saved = unsent.last(where: { owns($0.draft) }) { return saved.draft }
+        return deliveries.last(where: { $0.state == .failed && $0.draft.map(owns) == true })?.draft
     }
 }

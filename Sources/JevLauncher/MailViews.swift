@@ -38,217 +38,63 @@ struct MailSetupView: View {
 }
 
 enum MailRow {
-    static func date(_ date: Date) -> String {
-        Calendar.current.isDateInToday(date) ? date.formatted(date: .omitted, time: .shortened)
-            : Calendar.current.isDate(date, equalTo: Date(), toGranularity: .year) ? date.formatted(.dateTime.day().month(.abbreviated))
-            : date.formatted(date: .numeric, time: .omitted)
-    }
+    static func date(_ date: Date) -> String { MailDates.short(date) }
 }
 
-struct MailReader: View {
-    @ObservedObject var model: MailModel
-    /// Shows an Expand button that hides the sidebar and list.
-    var expanded: Binding<Bool>? = nil
-    /// A reply or forward docked below. The reader shows the message it answers, even when the
-    /// selection moved on, and keeps only the view controls: its actions would change the selection.
-    var draft: MailModel.Draft? = nil
-    var features: MailFeatureCenter? = nil
-    @AppStorage(MailReading.zoomKey) private var zoom = 1.0
-    @AppStorage(MailReading.fitKey) private var fitsWidth = true
-    @AppStorage(MailReading.plainKey) private var prefersPlain = false
-
-    /// What the reader shows: the answered message with the text kept in its draft, or the selection.
-    private struct Shown { let message: MailSummary; let detail: MIMEMessage?; let html: String?; let missing: Bool }
-    private var shown: Shown? {
-        if let original = draft?.original {
-            if let source = draft?.source { return Shown(message: original, detail: source.message, html: source.html, missing: false) }
-            if model.selectedID == original.rowID { return Shown(message: original, detail: model.detail, html: model.detailHTML, missing: model.detailMissing) }
-            return Shown(message: original, detail: nil, html: nil, missing: true)
-        }
-        return model.selected.map { Shown(message: $0, detail: model.detail, html: model.detailHTML, missing: model.detailMissing) }
-    }
-    private var composing: Bool { draft != nil }
-
-    var body: some View {
-        if let shown {
-            VStack(alignment: .leading, spacing: 0) {
-                actionBar(shown.message)
-                Divider()
-                if composing || (model.selectedConversation?.messages.count ?? 0) <= 1 {
-                    header(shown)
-                    Divider()
-                } else if let detail = shown.detail, !detail.attachments.isEmpty {
-                    MailReceivedAttachments(model: model, message: shown.message, detail: detail).padding(10)
-                }
-                // An invitation shows as a card with its answer buttons, above the message.
-                if !composing, let invite = model.invite, model.selectedID == shown.message.rowID {
-                    MailInviteCard(model: model, invite: invite)
-                }
-                if !composing, let summary = model.summary {
-                    GroupBox { Text(summary).font(.system(size: 12)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
-                        label: { Label("AI summary", systemImage: "sparkles") }
-                        .padding(12)
-                }
-                if !composing, let conversation = model.selectedConversation, conversation.messages.count > 1 {
-                    MailConversationReader(model: model, conversation: conversation,
-                        zoom: MailReading.clampZoom(zoom), fitsWidth: fitsWidth, prefersPlain: prefersPlain)
-                        .id(conversation.id)
-                } else { body(shown) }
-            }
-        } else {
-            MailEmptyState(symbol: "envelope.open", title: "No message selected", detail: "Use ↑ and ↓ to pick one, or ⌘N to write.")
-        }
-    }
-
-    private func header(_ shown: Shown) -> some View {
-        let message = shown.message
-        return VStack(alignment: .leading, spacing: 8) {
-            Text(message.subject.isEmpty ? "No subject" : message.subject).font(.system(size: MailStyle.title, weight: .semibold)).textSelection(.enabled)
-            HStack(alignment: .top, spacing: 10) {
-                MailAvatar(name: message.senderName, address: message.senderAddress)
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 5) {
-                        Text(message.sender).font(.system(size: MailStyle.subject, weight: .semibold))
-                        if !message.senderName.isEmpty { Text(message.senderAddress).font(.system(size: MailStyle.preview)).foregroundStyle(.secondary) }
-                        Spacer(minLength: 4)
-                    }
-                    .textSelection(.enabled).lineLimit(1)
-                    if let to = shown.detail?.header("To") { Text("To: " + to).font(.system(size: MailStyle.meta)).foregroundStyle(.secondary).lineLimit(2) }
-                    if let cc = shown.detail?.header("Cc") { Text("Cc: " + cc).font(.system(size: MailStyle.meta)).foregroundStyle(.secondary).lineLimit(2) }
-                }
-            }
-            if let detail = shown.detail, !detail.attachments.isEmpty {
-                if !composing { MailReceivedAttachments(model: model, message: message, detail: detail) }
-                else { Label(detail.attachments.map(\.name).joined(separator: ", "), systemImage: "paperclip").font(.caption).lineLimit(1) }
-            }
-        }
-        .padding(14)
-    }
-
-    @ViewBuilder private func body(_ shown: Shown) -> some View {
-        if let detail = shown.detail {
-            // The message as the sender styled it, with its images. Plain text only when there is no HTML.
-            if let html = shown.html, !(prefersPlain && hasPlain(detail)) {
-                MailHTMLView(html: html, documentID: shown.message.rowID, loadsRemote: model.loadsImages,
-                             zoom: MailReading.clampZoom(zoom), fitsWidth: fitsWidth)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                // Plain text wraps at a width that reads well, however wide the pane is.
-                ScrollView(.vertical) {
-                    Text(MailText.linked(detail.readableText)).font(.system(size: MailStyle.body * MailReading.clampZoom(zoom))).lineSpacing(2)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: MailStyle.readingWidth, alignment: .leading)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(14)
-                }
-                .defaultScrollAnchor(.topLeading)
-            }
-        } else if composing && shown.missing {
-            // The answered message is no longer selected and its text did not load: its preview stands in.
-            ScrollView {
-                Text(shown.message.snippet).font(.system(size: 13)).foregroundStyle(.secondary).textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(14)
-            }
-        } else if shown.missing {
-            VStack(spacing: 8) {
-                Text("Mail has not downloaded this message yet.").foregroundStyle(.secondary)
-                Button("Retry download") { model.retrySelectedBody() }
-                if !NativeMailCenter.isActive { Button("Open in Mail") { model.openInMail() } }
-            }
-            .padding(14)
-            Spacer()
-        } else {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-    }
-
-    private func hasPlain(_ detail: MIMEMessage) -> Bool {
-        !(detail.plainText ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var zoomControl: some View {
-        HStack(spacing: 6) {
-            Button { zoom = MailReading.clampZoom(zoom - 0.25) } label: { Image(systemName: "textformat.size.smaller") }
-                .help("Smaller text").disabled(zoom <= MailReading.zoomRange.lowerBound)
-            Text("\(Int((MailReading.clampZoom(zoom) * 100).rounded()))%").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                .frame(minWidth: 34)
-            Button { zoom = MailReading.clampZoom(zoom + 0.25) } label: { Image(systemName: "textformat.size.larger") }
-                .help("Larger text").disabled(zoom >= MailReading.zoomRange.upperBound)
-        }
-    }
-
-    /// The few actions checking mail needs, as icons with their keys in the tooltips. While a draft
-    /// is docked below, only the view controls stay.
-    private func actionBar(_ message: MailSummary) -> some View {
-        HStack(spacing: 6) {
-            if !composing {
-                Button { model.delete() } label: { Image(systemName: "trash") }.help("Delete (⌫)")
-                Button { model.archive() } label: { Image(systemName: "archivebox") }.help("Archive (⌃⌘A)")
-                if NativeMailCenter.isActive, model.mailbox(message.mailbox)?.role == .drafts {
-                    Button("Edit Draft") {
-                        Task { do { try await model.editSelectedServerDraft() } catch { model.banner = error.localizedDescription } }
-                    }.font(.caption)
-                } else {
-                    Button { model.reply(all: false) } label: { Label("Reply", systemImage: "arrowshape.turn.up.left").labelStyle(.titleAndIcon) }
-                        .font(.system(size: 13, weight: .medium)).help("Reply (⌘R)")
-                }
-                Button { model.toggleRead() } label: { Image(systemName: model.selected?.read == false ? "envelope.open" : "envelope.badge") }
-                    .help("Mark read or unread")
-            }
-            Menu {
-                if !composing {
-                    Button("Forward (⇧⌘F)") { model.forward() }
-                    Button(model.selected?.flagged == true ? "Unflag" : "Flag") { model.toggleFlag() }
-                    Button(model.selectedIsJunk ? "Not Junk: Move to Inbox" : "Mark as Junk") { model.setJunk(!model.selectedIsJunk) }
-                    let destinations = model.moveDestinations
-                    if !destinations.isEmpty {
-                        Menu("Move To") {
-                            ForEach(destinations) { box in Button(box.path) { model.move(to: box) } }
-                        }
-                    }
-                    Divider()
-                    Button("Delete All from \(model.selected?.sender ?? "Sender")", role: .destructive) { model.deleteAllFromSender() }
-                    if model.canUseAIWriting { Button("Summarise") { model.summarise() }.disabled(model.detail == nil || model.aiWritingBusy) }
-                }
-                Toggle("Load Images from the Web", isOn: $model.loadsImages)
-                Toggle("Fit Wide Mail to Width", isOn: $fitsWidth)
-                Toggle("Prefer Plain Text", isOn: $prefersPlain)
-                if !composing, !NativeMailCenter.isActive { Button("Open in Mail") { model.openInMail() } }
-            } label: { Image(systemName: "ellipsis.circle") }
-            .menuIndicator(.hidden).fixedSize()
-            if !composing, let features { MailMessageTools(model: model, features: features) }
-            Spacer(minLength: 4)
-            if !composing, let unsubscribe = model.unsubscribe, unsubscribe.web != nil || NativeMailCenter.isActive {
-                MailUnsubscribeButton(model: model, unsubscribe: unsubscribe)
-            }
-            zoomControl
-            if let expanded {
-                Button { expanded.wrappedValue.toggle() } label: {
-                    Image(systemName: expanded.wrappedValue ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
-                }
-                .help(expanded.wrappedValue ? "Show the list (Escape)" : "Expand (Space or Return)")
-            }
-            Text(message.date.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary)
-                .lineLimit(1).layoutPriority(-1)
-        }
-        .buttonStyle(MailIconButtonStyle()).font(.system(size: 14))
-        .padding(.horizontal, 10).padding(.vertical, 6)
-    }
-}
-
-/// The note at the bottom of the mail views. While a sent message waits, it counts down and
+/// The notes at the bottom of the mail views. While a sent message waits, it counts down and
 /// offers Undo; while it goes to Mail, it says so. A draft that did not go stays here with Show
-/// until you take it back. Other notes go away after a few seconds or on a click.
+/// until you take it back. Other notes go away after a few seconds or on a click. The Undo note of
+/// an archive, delete, or move shows below them for its whole time, so no other note hides it.
 struct MailBanner: View {
     @ObservedObject var model: MailModel
+    /// True while a text box has the keys, such as the composer: ⌘Z is the text's own undo there.
+    var typing = false
+
+    /// True when the note for `note` shows ⌘Z: the key undoes that note's change, and no text box
+    /// has the keys. The note's Undo button stays either way.
+    static func showsUndoKey(_ target: MailModel.UndoKeyTarget, on note: MailModel.UndoKeyTarget, typing: Bool) -> Bool {
+        !typing && target == note
+    }
+
+    /// Clears the "Draft saved." note after its time. Leaving Mail cancels the wait, and the
+    /// note stays, so it shows again for its whole time when Mail opens again.
+    @MainActor static func expireDraftNote(_ note: String, _ model: MailModel, after nanoseconds: UInt64 = 6_000_000_000) async {
+        do { try await Task.sleep(nanoseconds: nanoseconds) } catch { return }
+        if model.draftNote == note { model.draftNote = nil }
+    }
+
     var body: some View {
+        VStack(spacing: 6) {
+            status
+            if let change = model.lastChange {
+                let key = Self.showsUndoKey(model.undoKeyTarget, on: .change, typing: typing)
+                HStack(spacing: 8) {
+                    Text(change.title)
+                    Text("·").foregroundStyle(.secondary)
+                    // ⌘Z goes to the waiting send first, so only that note shows the key then.
+                    Button("Undo") { model.undoLastChange() }.buttonStyle(.link)
+                        .help(key ? "Undo (⌘Z)" : "Undo")
+                    if key { KeyChip("⌘Z") }
+                }
+                .font(.callout).padding(.horizontal, 14).padding(.vertical, 8)
+                .background(.regularMaterial, in: Capsule())
+                // The time stops while the pointer is on the note.
+                .onHover { model.hoverUndo($0) }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+    }
+
+    @ViewBuilder private var status: some View {
         if model.pendingSend != nil {
             HStack(spacing: 8) {
                 TimelineView(.periodic(from: .now, by: 0.5)) { context in
                     Text("Sends in \(secondsLeft(at: context.date)) s").monospacedDigit()
                 }
                 Text("·").foregroundStyle(.secondary)
-                Button("Undo") { model.undoSend() }.buttonStyle(.link).help("Undo (⌘Z)")
-                KeyChip("⌘Z")
+                let key = Self.showsUndoKey(model.undoKeyTarget, on: .send, typing: typing)
+                Button("Undo") { model.undoSend() }.buttonStyle(.link).help(key ? "Undo (⌘Z)" : "Undo")
+                if key { KeyChip("⌘Z") }
             }
             .font(.callout).padding(.horizontal, 14).padding(.vertical, 8)
             .background(.regularMaterial, in: Capsule())
@@ -257,16 +103,14 @@ struct MailBanner: View {
                 .background(.regularMaterial, in: Capsule())
                 .onTapGesture { model.banner = nil }
                 .task(id: banner) { try? await Task.sleep(nanoseconds: 4_000_000_000); if model.banner == banner { model.banner = nil } }
-        } else if let change = model.lastChange {
+        } else if let note = model.draftNote {
             HStack(spacing: 8) {
-                Text(change.title)
-                Text("·").foregroundStyle(.secondary)
-                Button("Undo") { model.undoLastChange() }.buttonStyle(.link).help("Undo (⌘Z)")
-                KeyChip("⌘Z")
+                Text(note)
+                Button("Open") { model.reopenDraft() }.buttonStyle(.link).help("Open the draft again")
             }
             .font(.callout).padding(.horizontal, 14).padding(.vertical, 8)
             .background(.regularMaterial, in: Capsule())
-            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .task(id: note) { await Self.expireDraftNote(note, model) }
         } else if model.sending {
             HStack(spacing: 10) {
                 ProgressView().controlSize(.small)
@@ -274,10 +118,10 @@ struct MailBanner: View {
             }
             .font(.callout).padding(.horizontal, 14).padding(.vertical, 8)
             .background(.regularMaterial, in: Capsule())
-        } else if let first = model.unsent.first {
+        } else if let first = model.notSent.first {
             HStack(spacing: 10) {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                Text(model.unsent.count == 1 ? first.reason : "\(model.unsent.count) messages were not sent.")
+                Text(model.notSent.count == 1 ? first.reason : "\(model.notSent.count) messages were not sent.")
                 Button("Show") { model.showUnsent() }.buttonStyle(.link).help("Open the message again")
             }
             .font(.callout).padding(.horizontal, 14).padding(.vertical, 8)

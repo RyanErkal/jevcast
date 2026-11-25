@@ -170,7 +170,8 @@ struct MailScheduleButton: View {
             .popover(isPresented: $showingEditor) {
                 MailScheduleEditor(draft: draft, account: account, center: center, onScheduled: onScheduled)
             }
-            .help("Schedule this complete draft")
+            .help("Send Later: schedule this complete draft")
+            .accessibilityLabel("Send Later")
     }
 }
 

@@ -10,13 +10,19 @@ enum MailStyle {
     static let meta: CGFloat = 11.5
     static let body: CGFloat = 14.5
     static let title: CGFloat = 17
+    /// The subject in the reader's header, below the sender.
+    static let subjectTitle: CGFloat = 15
     /// Text lines longer than this are hard to read, so a plain message stops here.
     static let readingWidth: CGFloat = 760
+    /// The space around a designed message's light card in the reader.
+    static let cardInset: CGFloat = 12
 
-    /// Short and quiet. Nothing moves when Reduce Motion is on.
+    /// Short and quiet. Nothing moves when Reduce Motion is on, or in a snapshot run, so each
+    /// capture shows the finished layout.
     static var motion: Animation? {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .easeOut(duration: 0.18)
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion || snapshotRun ? nil : .easeOut(duration: 0.18)
     }
+    private static let snapshotRun = CommandLine.arguments.contains("--snapshot-ui")
 
     /// "PDF document · 2 KB" in place of a MIME type. The names come from a fixed table, not from
     /// macOS, so drawing a row never waits for another process.

@@ -19,10 +19,12 @@ struct MailSidebarRow: View {
                     Text(title).font(.system(size: 13)).lineLimit(1)
                     Spacer(minLength: 4)
                     if count > 0 {
-                        Text(count.formatted()).font(.system(size: 11, weight: .medium)).monospacedDigit()
+                        // 33,009 shows "33K"; the exact count is in the tooltip and the spoken value.
+                        Text(MailBadgeCount.text(count)).font(.system(size: 11, weight: .medium)).monospacedDigit()
                             .foregroundStyle(.secondary).padding(.horizontal, 6).frame(height: 16)
                             .background(Color.primary.opacity(selected ? 0.10 : 0.06), in: Capsule())
                             .fixedSize().layoutPriority(1)
+                            .help(count.formatted())
                     }
                 }
                 .padding(.leading, 8).padding(.trailing, expanded == nil ? 8 : 0)
@@ -31,6 +33,7 @@ struct MailSidebarRow: View {
             }
             .buttonStyle(.plain)
             .accessibilityAddTraits(selected ? [.isSelected] : [])
+            .accessibilityValue(count > 0 ? count.formatted() : "")
             if let expanded {
                 Button { expanded.wrappedValue.toggle() } label: {
                     Image(systemName: expanded.wrappedValue ? "chevron.down" : "chevron.right")

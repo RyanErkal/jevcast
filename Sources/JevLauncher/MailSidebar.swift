@@ -74,14 +74,17 @@ struct MailSidebar: View {
         let stateLabel = needsReview ? "Mail changes need review" : hasPending ? "Mail changes waiting to sync" : status(state)
         let accessibilityLabel = label + ", " + title
         let accessibilityValue = stateLabel + ", " + (isExpanded.wrappedValue ? "Expanded" : "Collapsed")
+        let canShow = center.backend == .jevcast && center.accounts.contains { $0.id == account }
         return HStack(spacing: 0) {
+            // The account's connection details. A warning sign takes the dot's place when the
+            // account failed or its changes need review, so it shows from across the panel.
             Button { showAccount(account) } label: {
-                Circle().fill(needsReview ? Color.orange : hasPending ? Color.accentColor : statusColor(state)).frame(width: 6, height: 6)
-                    .frame(width: 22, height: 24).contentShape(Rectangle())
+                MailAccountStatusMark(warning: needsReview || Self.failed(state),
+                                      color: needsReview ? Color.orange : hasPending ? Color.accentColor : statusColor(state))
             }
-            .buttonStyle(.plain)
-            .help(title + " · " + stateLabel)
-            .disabled(center.backend != .jevcast || !center.accounts.contains { $0.id == account })
+            .buttonStyle(MailIconButtonStyle())
+            .help(title + " · " + stateLabel + (canShow ? "\nClick for connection details" : ""))
+            .disabled(!canShow)
             .accessibilityLabel("Connection for " + title)
             .accessibilityValue(stateLabel)
             Button { isExpanded.wrappedValue.toggle() } label: {
@@ -99,7 +102,8 @@ struct MailSidebar: View {
             .accessibilityValue(accessibilityValue)
         }.padding(.trailing, 8)
         .contextMenu {
-            if center.backend == .jevcast, center.accounts.contains(where: { $0.id == account }) {
+            if canShow {
+                Button("Connection Details…") { showAccount(account) }
                 Button("New Folder…") { model.folderRequest = .init(kind: .create, accountID: account, box: nil) }
             }
         }
@@ -123,6 +127,11 @@ struct MailSidebar: View {
 
     private func row(_ title: String, _ symbol: String, _ place: MailModel.Place, count: Int = 0) -> some View {
         MailSidebarRow(title: title, symbol: symbol, count: count, selected: model.place == place) { model.place = place }
+    }
+
+    private static func failed(_ state: MailAccountSync.State?) -> Bool {
+        if case .failed = state { return true }
+        return false
     }
 
     private func statusColor(_ state: MailAccountSync.State?) -> Color {
@@ -194,5 +203,21 @@ private struct MailProviderFolders: View {
                 ForEach(node.children) { child in MailFolderNode(node: child, title: child.title, model: model) }
             }
         }
+    }
+}
+
+/// An account's state beside its name: a small dot, or a warning sign when it needs you.
+private struct MailAccountStatusMark: View {
+    let warning: Bool
+    let color: Color
+    var body: some View {
+        Group {
+            if warning {
+                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 9, weight: .semibold)).foregroundStyle(.orange)
+            } else {
+                Circle().fill(color).frame(width: 7, height: 7)
+            }
+        }
+        .frame(width: 14, height: 16).contentShape(Rectangle())
     }
 }

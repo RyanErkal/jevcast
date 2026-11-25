@@ -8,8 +8,10 @@ struct MailDeliveryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Messages recovered after restart stay here until you send them. A message marked Uncertain may already be sent.")
-                .font(.caption).foregroundStyle(.secondary)
+            if Self.needsReview(model.deliveries) {
+                Text("Messages recovered after restart stay here until you send them. A message marked Uncertain may already be sent.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             MailServerDraftCleanupView(model: model)
             if model.deliveries.isEmpty { Text("No send history").foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 100) }
             else {
@@ -47,6 +49,12 @@ struct MailDeliveryView: View {
             Button("Cancel", role: .cancel) { resend = nil }
         } message: { Text("Check your account's Sent folder first. Allow Resend opens the draft. It does not send the message.") }
     }
+    /// True when a message did not go, may have gone, or has no copy in Sent yet: then the
+    /// note about recovered and Uncertain messages shows. Plain send history needs no note.
+    static func needsReview(_ deliveries: [MailDelivery]) -> Bool {
+        deliveries.contains { [.failed, .uncertain, .sentCopyPending].contains($0.state) }
+    }
+
     private func title(_ state: MailDelivery.State) -> String {
         switch state {
         case .queued: return "Waiting for Undo"

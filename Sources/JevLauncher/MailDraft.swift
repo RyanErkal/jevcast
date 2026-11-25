@@ -63,6 +63,60 @@ extension MailModel {
         var quoteLeftOut: Bool?
         /// The To and Cc that `fillRecipients` wrote, so it refills them only until you edit them.
         var filledRecipients: [String]?
+        /// True for a new message, reply, or forward that Jevcast started, which gets the sending
+        /// account's signature. Nil for drafts saved before this key and drafts from a server, which
+        /// never get one. False once you changed the signature it put in.
+        var signsAutomatically: Bool?
+        /// The signature Jevcast put at the end of `body`. See `MailSignatureText`.
+        var automaticSignature: String?
+        /// The fields as Jevcast filled them in when it started this draft. Escape drops a draft
+        /// only while it still matches. Nil for a draft restored, imported, or saved before this
+        /// key: it always counts as changed, so it is kept.
+        var generated: Baseline?
+
+        /// What a draft says, for telling an untouched draft from a changed one. Attachments count
+        /// by name and size. The sending account and the text's styles count too, so a changed
+        /// From, or a link or bold added to the signature alone, is kept. New keys are optional so
+        /// older files load.
+        struct Baseline: Codable, Equatable, Sendable {
+            var from: String?
+            var fromAccountID: String?
+            var fromIdentityID: String?
+            var richText: Data?
+            var to: String
+            var cc: String
+            var bcc: String
+            var subject: String
+            var body: String
+            var instruction: String
+            var includesQuote: Bool
+            var attachments: [String]
+        }
+
+        var baseline: Baseline {
+            Baseline(from: fromAddress, fromAccountID: fromAccountID, fromIdentityID: fromIdentityID, richText: richText, to: to, cc: cc, bcc: bcc, subject: subject, body: body, instruction: instruction,
+                     includesQuote: includesQuote, attachments: attachments.map { "\($0.filename) \($0.data.count)" })
+        }
+
+        /// True while the draft is exactly as Jevcast filled it in: you changed nothing, not even
+        /// a header field. Only such a draft closes without a copy.
+        var isUntouched: Bool { generated == baseline }
+
+        /// True when closing must keep the draft: it has text, or you changed anything.
+        var needsKeeping: Bool { hasContent || !isUntouched }
+
+        /// Records the fields as Jevcast filled them in.
+        mutating func markGenerated() { generated = baseline }
+
+        /// Jevcast owns the signature only while the text ends with exactly the blank line and the
+        /// signature it put in. Any change that breaks that makes the signature yours for good, so
+        /// a later From change never touches the text. True when it let go.
+        mutating func releaseChangedSignature() -> Bool {
+            guard let signature = automaticSignature, MailSignatureText.typedPart(of: body, signature: signature) == nil else { return false }
+            automaticSignature = nil
+            signsAutomatically = false
+            return true
+        }
 
         var bcc: String { get { bccText ?? "" } set { bccText = newValue.isEmpty ? nil : newValue } }
         var includesQuote: Bool { get { quoteLeftOut != true } set { quoteLeftOut = newValue ? nil : true } }
@@ -192,12 +246,17 @@ extension MailModel {
         var hasContent: Bool {
             let typed: [String]
             switch mode {
-            case .new: typed = [to, cc, bcc, subject, body, instruction]
-            case .forward: typed = [to, cc, bcc, body, instruction]
-            case .reply: typed = [body, instruction]
+            case .new: typed = [to, cc, bcc, subject, typedBody, instruction]
+            case .forward: typed = [to, cc, bcc, typedBody, instruction]
+            case .reply: typed = [typedBody, instruction]
             }
             return serverDraftReference != nil || previousServerDraftReference != nil
                 || !attachments.isEmpty || typed.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        }
+
+        /// Your text: the body without the signature Jevcast put in, while it is unchanged.
+        var typedBody: String {
+            automaticSignature.flatMap { MailSignatureText.typedPart(of: body, signature: $0) } ?? body
         }
 
         /// "reply" or "message", for notes such as "Finish or discard your open reply first."
@@ -207,7 +266,8 @@ extension MailModel {
         /// empty reply never goes out. A forward may have no text; Mail sends the original.
         var sendProblem: String? {
             if uncertainSend { return "This message may already be sent. Check Sent, then use Allow Resend in Outbox if it was not sent." }
-            let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
+            // A signature alone is not a message.
+            let text = typedBody.trimmingCharacters(in: .whitespacesAndNewlines)
             // Apple Mail picks a reply's recipients itself; Jevcast's own accounts send to the fields.
             let checksTo = mode != .reply(all: false) && mode != .reply(all: true) || backend == MailBackend.jevcast.rawValue
             if checksTo, let problem = Self.addressProblem(to, required: true) ?? Self.addressProblem(cc, required: false) ?? Self.addressProblem(bcc, required: false) {
@@ -246,6 +306,9 @@ extension MailModel {
     struct Unsent: Codable, Identifiable, Equatable, Sendable {
         let draft: Draft
         let reason: String
+        /// A draft you closed and kept while another opened. It waits in Drafts without a warning,
+        /// since nothing went wrong. Nil for drafts that did not go.
+        var kept: Bool? = nil
         var id: UUID { draft.id }
     }
 }

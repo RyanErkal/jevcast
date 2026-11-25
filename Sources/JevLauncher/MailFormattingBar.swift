@@ -2,12 +2,13 @@ import AppKit
 import SwiftUI
 
 /// The composer's formatting controls, as in Apple Mail: font, size, colour, bold, italic,
-/// underline, strikethrough, alignment, lists, indent, link, image, and attachment.
+/// underline, strikethrough, alignment, lists, indent, link, and image. The composer's footer
+/// holds Attach, so the bar has it only when asked.
 struct MailFormattingBar: View {
     let commands: MailEditorCommands
     let addLink: () -> Void
     let insertImage: () -> Void
-    let attach: () -> Void
+    var attach: (() -> Void)? = nil
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -24,9 +25,9 @@ struct MailFormattingBar: View {
             sizeMenu
             colorMenu
             divider
-            button("bold", "Bold") { commands.trait(.boldFontMask) }
-            button("italic", "Italic") { commands.trait(.italicFontMask) }
-            button("underline", "Underline") { commands.underline() }
+            button("bold", "Bold (⌘B)") { commands.trait(.boldFontMask) }
+            button("italic", "Italic (⌘I)") { commands.trait(.italicFontMask) }
+            button("underline", "Underline (⌘U)") { commands.underline() }
             button("strikethrough", "Strikethrough") { commands.strikethrough() }
             divider
             button("text.alignleft", "Align left") { commands.align(.left) }
@@ -35,12 +36,12 @@ struct MailFormattingBar: View {
             divider
             button("list.bullet", "Bulleted list") { commands.list(numbered: false) }
             button("list.number", "Numbered list") { commands.list(numbered: true) }
-            button("decrease.indent", "Decrease indent") { commands.indent(by: -MailEditorCommands.indentStep) }
-            button("increase.indent", "Increase indent") { commands.indent(by: MailEditorCommands.indentStep) }
+            button("decrease.indent", "Decrease indent (⌘[)") { commands.indent(by: -MailEditorCommands.indentStep) }
+            button("increase.indent", "Increase indent (⌘])") { commands.indent(by: MailEditorCommands.indentStep) }
             divider
             button("link", "Add a link to selected text", addLink)
             button("photo", "Insert an image", insertImage)
-            button("paperclip", "Attach files", attach)
+            if let attach { button("paperclip", "Attach files", attach) }
         }
     }
 
@@ -49,9 +50,9 @@ struct MailFormattingBar: View {
             fontMenu
             sizeMenu
             colorMenu
-            button("bold", "Bold") { commands.trait(.boldFontMask) }
-            button("italic", "Italic") { commands.trait(.italicFontMask) }
-            button("underline", "Underline") { commands.underline() }
+            button("bold", "Bold (⌘B)") { commands.trait(.boldFontMask) }
+            button("italic", "Italic (⌘I)") { commands.trait(.italicFontMask) }
+            button("underline", "Underline (⌘U)") { commands.underline() }
             Menu {
                 Button("Strikethrough") { commands.strikethrough() }
                 Section("Alignment") {
@@ -69,7 +70,7 @@ struct MailFormattingBar: View {
                 Button("Insert Image", action: insertImage)
             } label: { Image(systemName: "ellipsis.circle") }
                 .menuStyle(.borderlessButton).fixedSize().help("More formatting options")
-            button("paperclip", "Attach files", attach)
+            if let attach { button("paperclip", "Attach files", attach) }
         }
     }
 

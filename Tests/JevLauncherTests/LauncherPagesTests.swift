@@ -100,6 +100,27 @@ final class LauncherPagesTests: XCTestCase {
         XCTAssertEqual(page.keys, [.delete])
     }
 
+    /// Only ⌫ (with an empty filter) and ⌘⌫ delete. A chord with ⇧, ⌥, or ⌃ never does.
+    @MainActor func testOnlyDeleteAndCommandDeleteReachTheView() {
+        let page = SpyPage()
+        let (model, done) = makeModel(page); defer { done() }
+        model.showView(.mail)
+        func chord(_ flags: NSEvent.ModifierFlags) -> NSEvent {
+            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
+                             characters: "\u{7f}", charactersIgnoringModifiers: "\u{7f}", isARepeat: false, keyCode: 51)!
+        }
+        let refused: [NSEvent.ModifierFlags] = [.shift, .option, .control, [.command, .shift], [.command, .option], [.command, .control]]
+        for flags in refused {
+            XCTAssertFalse(model.handleViewKey(chord(flags)), "\(flags.rawValue) is not Delete")
+        }
+        XCTAssertEqual(page.keys, [])
+        XCTAssertTrue(model.handleViewKey(chord(.command)))
+        XCTAssertEqual(page.keys, [.delete], "⌘⌫ deletes")
+        model.filterView("abc")
+        XCTAssertTrue(model.handleViewKey(chord(.command)), "⌘⌫ deletes also while the filter has text")
+        XCTAssertEqual(page.keys, [.delete, .delete])
+    }
+
     @MainActor func testClosingAllViewsReturnsToSearchWithoutReopening() {
         let page = SpyPage()
         let (model, done) = makeModel(page); defer { done() }

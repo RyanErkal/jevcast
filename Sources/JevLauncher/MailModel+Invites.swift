@@ -77,10 +77,12 @@ extension MailModel {
         return nil
     }
 
-    /// Opens a `mailto:` link as a new message here, in place of another mail app.
+    /// Opens a `mailto:` link as a new message here, in place of another mail app. False when an
+    /// open draft you changed stays instead; the note says so.
     @discardableResult
     func compose(link: MailtoLink) -> Bool {
         startDraft(Draft(to: link.to.joined(separator: ", "), cc: link.cc.joined(separator: ", "),
-                         bccText: link.bcc.isEmpty ? nil : link.bcc.joined(separator: ", "), subject: link.subject, body: link.body))
+                         bccText: link.bcc.isEmpty ? nil : link.bcc.joined(separator: ", "), subject: link.subject, body: link.body,
+                         signsAutomatically: true), generated: true)
     }
 }

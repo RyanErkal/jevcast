@@ -2,13 +2,7 @@ import Foundation
 import LauncherCore
 
 extension MailModel {
-    var bulkMoveDestinations: [MailMailbox] {
-        let accounts = Set(selectedMessages.compactMap { actionBox($0)?.accountID })
-        guard accounts.count == 1, let account = accounts.first else { return [] }
-        let sources = Set(selectedMessages.compactMap { actionBox($0)?.rowID })
-        return mailboxes.filter { $0.accountID == account && !sources.contains($0.rowID) }
-            .sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
-    }
+    var bulkMoveDestinations: [MailMailbox] { moveDestinations(for: selectedMessages) }
 
     func moveMessage(_ rowID: Int64, to destination: MailMailbox) {
         guard messages.contains(where: { $0.rowID == rowID }) else { return }
@@ -77,10 +71,11 @@ extension MailModel {
         guard !bulkBusy else { return }
         let reviewed = bulkSnapshots()
         guard !reviewed.isEmpty else { banner = "Select one or more messages first."; return }
+        if let refusal = bulkRefusal(operation) { banner = refusal; return }
         bulkBusy = true
         bulkResult = nil
         let boxes = mailboxes
-        Task { @MainActor [weak self] in
+        bulkWork = Task { @MainActor [weak self] in
             guard let self else { return }
             var succeeded: [MailBulkSnapshot] = []
             var failures: [MailBulkFailure] = []
@@ -144,11 +139,12 @@ extension MailModel {
 
     /// Reverses only successful actions from the exact previous result. A later source change
     /// causes an item to fail instead of overwriting newer user work.
-    func undoBulk() {
-        guard let result = bulkResult, !bulkBusy, !result.undoable.isEmpty else { return }
+    /// `record` is a change's own Undo record; without it, the last bulk action is undone.
+    func undoBulk(_ record: MailBulkResult? = nil) {
+        guard let result = record ?? bulkResult, !bulkBusy, !result.undoable.isEmpty else { return }
         bulkBusy = true
         let boxes = mailboxes
-        Task { @MainActor [weak self] in
+        bulkWork = Task { @MainActor [weak self] in
             guard let self else { return }
             var restored = 0
             var failed = 0
@@ -159,7 +155,7 @@ extension MailModel {
                 } catch { failed += 1 }
             }
             self.bulkBusy = false
-            self.bulkUndoAvailable = false
+            if record == nil || self.bulkResult == result { self.bulkUndoAvailable = false }
             self.banner = failed == 0 ? "Undid \(restored) message\(restored == 1 ? "" : "s")." : "Undid \(restored) messages; \(failed) could not be restored safely."
             self.reload(keepSelection: true)
         }
@@ -168,8 +164,10 @@ extension MailModel {
     private func undoBulkItem(_ operation: MailBulkOperation, snapshot: MailBulkSnapshot, boxes: [MailMailbox]) async throws {
         guard let source = boxes.first(where: { $0.rowID == snapshot.sourceMailboxID }) else { throw LauncherError("The original mailbox is unavailable.") }
         switch operation {
-        case .markRead(let read): try await MailActions.setRead(!read, snapshot.message, in: source)
-        case .flag(let flagged): try await MailActions.setFlagged(!flagged, snapshot.message, in: source)
+        case .markRead(let read):
+            if let back = Self.undoneState(read, was: snapshot.message.read) { try await MailActions.setRead(back, snapshot.message, in: source) }
+        case .flag(let flagged):
+            if let back = Self.undoneState(flagged, was: snapshot.message.flagged) { try await MailActions.setFlagged(back, snapshot.message, in: source) }
         case .archive:
             guard let destination = MailMailbox.archive(for: source.accountID, in: boxes) else { throw LauncherError("The Archive mailbox is unavailable.") }
             try await moveBack(snapshot, from: destination, to: source)
@@ -182,7 +180,13 @@ extension MailModel {
         }
     }
 
+    /// What Undo of a read or flag change sets on one message: the value it had before, or nil
+    /// when the change did not change it, so a message that was already read stays read.
+    nonisolated static func undoneState(_ applied: Bool, was previous: Bool) -> Bool? {
+        applied == previous ? nil : previous
+    }
+
     private func moveBack(_ snapshot: MailBulkSnapshot, from: MailMailbox, to: MailMailbox) async throws {
-        try await MailActions.moveBack(snapshot.message, messageID: snapshot.expectedMessageID, from: from, to: to)
+        try await moveBackAction(snapshot, from, to)
     }
 }

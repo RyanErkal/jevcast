@@ -36,21 +36,38 @@ struct MailSnoozeEditor: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Snooze on this Mac").font(.headline)
             Text(entry.summary.subject.isEmpty ? "No subject" : entry.summary.subject).lineLimit(2)
+            // One click snoozes until a usual time; the date below picks any other.
+            VStack(spacing: 2) {
+                ForEach(MailSnoozePreset.presets(now: Date())) { preset in
+                    Button { save(preset.date) } label: {
+                        HStack {
+                            Text(preset.title)
+                            Spacer(minLength: 12)
+                            Text(preset.date.formatted(.dateTime.weekday(.abbreviated).hour().minute())).foregroundStyle(.secondary)
+                        }
+                        .contentShape(Rectangle()).padding(.vertical, 3)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            Divider()
             DatePicker("Return at", selection: $date, in: Date()..., displayedComponents: [.date, .hourAndMinute])
             if let problem { Text(problem).font(.caption).foregroundStyle(.red) }
             HStack {
                 Button("Cancel", role: .cancel) { dismiss() }
                 Spacer()
-                Button("Save") {
-                    do {
-                        try saveDate(date)
-                        onDone(); dismiss()
-                    } catch { problem = error.localizedDescription }
-                }.keyboardShortcut(.defaultAction)
+                Button("Save") { save(date) }.keyboardShortcut(.defaultAction)
             }
         }
         .padding(16)
         .frame(minWidth: 300)
+    }
+
+    private func save(_ date: Date) {
+        do {
+            try saveDate(date)
+            onDone(); dismiss()
+        } catch { problem = error.localizedDescription }
     }
 }
 
@@ -61,16 +78,18 @@ struct MailSnoozeButton: View {
     @ObservedObject var center: MailSnoozeCenter
     let defaultDate: Date
     let onSnoozed: (MailSnoozeEntry) -> Void
-    @State private var showingEditor = false
+    /// Open while the editor shows. Mail's Snooze key sets it too.
+    @Binding var showingEditor: Bool
 
     init(message: MailSummary, account: MailAccountIdentity, messageID: String? = nil,
-         center: MailSnoozeCenter, defaultDate: Date? = nil,
+         center: MailSnoozeCenter, defaultDate: Date? = nil, showingEditor: Binding<Bool>,
          onSnoozed: @escaping (MailSnoozeEntry) -> Void = { _ in }) {
         self.message = message
         self.account = account
         self.messageID = messageID
         self.center = center
         self.defaultDate = defaultDate ?? Date().addingTimeInterval(3600)
+        self._showingEditor = showingEditor
         self.onSnoozed = onSnoozed
     }
 
@@ -81,7 +100,7 @@ struct MailSnoozeButton: View {
                                  center: center, initialDate: defaultDate,
                                  onDone: { if let item = center.entries.first(where: { $0.identity.accountID == account.accountID && $0.identity.messageKey == message.messageKey && $0.state == .scheduled }) { onSnoozed(item) } })
             }
-            .help("Snooze this message on this Mac")
+            .help("Snooze this message on this Mac (⌃⌘S)")
     }
 }
 

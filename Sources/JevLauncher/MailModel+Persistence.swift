@@ -50,7 +50,7 @@ extension MailModel {
     }
 
     private func compositionSnapshot() -> MailDraftStore.Snapshot {
-        .init(active: draft, unsent: unsent, deliveries: deliveries)
+        .init(active: draft, unsent: unsent, deliveries: deliveries, activeSetAside: draft != nil && draftSetAside ? true : nil)
     }
 
     func recordDelivery(_ draft: Draft, state: MailDelivery.State, note: String? = nil) {
@@ -72,12 +72,28 @@ extension MailModel {
         }
     }
 
+    /// Open Draft and Allow Resend in Outbox. They open the newest local copy of the draft (open,
+    /// set aside, or saved), so edits made after the failed send stay; the copy the send kept is
+    /// used only when there is no other. Allow Resend applies to that newest copy.
     func restoreDelivery(_ delivery: MailDelivery, allowResend: Bool = false) {
         guard [.failed, .uncertain].contains(delivery.state), delivery.state != .uncertain || allowResend,
-              var recovered = delivery.draft else { return }
+              let kept = delivery.draft else { return }
+        var recovered = latestLocalDraft(delivery.id) ?? kept
         if allowResend { recovered.uncertainSend = false }
-        guard startDraft(recovered) else { return }
+        if draft?.id == recovered.id {
+            draft = recovered
+            reopenDraft()
+        } else {
+            guard startDraft(recovered) else { return }
+        }
         unsent.removeAll { $0.id == recovered.id }
         if allowResend { recordDelivery(recovered, state: .failed, note: "You confirmed this message was not sent.") }
+    }
+
+    /// The newest copy of a draft on this Mac, by its ID: the open or set-aside draft, then a
+    /// saved one. Nil when only Outbox's copy is left.
+    func latestLocalDraft(_ id: UUID) -> Draft? {
+        if let draft, draft.id == id { return draft }
+        return unsent.last { $0.id == id }?.draft
     }
 }

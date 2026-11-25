@@ -31,7 +31,21 @@ enum MailReading {
     static let fitKey = "mailFitWidth"
     static let markReadKey = "mailMarkReadAfter"
     static let plainKey = "mailPrefersPlain"
+    /// Whether the mailbox sidebar shows. It stays as you left it, also after a restart.
+    static let sidebarKey = "mailShowsSidebar"
+    /// Whether the composer's formatting bar shows. Hidden by default.
+    static let formattingKey = "mailShowsFormatting"
+    /// Column widths you dragged to, in points. Double-clicking a divider removes them.
+    static let sidebarWidthKey = "mailSidebarWidth"
+    /// The list's width under one layout. Each `Split` keeps its own.
+    static func listWidthKey(_ split: Split) -> String { "mailListWidth." + split.rawValue }
+    /// One list width and the `Split` it was dragged under, as earlier builds kept them. Read once
+    /// and moved to the layout's own key.
+    static let legacyListWidthKey = "mailListWidth"
+    static let legacyListWidthSplitKey = "mailListWidthSplit"
     static let zoomRange: ClosedRange<Double> = 0.75...1.5
+    /// One press of ⌘+ or ⌘−, the same step as the reader's Text Size menu items.
+    static let zoomStep = 0.25
 
     static var markRead: MarkRead {
         UserDefaults.standard.object(forKey: markReadKey).flatMap { ($0 as? Double).flatMap(MarkRead.init(rawValue:)) } ?? .oneSecond
@@ -39,4 +53,21 @@ enum MailReading {
     static var split: Split { UserDefaults.standard.string(forKey: splitKey).flatMap(Split.init(rawValue:)) ?? .balanced }
 
     static func clampZoom(_ value: Double) -> Double { min(max(value, zoomRange.lowerBound), zoomRange.upperBound) }
+
+    /// The message text size, shown in the reader's ⋯ menu. ⌘+, ⌘−, and ⌘0 change it.
+    static var zoom: Double {
+        get { clampZoom(UserDefaults.standard.object(forKey: zoomKey) as? Double ?? 1) }
+        set { UserDefaults.standard.set(clampZoom(newValue), forKey: zoomKey) }
+    }
+
+    enum ZoomChange { case larger, smaller, actualSize }
+
+    /// The size after one zoom key.
+    static func zoom(_ current: Double, _ change: ZoomChange) -> Double {
+        switch change {
+        case .larger: return clampZoom(clampZoom(current) + zoomStep)
+        case .smaller: return clampZoom(clampZoom(current) - zoomStep)
+        case .actualSize: return 1
+        }
+    }
 }

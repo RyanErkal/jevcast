@@ -7,33 +7,60 @@ import LauncherCore
 extension MailModel {
     // MARK: Starting a draft
 
-    func compose(to address: String = "") { startDraft(Draft(to: address)) }
+    /// New messages, replies, and forwards start with the sending account's signature.
+    func compose(to address: String = "") { startDraft(Draft(to: address, signsAutomatically: true), generated: true) }
 
     func reply(all: Bool) {
-        guard let message = selected else { return }
+        guard let message = selected, !refuses(all ? .replyAll : .reply) else { return }
+        noteUserAction()
         let subject = message.subject.lowercased().hasPrefix("re:") ? message.subject : "Re: " + message.subject
-        startDraft(Draft(mode: .reply(all: all), to: message.senderAddress, subject: subject, original: message, source: loadedSource(message)))
+        startDraft(Draft(mode: .reply(all: all), to: message.senderAddress, subject: subject, original: message, source: loadedSource(message),
+                         signsAutomatically: true), generated: true)
     }
 
     func forward() {
-        guard let message = selected else { return }
+        guard let message = selected, !refuses(.forward) else { return }
+        noteUserAction()
         let subject = message.subject.lowercased().hasPrefix("fwd:") ? message.subject : "Fwd: " + message.subject
-        if startDraft(Draft(mode: .forward, subject: subject, original: message, source: loadedSource(message))) { captureForwardAttachments() }
+        if startDraft(Draft(mode: .forward, subject: subject, original: message, source: loadedSource(message), signsAutomatically: true),
+                      generated: true) {
+            captureForwardAttachments()
+        }
     }
 
-    /// Opens `new` in the composer. An open draft with text stays: a view that hid it shows it
-    /// again, with a note. A message still in its undo time goes to Mail now.
+    /// Opens `new` in the composer. An open draft you changed stays: a view that hid it shows it
+    /// again, with a note. A draft you closed (set aside) never blocks a new one: it stays in
+    /// Drafts and the new one opens. A message still in its undo time goes to Mail now.
+    /// `generated` is true for a draft Jevcast fills in itself (new, reply, forward, mail link), so
+    /// Escape can drop it while you change nothing.
     @discardableResult
-    func startDraft(_ new: Draft) -> Bool {
-        if let draft, draft.id != new.id, draft.hasContent {
-            banner = "Finish or discard your open \(draft.noun) first."
-            draftNudge += 1
-            return false
+    func startDraft(_ new: Draft, generated: Bool = false) -> Bool {
+        if let draft, draft.id != new.id {
+            if draftSetAside {
+                if draft.needsKeeping {
+                    // The closed draft is the newest copy: it replaces any older one with its ID.
+                    // A draft that did not go keeps its warning; only a draft you closed is quiet.
+                    let problem = deliveryProblem(draft)
+                    unsent.removeAll { $0.id == draft.id }
+                    unsent.append(Unsent(draft: draft, reason: problem ?? "Saved in Drafts.", kept: problem == nil ? true : nil))
+                }
+            } else if draft.needsKeeping {
+                banner = "Finish or discard your open \(draft.noun) first."
+                draftNudge += 1
+                return false
+            }
         }
         sendPendingNow()
         var chosen = new
         if chosen.fromAccountID == nil { selectInitialSender(&chosen) }
         chosen.fillRecipients()
+        // A draft opened again already has its signature; this changes nothing then.
+        applyAutomaticSignature(&chosen)
+        // Only a draft Jevcast fills in now may close without a copy. A draft opened again,
+        // restored, or imported always counts as changed.
+        if generated { chosen.markGenerated() } else { chosen.generated = nil }
+        // A kept draft that opens again leaves the saved list; it is the open draft now.
+        unsent.removeAll { $0.id == chosen.id && $0.kept == true }
         draft = chosen
         if place == .outbox { place = .drafts }
         return true
@@ -49,22 +76,28 @@ extension MailModel {
     func captureSource(_ rowID: Int64) {
         guard let draft, draft.source == nil, draft.original?.rowID == rowID, let message = draft.original,
               let source = loadedSource(message) else { return }
+        // Filled in by Jevcast before you changed anything: it still counts as untouched.
+        let untouched = draft.isUntouched
         var ready = draft
         ready.source = source
         if !ready.senderWasChosen { selectInitialSender(&ready) }
         ready.fillRecipients()
+        applyAutomaticSignature(&ready)
+        if untouched { ready.markGenerated() }
         self.draft = ready
         if ready.mode == .forward { captureForwardAttachments() }
     }
 
-    /// Escape or Discard. A draft with text needs a second press, and the footer says so.
+    /// The Discard button or ⇧⌘⌫. A draft with text needs a second press, and the footer says so.
+    /// Escape never discards; it closes the composer and keeps the draft (`closeDraft`).
     /// Returns true when the draft closed.
     @discardableResult
     func discardDraft() -> Bool {
         guard let draft else { return true }
-        if draft.hasContent, !discardArmed {
+        // The same rule as Escape: any change, such as a Bcc alone, asks first.
+        if draft.needsKeeping, !discardArmed {
             discardArmed = true
-            composeNote = "Press Escape or click Discard again to discard this \(draft.noun)."
+            composeNote = "Click Discard or press ⇧⌘⌫ again to discard this \(draft.noun)."
             return false
         }
         self.draft = nil
@@ -73,9 +106,75 @@ extension MailModel {
         return true
     }
 
+    /// Escape on the composer, or a click on another message: closes it and keeps the draft. Only
+    /// a draft still exactly as Jevcast filled it in closes without a saved copy; a change to any
+    /// field, also To, Bcc, or Subject alone, keeps it.
+    func closeDraft() {
+        guard let draft, !draftSetAside else { return }
+        if draft.needsKeeping { setDraftAside() } else { discardDraft() }
+    }
+
+    /// Closes the composer and keeps the draft. It is saved at once; once it is on disk, a note
+    /// offers to open it again. A failed write says so, and the draft stays here.
+    func setDraftAside() {
+        guard let draft, !draftSetAside else { return }
+        discardArmed = false
+        composeNote = nil
+        draftSetAside = true
+        guard draft.needsKeeping else { return }
+        let id = draft.id, ticket = UUID()
+        draftCheckpointTicket = ticket
+        draftCheckpoint = Task { @MainActor [weak self] in
+            do {
+                try await self?.saveCompositionAsync()
+                // Opened again or replaced meanwhile: the note has nothing to say.
+                if let self, self.draftSetAside, self.draft?.id == id { self.draftNote = "Draft saved." }
+            } catch {
+                self?.draftNote = nil
+                self?.banner = "The draft could not be saved: " + error.localizedDescription
+            }
+            if self?.draftCheckpointTicket == ticket { self?.draftCheckpoint = nil; self?.draftCheckpointTicket = nil }
+        }
+    }
+
+    /// True while the write of a draft you closed runs.
+    var savingDraft: Bool { draftCheckpoint != nil }
+
+    /// For quitting: returns when the newest write of a draft you closed is done.
+    func finishDraftCheckpoint() async { await draftCheckpoint?.value }
+
+    /// Shows the kept draft in the composer again, such as from the note's Open button.
+    func reopenDraft() {
+        draftNote = nil
+        guard draft != nil else { return }
+        draftSetAside = false
+        draftNudge += 1
+    }
+
+    /// Drafts that did not go, without the ones you only closed and kept. A draft whose send
+    /// failed or may have gone keeps its warning, also when it was closed and kept, and also while
+    /// it is the draft you closed with Escape (set aside, not yet in the saved list).
+    var notSent: [Unsent] {
+        var list = unsent.filter { $0.kept != true || deliveryProblem($0.draft) != nil }
+        if let draft, draftSetAside, let problem = deliveryProblem(draft), !list.contains(where: { $0.id == draft.id }) {
+            list.append(Unsent(draft: draft, reason: problem))
+        }
+        return list
+    }
+
+    /// Why `draft` did not go, while Outbox records a failed or uncertain send for it. Nil otherwise.
+    func deliveryProblem(_ draft: Draft) -> String? {
+        let record = deliveries.last { $0.id == draft.id && [.failed, .uncertain].contains($0.state) }
+        if draft.uncertainSend { return record?.note ?? "This message may already be sent. Check Sent before resending." }
+        return record.map { $0.note ?? "Not sent." }
+    }
+
     /// Brings back the oldest draft that did not go, unless a draft with text is open.
     func showUnsent() {
-        guard let first = unsent.first, startDraft(first.draft) else { return }
+        guard let first = notSent.first else { return }
+        // The draft you closed is this one: it shows again as it is.
+        if first.id == draft?.id, draftSetAside { reopenDraft(); return }
+        guard startDraft(first.draft) else { return }
         unsent.removeAll { $0.id == first.id }
     }
 
@@ -290,9 +389,12 @@ extension MailModel {
         return .appleMailQueued
     }
 
-    /// Puts a draft back in the composer when no draft with text is open.
+    /// Puts a draft back in the composer when no draft you changed is open.
     private func restore(_ back: Draft) -> Bool {
-        if let draft, draft.hasContent { return false }
+        if let draft, draft.needsKeeping { return false }
+        var back = back
+        // A draft that comes back is always kept on Escape.
+        back.generated = nil
         draft = back
         return true
     }
@@ -306,6 +408,8 @@ extension MailModel {
         aiWritingBusy = true
         let id = current.id, body = current.body, source = aiWritingSource(current)
         let instruction = current.instruction
+        // An unchanged signature stays below the written text.
+        let signature = current.automaticSignature.flatMap { MailSignatureText.typedPart(of: body, signature: $0) == nil ? nil : $0 }
         Task { @MainActor [weak self] in
             defer { self?.aiWritingBusy = false }
             do {
@@ -316,7 +420,7 @@ extension MailModel {
                     self.composeNote = "The AI draft was not used because you changed the message."
                     return
                 }
-                self.draft?.body = reply.text
+                self.draft?.body = signature.map { MailSignatureText.signed(reply.text, signature: $0) } ?? reply.text
                 self.draft?.richText = nil
             } catch { self?.banner = error.localizedDescription }
         }

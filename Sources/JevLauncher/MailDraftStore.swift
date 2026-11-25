@@ -24,6 +24,8 @@ final class MailDraftStore: @unchecked Sendable {
         var active: MailModel.Draft?
         var unsent: [MailModel.Unsent] = []
         var deliveries: [MailDelivery] = []
+        /// True when the active draft was closed and kept (set aside). Optional so older files load.
+        var activeSetAside: Bool?
     }
 
     /// The file is deliberately bounded. The composer already limits attachments to 18 MB, but

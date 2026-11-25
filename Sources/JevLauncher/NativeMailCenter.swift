@@ -41,6 +41,8 @@ final class NativeMailCenter: ObservableObject {
     /// A note that did not stop sync, such as a sent message whose copy in Sent failed.
     @Published private(set) var notices: [String: String] = [:]
     @Published private(set) var problem: String?
+    /// False while the Mac has no network, from the same watch that reconnects after a change.
+    @Published private(set) var isOnline = true
     @Published private(set) var backend: MailBackend
     private let defaults: UserDefaults?
     private static let lastSyncKey = "mailLastSuccessfulSync"
@@ -76,6 +78,12 @@ final class NativeMailCenter: ObservableObject {
                 await self?.refreshOfflineState()
             }
         }
+    }
+
+    /// For demo snapshots: shows a state without touching a store or an engine.
+    func showDemoState(_ id: String, _ state: MailAccountSync.State) {
+        states[id] = state
+        if case .ready(let date) = state { lastSuccessfulSync[id] = date }
     }
 
     nonisolated private static let lock = NSLock()
@@ -153,6 +161,7 @@ final class NativeMailCenter: ObservableObject {
     }
 
     private func networkChanged(online: Bool, route: String) {
+        if isOnline != online { isOnline = online }
         defer { lastRoute = online ? route : nil; sawRoute = true }
         // The first report is the state at launch, not a change.
         guard sawRoute, online, lastRoute != route else { return }

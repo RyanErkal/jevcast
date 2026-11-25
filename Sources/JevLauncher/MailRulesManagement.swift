@@ -238,9 +238,12 @@ struct MailRulesView: View {
                 if let message = controller.message { Text(message).font(.caption).foregroundStyle(.orange) }
             }
             .formStyle(.grouped)
+            // The pane's own surface, so a wide pane has no grey block beside the form.
+            .scrollContentBackground(.hidden)
             .padding()
-            .frame(minWidth: 360, maxWidth: 640)
-            Spacer(minLength: 0)
+            // Fields this wide still read as one form; the rest of a wide pane sits evenly around it.
+            .frame(minWidth: 360, maxWidth: 720)
+            .frame(maxWidth: .infinity)
         }
         .onAppear { selectFirst() }
         .onChange(of: selectedID) { _, id in load(id) }

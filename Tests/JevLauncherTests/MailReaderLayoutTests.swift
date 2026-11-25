@@ -69,7 +69,7 @@ final class MailReaderLayoutTests: XCTestCase {
 
     func testReplyInitialsUseTheAvatarColours() {
         XCTAssertEqual(MailThreadHTML.avatarColor("Sam@Example.com"), MailThreadHTML.avatarColor("sam@example.com"))
-        let index = MailAccountMark.paletteIndex(for: "sam@example.com")
+        let index = MailAvatar.paletteIndex(for: "sam@example.com")
         XCTAssertTrue((0..<10).contains(index))
         let html = MailThreadHTML.render([.init(message: .init(rowID: 7, mailbox: 1, subject: "Plan", senderName: "Sam Lee",
             senderAddress: "sam@example.com", snippet: "Hi", date: Date(), read: true, flagged: false, conversation: 1), body: nil)],

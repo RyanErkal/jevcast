@@ -43,9 +43,9 @@ final class MailStyleTests: XCTestCase {
         XCTAssertFalse(designed.contains("prefers-color-scheme"), "A designed message keeps the page its sender expected.")
     }
 
-    func testAccountColorsAreSteady() {
-        XCTAssertEqual(MailAccountMark.color(for: "acct-1"), MailAccountMark.color(for: "acct-1"))
-        let mark = MailAccountMark(title: "alex@example.com", color: .blue)
-        XCTAssertEqual(mark, MailAccountMark(title: "alex@example.com", color: .blue))
+    func testSenderKeepsTheSameAvatarColourInTheReaderAndThread() {
+        let address = "sam@example.com"
+        XCTAssertEqual(MailAvatar.color(for: address), .red)
+        XCTAssertEqual(MailThreadHTML.avatarColor(address), "#ff453a")
     }
 }

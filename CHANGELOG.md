@@ -2,6 +2,10 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.24.1] - 2026-11-25
+
+- Removed the account-colour dots beside subjects in Mail. In a mixed inbox, hovering over a subject shows its account and VoiceOver includes it in the row label.
+
 ## [1.24.0] - 2026-11-25
 
 ### Changed

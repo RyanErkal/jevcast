@@ -3,7 +3,7 @@ import LauncherCore
 @testable import JevLauncher
 
 /// The list column on invented demo mail: what its menus and buttons act on, Escape with several
-/// rows, account marks, and date labels. Deletes go to a recording fake; nothing reaches Mail.
+/// rows, account names, and date labels. Deletes go to a recording fake; nothing reaches Mail.
 @MainActor
 final class MailListTests: XCTestCase {
     private var deleted: [Int64] = []
@@ -93,14 +93,15 @@ final class MailListTests: XCTestCase {
         XCTAssertTrue(model.rowMenuContext([1, 2], features: nil).multiple)
     }
 
-    func testAccountMarksShowOnlyWhenTheListHoldsSeveralAccounts() {
+    func testAccountNamesAreAvailableOnlyInAMixedList() {
         let single = demo()
-        XCTAssertTrue(single.accountMarks(for: single.conversationGroups).isEmpty)
+        XCTAssertTrue(single.accountTitles(for: single.conversationGroups).isEmpty)
         let both = demo(accounts: 2)
-        XCTAssertEqual(both.accountMarks(for: both.conversationGroups).count, 2)
-        // Two accounts on the Mac, but this list holds mail of one: no marks.
+        both.senders = [.init(accountID: "demo", address: "work@example.com", name: "", signature: "")]
+        XCTAssertEqual(both.listMetadata.accountTitles, ["demo": "work@example.com", "personal": "personal"])
+        // Two accounts on the Mac, but this list holds mail of one: the account is implicit.
         let groups = both.conversationGroups.filter { $0.latest.summary.mailbox == 1 }
-        XCTAssertTrue(both.accountMarks(for: groups).isEmpty)
+        XCTAssertTrue(both.accountTitles(for: groups).isEmpty)
     }
 
     func testDateLabelsShowInLongListsButNotInOutbox() {
@@ -151,7 +152,7 @@ final class MailListTests: XCTestCase {
         let model = demo(accounts: 2, count: 9)
         let first = model.listMetadata
         let builds = model.listMetadataBuilds
-        XCTAssertEqual(first.marks.count, 2)
+        XCTAssertEqual(first.accountTitles.count, 2)
         XCTAssertFalse(first.sections.isEmpty)
         XCTAssertTrue(first.hoverActions(model.conversationGroups[0].latest.summary).contains(.delete))
         // A redraw, a selection, or typing in a draft does not work it out again.
@@ -161,7 +162,7 @@ final class MailListTests: XCTestCase {
         model.draft?.body = "Typing"
         _ = model.listMetadata
         XCTAssertEqual(model.listMetadataBuilds, builds, "Nothing the list reads changed")
-        // New rows: the labels, marks, and buttons follow them.
+        // New rows: the labels, account names, and buttons follow them.
         model.messages = Array(model.messages.prefix(3))
         let fewer = model.listMetadata
         XCTAssertEqual(model.listMetadataBuilds, builds + 1)

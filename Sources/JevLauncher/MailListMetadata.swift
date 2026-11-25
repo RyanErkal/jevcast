@@ -20,7 +20,7 @@ struct MailConversationIndex {
     }
 }
 
-/// What the list draws beside its rows: the date labels, each account's mark, the VIP rows, and
+/// What the list draws beside its rows: the date labels, the account names, the VIP rows, and
 /// the buttons under the pointer. It is worked out once per grouping of the list (and when the
 /// place, the day, the VIP senders, or the accounts change), not on every redraw, so typing a
 /// draft does not walk the whole mailbox again.
@@ -28,7 +28,7 @@ struct MailListMetadata {
     struct Key: Equatable {
         let revision: Int
         let place: MailModel.Place
-        let marks: Bool
+        let canListMultipleAccounts: Bool
         let titles: [String]
         let vip: Set<String>
         let day: Date
@@ -36,7 +36,7 @@ struct MailListMetadata {
 
     let key: Key
     let sections: [MailConversationID: MailDateSection]
-    let marks: [String: MailAccountMark]
+    let accountTitles: [String: String]
     /// Rows with a message from a VIP sender.
     let vip: Set<Int64>
     /// The buttons under the pointer, by `boxKey`: rows that share a mailbox and labels share them.
@@ -52,9 +52,8 @@ extension MailModel {
     /// The list's metadata for the rows on screen, from the cache when nothing it reads changed.
     var listMetadata: MailListMetadata {
         let groups = conversationGroups
-        let marks = showsAccountMarks
-        let key = MailListMetadata.Key(revision: conversationRevision, place: place, marks: marks,
-                                       titles: marks ? senders.map(\.address) : [], vip: vipAddresses,
+        let key = MailListMetadata.Key(revision: conversationRevision, place: place, canListMultipleAccounts: canListMultipleAccounts,
+                                       titles: canListMultipleAccounts ? senders.map(\.address) : [], vip: vipAddresses,
                                        day: Calendar.current.startOfDay(for: Date()))
         if let cached = listMetadataCache, cached.key == key { return cached }
         var hover: [[Int64]: [MailRowAction]] = [:]
@@ -68,7 +67,7 @@ extension MailModel {
             if !vipAddresses.isEmpty, conversation.messages.contains(where: { isVIP($0.summary) }) { vip.insert(message.rowID) }
         }
         let metadata = MailListMetadata(key: key, sections: MailMessageList.sections(groups, place: place),
-                                        marks: accountMarks(for: groups), vip: vip, hover: hover)
+                                        accountTitles: accountTitles(for: groups), vip: vip, hover: hover)
         listMetadataCache = metadata
         listMetadataBuilds &+= 1
         return metadata

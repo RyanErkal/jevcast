@@ -333,7 +333,7 @@ enum MailSnapshots {
     }
 
     /// Twelve invented conversations of two accounts, from today back to last year, so the list
-    /// shows its date labels and each account's colour.
+    /// shows its date labels across accounts.
     static func longList() -> MailModel {
         let model = workspace()
         let calendar = Calendar.current

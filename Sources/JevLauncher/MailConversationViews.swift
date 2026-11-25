@@ -1,29 +1,6 @@
 import SwiftUI
 import LauncherCore
 
-/// The account a row belongs to, in a list that holds mail of several accounts: the account's own
-/// colour, with its address in the tooltip.
-struct MailAccountMark: Equatable {
-    let title: String
-    let color: Color
-
-    /// The dot's width in a row, a little smaller than the unread dot.
-    static let size: CGFloat = 6
-
-    /// A steady color per account: the same account has the same color after every launch.
-    static func color(for accountID: String) -> Color {
-        let palette: [Color] = [.blue, .orange, .green, .purple, .pink, .teal, .indigo, .brown, .mint, .red]
-        return palette[paletteIndex(for: accountID)]
-    }
-
-    /// The place in the ten-colour palette for a key. The reader's conversation document uses it too.
-    static func paletteIndex(for key: String) -> Int {
-        var hash: UInt64 = 1_469_598_103_934_665_603
-        for byte in key.utf8 { hash = (hash ^ UInt64(byte)) &* 1_099_511_628_211 }
-        return Int(hash % 10)
-    }
-}
-
 /// How a row is selected. The list draws one wash per selected row: accent for the message on
 /// screen, a quieter accent for the other rows of a selection.
 enum MailRowHighlight: Equatable {
@@ -36,8 +13,8 @@ enum MailRowHighlight: Equatable {
 struct MailConversationSummaryRow: View, Equatable {
     let conversation: MailConversation
     var isVIP = false
-    /// The account's colour, as a small dot at the end of the subject line, in a list of several accounts.
-    var account: MailAccountMark?
+    /// Available in the subject tooltip and to VoiceOver in a mixed inbox.
+    var accountTitle: String?
     /// The search words, marked where they occur.
     var highlight = ""
     var selection = MailRowHighlight.none
@@ -50,7 +27,7 @@ struct MailConversationSummaryRow: View, Equatable {
     @Environment(\.mailRowHoverPreview) private var hoverPreview
 
     nonisolated static func == (lhs: MailConversationSummaryRow, rhs: MailConversationSummaryRow) -> Bool {
-        lhs.conversation == rhs.conversation && lhs.isVIP == rhs.isVIP && lhs.account == rhs.account && lhs.highlight == rhs.highlight
+        lhs.conversation == rhs.conversation && lhs.isVIP == rhs.isVIP && lhs.accountTitle == rhs.accountTitle && lhs.highlight == rhs.highlight
             && lhs.selection == rhs.selection && lhs.hoverActions == rhs.hoverActions && lhs.day == rhs.day
     }
 
@@ -78,16 +55,11 @@ struct MailConversationSummaryRow: View, Equatable {
                         MailRowHoverBar(actions: hoverActions, unread: !summary.read, selection: selection, act: act)
                     }
                 }
-                HStack(spacing: 6) {
-                    Text(marked(conversation.subject.isEmpty ? "No subject" : conversation.subject)).font(.system(size: MailStyle.subject))
-                        .foregroundStyle(conversation.hasUnread ? AnyShapeStyle(.primary) : quiet(MailListWash.readSubject)).lineLimit(1)
-                    // Under the date, away from the unread dot: the leading edge has one mark only.
-                    if let account {
-                        Spacer(minLength: 6)
-                        Circle().fill(account.color).frame(width: MailAccountMark.size, height: MailAccountMark.size)
-                            .help(account.title)
-                    }
-                }
+                Text(marked(conversation.subject.isEmpty ? "No subject" : conversation.subject))
+                    .font(.system(size: MailStyle.subject))
+                    .foregroundStyle(conversation.hasUnread ? AnyShapeStyle(.primary) : quiet(MailListWash.readSubject))
+                    .lineLimit(1)
+                    .help(accountTitle ?? "")
                 let preview = Self.preview(summary.snippet)
                 if !preview.isEmpty {
                     Text(marked(preview)).font(.system(size: MailStyle.preview))
@@ -110,11 +82,10 @@ struct MailConversationSummaryRow: View, Equatable {
         let summary = conversation.latest.summary
         return Self.spokenLabel(sender: summary.sender, subject: conversation.subject, count: conversation.messages.count,
                                 date: MailDates.full(summary.date), unread: conversation.hasUnread, flagged: conversation.isFlagged,
-                                attachments: conversation.hasAttachments, vip: isVIP, account: account?.title)
+                                attachments: conversation.hasAttachments, vip: isVIP, account: accountTitle)
     }
 
-    /// What a screen reader says for a row: everything the row shows, as words. The account is
-    /// named only when the row shows its colour.
+    /// VoiceOver includes the account when the list contains messages from several accounts.
     static func spokenLabel(sender: String, subject: String, count: Int, date: String, unread: Bool, flagged: Bool,
                             attachments: Bool, vip: Bool = false, account: String? = nil) -> String {
         var parts: [String] = []

@@ -78,11 +78,25 @@ struct MailAvatar: View {
     let name: String
     let address: String
     var size: CGFloat = 34
+
+    /// The sender’s address determines the colour of their initials.
+    static func color(for address: String) -> Color {
+        let palette: [Color] = [.blue, .orange, .green, .purple, .pink, .teal, .indigo, .brown, .mint, .red]
+        return palette[paletteIndex(for: address)]
+    }
+
+    /// The place in the ten-colour palette for a key. The reader's conversation document uses it too.
+    static func paletteIndex(for key: String) -> Int {
+        var hash: UInt64 = 1_469_598_103_934_665_603
+        for byte in key.utf8 { hash = (hash ^ UInt64(byte)) &* 1_099_511_628_211 }
+        return Int(hash % 10)
+    }
+
     var body: some View {
         Text(MailStyle.initials(name.isEmpty ? address : name))
             .font(.system(size: size * 0.38, weight: .semibold)).foregroundStyle(.white)
             .frame(width: size, height: size)
-            .background(Circle().fill(MailAccountMark.color(for: address.lowercased()).gradient))
+            .background(Circle().fill(Self.color(for: address.lowercased()).gradient))
             .accessibilityHidden(true)
     }
 }

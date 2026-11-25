@@ -84,7 +84,7 @@ enum MailThreadHTML {
     /// The same colours as `MailAvatar`, for the initials beside each reply.
     static func avatarColor(_ address: String) -> String {
         let colors = ["#0a84ff", "#ff9f0a", "#30d158", "#bf5af2", "#ff375f", "#40c8e0", "#5e5ce6", "#ac8e68", "#63e6e2", "#ff453a"]
-        return colors[MailAccountMark.paletteIndex(for: address.lowercased())]
+        return colors[MailAvatar.paletteIndex(for: address.lowercased())]
     }
 
     /// `quotesOpen` shows every reply's quoted text, as Show Quoted Text in the ⋯ menu and ⌘K asks.

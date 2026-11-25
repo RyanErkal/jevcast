@@ -42,7 +42,7 @@ final class MailModel: ObservableObject {
     var conversationIndex = MailConversationIndex()
     /// Counts the groupings made, so what the list works out from them is kept until the next.
     var conversationRevision = 0
-    /// The list's date labels, account marks, and row buttons for one grouping. See `listMetadata`.
+    /// The list's date labels, account names, and row buttons for one grouping. See `listMetadata`.
     var listMetadataCache: MailListMetadata?
     /// How many times the list's metadata was worked out. Tests read it to see the cache is used.
     var listMetadataBuilds = 0

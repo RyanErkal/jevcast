@@ -16,8 +16,8 @@ extension MailModel {
         return groups
     }
 
-    /// True when the list on screen holds mail of more than one account.
-    var showsAccountMarks: Bool {
+    /// Whether the current mailbox or search can include several accounts.
+    var canListMultipleAccounts: Bool {
         guard accountCount > 1 else { return false }
         switch place {
         case .inbox, .allMail, .unread, .flagged, .sent, .drafts: return true
@@ -25,14 +25,13 @@ extension MailModel {
         }
     }
 
-    /// The mark of each account in `groups`, only when the list really holds mail of more than
-    /// one account. Empty otherwise, so a list of one account shows no marks.
-    func accountMarks(for groups: [MailConversation]) -> [String: MailAccountMark] {
-        guard showsAccountMarks else { return [:] }
+    /// Account names for the subject tooltip and VoiceOver in a mixed list.
+    func accountTitles(for groups: [MailConversation]) -> [String: String] {
+        guard canListMultipleAccounts else { return [:] }
         let present = Set(groups.map(\.accountID).filter { !$0.isEmpty })
         guard present.count > 1 else { return [:] }
         return Dictionary(uniqueKeysWithValues: present.map { id in
-            (id, MailAccountMark(title: accountTitle(id), color: MailAccountMark.color(for: id)))
+            (id, accountTitle(id))
         })
     }
 

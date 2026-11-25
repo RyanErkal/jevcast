@@ -19,7 +19,7 @@ struct MailMessageList: View {
 
     var body: some View {
         let groups = model.conversationGroups
-        // Date labels, account colours, VIP marks, and row buttons, worked out once per change of the rows.
+        // Date labels, account names, VIP marks, and row buttons, worked out once per change of the rows.
         let meta = model.listMetadata
         let highlight = model.search.trimmingCharacters(in: .whitespaces)
         let selected = model.selectedConversationRowIDs
@@ -33,7 +33,7 @@ struct MailMessageList: View {
                         MailDateSectionLabel(section: section).selectionDisabled().listRowSeparator(.hidden)
                     }
                     MailConversationSummaryRow(conversation: conversation, isVIP: meta.vip.contains(rowID),
-                        account: meta.marks[conversation.accountID], highlight: highlight,
+                        accountTitle: meta.accountTitles[conversation.accountID], highlight: highlight,
                         selection: wash, hoverActions: meta.hoverActions(conversation.latest.summary),
                         act: { action in model.runRowAction(action, on: [rowID], page: page) }, day: meta.key.day)
                         .equatable()

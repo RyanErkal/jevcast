@@ -2,6 +2,21 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org).
 
+## [1.24.0] - 2026-11-25
+
+### Changed
+
+- Mail reopens the last mailbox and message. Opening the panel leaves unread messages unread until you choose one. In a list with several accounts, a small dot at the end of the subject identifies the account. The dot on the left marks unread mail.
+- Right-click a conversation to act on it. Select several conversations to see their shared actions. Use the Unread, Flagged, and Attachments filters above the list, or drag the dividers to adjust its width.
+- Space and Shift-Space page through the reader. Use the Reply menu for Reply All or Forward, ⌘E to archive, and ⌃⌘S to snooze.
+- Escape closes an edited draft and keeps it in Drafts. The composer can add the sending identity’s signature. ⇧⌘A attaches files.
+- Delete All from Sender shows the sender and message count before moving messages to Trash. Point at the Undo note to pause its timer.
+
+### Known limits
+
+- If saving a draft fails, quitting can lose unsaved edits. Reopening Mail can briefly cover a send-failure warning with a draft notice. Switching between server drafts can show the wrong notice.
+- Changing the sending identity can remove pasted text if it ends with an exact copy of the previous signature.
+
 ## [1.23.0] - 2026-11-10
 
 ### Added

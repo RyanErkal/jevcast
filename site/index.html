@@ -60,11 +60,8 @@
         <span>Jevcast</span>
       </a>
       <nav class="top-nav" aria-label="Sections">
-        <a href="#type">What you can type</a>
-        <a href="#windows">Windows</a>
-        <a href="#calendar">Calendar</a>
-        <a href="#automations">Automations</a>
-        <a href="#clipboard">Clipboard</a>
+        <a href="#type">Commands</a>
+        <a href="#mail">Mail</a>
         <a href="#privacy">Privacy</a>
         <a href="#install">Install</a>
         <a href="#changelog">What’s new</a>
@@ -91,13 +88,9 @@
               aria-hidden="true"
             ></span>
           </button>
-          <h1 id="hero-title">
-            One shortcut for your apps, files, sums, and windows.
-          </h1>
+          <h1 id="hero-title">Open apps, find files, and move windows.</h1>
           <p class="lead">
-            Press <kbd>⌥</kbd><kbd>Space</kbd>, type what you want, and press
-            Return. Jevcast opens apps, finds files, answers sums and
-            conversions, moves windows, and brings back what you copied.
+            Press <kbd>⌥</kbd><kbd>Space</kbd> anywhere on your Mac. Type what you need and press Return.
           </p>
           <div class="get">
             <a
@@ -109,9 +102,7 @@
             </a>
           </div>
           <p class="specs">
-            Free under the MIT license <span aria-hidden="true">·</span> macOS
-            14 or later <span aria-hidden="true">·</span> Apple silicon and
-            Intel <span aria-hidden="true">·</span> Build needs Xcode 26 or later and Homebrew on a supported Mac
+            Free and open source <span aria-hidden="true">·</span> macOS 14+ <span aria-hidden="true">·</span> Apple silicon and Intel
           </p>
         </div>
 
@@ -212,59 +203,17 @@
       <section class="section" id="type" aria-labelledby="type-title">
         <div class="wrap type-grid">
           <div class="type-intro">
-            <h2 id="type-title">Type what you want. Press Return.</h2>
-            <p>
-              Results appear as you type. Apps and actions you use often move up
-              the list. Right-click an app to keep it in your favourites. Click a row, or press Return.
-            </p>
-            <p class="keys-line">
-              In the launcher: <kbd>↩</kbd> open, <kbd>↑</kbd
-              ><kbd>↓</kbd> select, <kbd>esc</kbd> close, <kbd>⌘K</kbd> more
-              actions, <kbd>⌘Y</kbd> Quick Look, <kbd>⌘R</kbd> show in Finder,
-              <kbd>⌘⇧C</kbd> copy the path.
-            </p>
+            <h2 id="type-title">A few commands to try</h2>
+            <p>Use the arrow keys to pick a result. Press <kbd>⌘K</kbd> for more actions.</p>
+            <p><a href="https://github.com/RyanErkal/jevcast#what-you-can-do">All commands</a></p>
           </div>
           <div class="examples">
-            <div class="ex">
-              <h3><span class="ex-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" /></svg></span>Apps</h3>
-              <dl>
-                <div class="ex-row">
-                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>safari</code></span></dt>
-                  <dd>Opens Safari. Your own aliases work too.</dd>
-                </div>
-                <div class="ex-row">
-                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>time</code></span></dt>
-                  <dd>Finds FaceTime by any word in its name.</dd>
-                </div>
-              </dl>
-            </div>
             <div class="ex">
               <h3><span class="ex-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z" /></svg></span>Files</h3>
               <dl>
                 <div class="ex-row">
-                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>invoice</code></span></dt>
-                  <dd>Files and folders named “invoice”.</dd>
-                </div>
-                <div class="ex-row">
-                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>kind:pdf in:downloads</code></span></dt>
-                  <dd>PDFs in your Downloads folder.</dd>
-                </div>
-                <div class="ex-row">
-                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>files modified today</code></span></dt>
-                  <dd>Everything you changed today.</dd>
-                </div>
-              </dl>
-            </div>
-            <div class="ex">
-              <h3><span class="ex-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008Zm0 2.25h.008v.008H8.25V13.5Zm0 2.25h.008v.008H8.25v-.008Zm0 2.25h.008v.008H8.25V18Zm2.498-6.75h.007v.008h-.007v-.008Zm0 2.25h.007v.008h-.007V13.5Zm0 2.25h.007v.008h-.007v-.008Zm0 2.25h.007v.008h-.007V18Zm2.504-6.75h.008v.008h-.008v-.008Zm0 2.25h.008v.008h-.008V13.5Zm0 2.25h.008v.008h-.008v-.008Zm0 2.25h.008v.008h-.008V18Zm2.498-6.75h.008v.008h-.008v-.008Zm0 2.25h.008v.008h-.008V13.5ZM8.25 6h7.5v2.25h-7.5V6ZM12 2.25c-1.892 0-3.758.11-5.593.322C5.307 2.7 4.5 3.65 4.5 4.757V19.5a2.25 2.25 0 0 0 2.25 2.25h10.5a2.25 2.25 0 0 0 2.25-2.25V4.757c0-1.108-.806-2.057-1.907-2.185A48.507 48.507 0 0 0 12 2.25Z" /></svg></span>Sums and conversions</h3>
-              <dl>
-                <div class="ex-row">
-                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>12 * (8 + 2)</code></span></dt>
-                  <dd>120. Return copies it.</dd>
-                </div>
-                <div class="ex-row">
-                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>10 km in mi</code></span></dt>
-                  <dd>6.2137 mi. Mass, data, speed, and more work too.</dd>
+                  <dt><span class="query"><code>kind:pdf in:downloads</code></span></dt>
+                  <dd>Find PDFs in Downloads.</dd>
                 </div>
               </dl>
             </div>
@@ -272,38 +221,8 @@
               <h3><span class="ex-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8.25V18a2.25 2.25 0 0 0 2.25 2.25h13.5A2.25 2.25 0 0 0 21 18V8.25m-18 0V6a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 6v2.25m-18 0h18M5.25 6h.008v.008H5.25V6ZM7.5 6h.008v.008H7.5V6Zm2.25 0h.008v.008H9.75V6Z" /></svg></span>Windows</h3>
               <dl>
                 <div class="ex-row">
-                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>left half</code></span></dt>
-                  <dd>The front window fills the left half.</dd>
-                </div>
-                <div class="ex-row">
-                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>next monitor</code></span></dt>
-                  <dd>The window moves to your other display.</dd>
-                </div>
-              </dl>
-            </div>
-            <div class="ex">
-              <h3><span class="ex-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 0 1 3 12c0-1.605.42-3.113 1.157-4.418" /></svg></span>Web</h3>
-              <dl>
-                <div class="ex-row">
-                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>gh swiftui</code></span></dt>
-                  <dd>Searches GitHub. Also <code>yt</code>, <code>maps</code>, <code>wiki</code>, and your own.</dd>
-                </div>
-                <div class="ex-row">
-                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>example.com</code></span></dt>
-                  <dd>Opens the site in your browser.</dd>
-                </div>
-              </dl>
-            </div>
-            <div class="ex">
-              <h3><span class="ex-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z" /></svg></span>Clipboard and settings</h3>
-              <dl>
-                <div class="ex-row">
-                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>clip</code></span></dt>
-                  <dd>What you copied: text, images, files, and links.</dd>
-                </div>
-                <div class="ex-row">
-                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>wi-fi settings</code></span></dt>
-                  <dd>Opens Wi-Fi in System Settings.</dd>
+                  <dt><span class="query"><code>notes left half</code></span></dt>
+                  <dd>Open Notes on the left half of your screen.</dd>
                 </div>
               </dl>
             </div>
@@ -311,64 +230,17 @@
               <h3><span class="ex-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 0 1-3-3m3 3a3 3 0 1 0 0 6h13.5a3 3 0 1 0 0-6m-16.5-3a3 3 0 0 1 3-3h13.5a3 3 0 0 1 3 3m-19.5 0a4.5 4.5 0 0 1 .9-2.7L5.737 5.1a3.375 3.375 0 0 1 2.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 0 1 .9 2.7m0 0a3 3 0 0 1-3 3m0 3h.008v.008h-.008v-.008Zm0-6h.008v.008h-.008v-.008Zm-3 6h.008v.008h-.008v-.008Zm0-6h.008v.008h-.008v-.008Z" /></svg></span>Ports</h3>
               <dl>
                 <div class="ex-row">
-                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>port 3000</code></span></dt>
-                  <dd>What listens there, with CPU, memory, and folder. ⌫ twice stops it.</dd>
-                </div>
-                <div class="ex-row">
-                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>ports</code></span></dt>
-                  <dd>Every local server that is listening.</dd>
+                  <dt><span class="query"><code>port 3000</code></span></dt>
+                  <dd>See which process is listening on port 3000.</dd>
                 </div>
               </dl>
             </div>
             <div class="ex">
-              <h3><span class="ex-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m6.75 7.5 3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0 0 20.25 18V6A2.25 2.25 0 0 0 18 3.75H6A2.25 2.25 0 0 0 3.75 6v12a2.25 2.25 0 0 0 2.25 2.25Z" /></svg></span>Commands</h3>
+              <h3><span class="ex-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg></span>Timers</h3>
               <dl>
                 <div class="ex-row">
-                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>dark mode</code></span></dt>
-                  <dd>Switches light and dark. Also <code>caffeinate</code>, <code>my ip</code>, and more.</dd>
-                </div>
-                <div class="ex-row">
-                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>deploy site</code></span></dt>
-                  <dd>Runs a command you added yourself.</dd>
-                </div>
-              </dl>
-            </div>
-            <div class="ex">
-              <h3><span class="ex-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z" /></svg></span>Say it your way</h3>
-              <dl>
-                <div class="ex-row">
-                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>notes left half</code></span></dt>
-                  <dd>Opens Notes, then puts it on the left.</dd>
-                </div>
-                <div class="ex-row">
-                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>search github for swift ui</code></span></dt>
-                  <dd>Searches the site with the rest of your words.</dd>
-                </div>
-              </dl>
-            </div>
-            <div class="ex">
-              <h3><span class="ex-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg></span>Timers and emoji</h3>
-              <dl>
-                <div class="ex-row">
-                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>5m tea</code></span></dt>
-                  <dd>A timer with a notification. <code>timers</code> lists them.</dd>
-                </div>
-                <div class="ex-row">
-                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>:tada</code></span></dt>
-                  <dd>🎉 to copy. Shift–Return pastes it.</dd>
-                </div>
-              </dl>
-            </div>
-            <div class="ex">
-              <h3><span class="ex-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 0 1 3 12c0-1.605.42-3.113 1.157-4.418" /></svg></span>Tailnet</h3>
-              <dl>
-                <div class="ex-row">
-                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>tailnet</code></span></dt>
-                  <dd>Your Tailscale devices, with ping, load, and the pages they share.</dd>
-                </div>
-                <div class="ex-row">
-                  <dt><span class="query"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg><code>qbit</code></span></dt>
-                  <dd>Opens a page on your tailnet by its name.</dd>
+                  <dt><span class="query"><code>5m tea</code></span></dt>
+                  <dd>Start a five-minute timer for tea.</dd>
                 </div>
               </dl>
             </div>
@@ -379,23 +251,9 @@
       <section class="section" id="windows" aria-labelledby="windows-title">
         <div class="wrap windows-grid">
           <div class="windows-copy">
-            <h2 id="windows-title">Move windows from the keyboard.</h2>
-            <p>
-              Type a layout such as <code>left half</code>, or hold <kbd>⌃</kbd
-              ><kbd>⌥</kbd><kbd>⌘</kbd> and press one key. Press a half again to
-              cycle its size: 1/2, 2/3, then 1/3.
-            </p>
-            <p>
-              Never use Caps Lock? Turn it into a Hyper key. Hold it and press
-              <kbd>←</kbd> or <kbd>→</kbd> for a half, <kbd>M</kbd> for Mail,
-              <kbd>C</kbd> for Calendar, <kbd>T</kbd> for a terminal in the launcher, or
-              <kbd>H</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd> for arrows. The Caps Lock light is on only while you hold it.
-            </p>
-            <p class="note">
-              Window control needs Accessibility access. Snapping windows at
-              screen edges is optional. If you also use Rectangle, turn off one
-              app’s shortcuts, so the two apps do not move the same window.
-            </p>
+            <h2 id="windows-title">Move windows with a keystroke.</h2>
+            <p>Type <code>left half</code> to tile the front window. Repeat the shortcut to cycle through widths, or move the window to another display.</p>
+            <p class="note">Window control needs Accessibility access.</p>
           </div>
           <figure class="layouts">
             <div
@@ -596,21 +454,12 @@
         <div class="wrap windows-grid">
           <div class="windows-copy">
             <h2 id="mail-title">Your inbox, inside the launcher.</h2>
-            <p>Hold Caps Lock and press <kbd>M</kbd>. Read, organise, and write mail beside your accounts and folders. Everything stays in the launcher panel.</p>
-            <ul class="auto-points">
-              <li><strong>Keep mail offline.</strong> Choose recent mail, selected folders, or all history. Check download coverage and search the message text kept on your Mac.</li>
-              <li><strong>Work through your inbox.</strong> Conversation groups, filters, bulk actions, rules, smart mailboxes, and VIP senders.</li>
-              <li><strong>Write with care.</strong> Recipient suggestions, provider-authorized aliases, signatures, saved drafts, and explicit recovery after an uncertain send.</li>
-              <li><strong>Plan your mail.</strong> Snooze messages and use Send Later. Jevcast must be running and your Mac awake; missed sends wait for review.</li>
-              <li><strong>Answer invitations.</strong> A meeting invitation shows as a card. Accept, Maybe, or Decline tells the organiser, and Add to Calendar saves the event.</li>
-              <li><strong>Stay on the keyboard.</strong> Archive, flag, mark junk, and move to a folder with keys. <kbd>⌘</kbd><kbd>K</kbd> lists every action, and <kbd>⌘</kbd><kbd>Z</kbd> undoes an archive, delete, or move. A mail address you click starts a new message here, and Jevcast can be your default mail app.</li>
-              <li><strong>Leave lists and tidy folders.</strong> Unsubscribe with one confirmed click. Make, rename, and remove your own folders.</li>
-              <li><strong>Keep your archives.</strong> Import and export .eml and .mbox files without changing the originals.</li>
-            </ul>
-            <p><a href="https://github.com/RyanErkal/jevcast/blob/main/docs/MAIL_FEATURES.md">Read the feature guide and verification limits</a>.</p>
+            <p>Type <code>inbox</code> to pick up where you left off. Space pages through a message, <kbd>⌘E</kbd> archives it, and Escape keeps an edited draft.</p>
+            <p>In a mixed inbox, the dot beside the subject identifies the account. The dot beside the sender marks unread mail.</p>
+            <p><a href="https://github.com/RyanErkal/jevcast/blob/main/docs/MAIL_FEATURES.md">Mail guide</a></p>
           </div>
           <figure class="auto-shot">
-            <img src="images/mail-invitation.png" width="2640" height="1656" loading="lazy" alt="Jevcast Mail inside the launcher with invented accounts. The message list shows each sender, subject, the start of the text, and a short account name. A meeting invitation is open, with the sender's initials, a card that shows its time and place, and the buttons Accept, Maybe, and Decline. All mail is demo data." />
+            <img src="images/mail-invitation.png" width="2640" height="1656" loading="lazy" alt="Demo inbox with unread dots beside sender names and account colours beside subjects. The open Design Review invitation shows the meeting time, place, and response buttons." />
           </figure>
         </div>
       </section>
@@ -618,26 +467,9 @@
       <section class="section" id="calendar" aria-labelledby="calendar-title">
         <div class="wrap windows-grid">
           <div class="windows-copy">
-            <h2 id="calendar-title">Your day, from one shortcut.</h2>
-            <p>
-              Type <code>calendar</code> or hold Caps Lock and press <kbd>C</kbd>.
-              See the next three days on an hourly grid, add and change events, open a meeting beside it, and join Google Meet.
-            </p>
-            <ul class="auto-points">
-              <li><strong>Sign in with Google.</strong> Connect your Google Calendar directly, or use calendars already on your Mac.</li>
-              <li><strong>See the time.</strong> 3 Days, Day, and Week have horizontal hour lines, all-day events, and a current-time marker. Month and List are there too. <kbd>←</kbd> and <kbd>→</kbd> switch views.</li>
-              <li><strong>Open the details.</strong> Click an event to see its description, meeting notes, location, organiser, guests, and linked documents beside the calendar.</li>
-              <li><strong>Join the meeting.</strong> Open the event's Google Meet link in your browser.</li>
-              <li><strong>Add and change events.</strong> Press <kbd>⌘</kbd><kbd>N</kbd> or double-click a time. Edit, drag, or delete your events on the calendars of your Mac. Calendar does not need to be open.</li>
-              <li><strong>One view for every calendar.</strong> Show your Mac and several Google accounts together.</li>
-              <li><strong>Know when to join.</strong> A quiet mark beside the notch shows a few minutes before a meeting, with Join.</li>
-              <li><strong>Read-only Google access.</strong> Choose which calendars to show. Jevcast cannot change or delete events through your Google sign-in.</li>
-            </ul>
-            <p>
-              Google sign-in uses your own free Desktop app client. The
-              <a href="https://github.com/RyanErkal/jevcast/blob/main/docs/DEVELOPMENT.md#calendar">setup guide</a>
-              shows how to enable Calendar access. A client set up for Mail can be reused.
-            </p>
+            <h2 id="calendar-title">See your next three days.</h2>
+            <p>Type <code>calendar</code> to see what’s next or join a meeting. Add and move events on your Mac calendars. Connect Google calendars for a read-only view alongside them.</p>
+            <p><a href="https://github.com/RyanErkal/jevcast/blob/main/docs/DEVELOPMENT.md#calendar">Google Calendar setup</a></p>
           </div>
           <figure class="auto-shot">
             <img
@@ -654,20 +486,8 @@
       <section class="section" id="automations" aria-labelledby="automations-title">
         <div class="wrap windows-grid">
           <div class="windows-copy">
-            <h2 id="automations-title">Background work, on your terms.</h2>
-            <p>
-              Schedule scripts and agents that run on your Mac, also while
-              Jevcast is closed. Agents use the <code>codex</code> or
-              <code>claude</code> command you are already signed in to, so they
-              run on your ChatGPT or Claude plan.
-            </p>
-            <ul class="auto-points">
-              <li><strong>You approve changes.</strong> An agent proposes file moves and tidy-ups. You tick what you want; Jevcast makes the change and can undo it.</li>
-              <li><strong>Quiet by default.</strong> No banners. A card drops from the notch when a run needs you or fails, and, if you ask for it, when a report is ready or a backup is done.</li>
-              <li><strong>Report workflows.</strong> An approved script plans each run. A model starts only when a report is due, and never picks a program or an argument.</li>
-              <li><strong>Read only unless you choose.</strong> Access is enforced by the agent's own sandbox, never by the prompt.</li>
-              <li><strong>Bring your Codex automations.</strong> Jevcast reads them, and imports a paused copy when you ask.</li>
-            </ul>
+            <h2 id="automations-title">Schedule work on your Mac.</h2>
+            <p>Run a script or ask Codex or Claude for a report, even when Jevcast is closed. Agents use your signed-in CLI. Review proposed file changes before applying them.</p>
           </div>
           <figure class="auto-shot">
             <img
@@ -684,18 +504,8 @@
       <section class="section" id="clipboard" aria-labelledby="clipboard-title">
         <div class="wrap windows-grid">
           <div class="windows-copy">
-            <h2 id="clipboard-title">Everything you copied, one key away.</h2>
-            <p>
-              Type <code>clip</code> or hold Caps Lock and press <kbd>V</kbd>.
-              Text, images, screenshots, files, videos, links, colours, and code,
-              with a big preview beside the list.
-            </p>
-            <ul class="auto-points">
-              <li><strong>Find anything.</strong> Search text, file names, apps, and even the words inside images, read on your Mac.</li>
-              <li><strong>Copy and go.</strong> <kbd>↩</kbd> copies and closes, then paste as usual with <kbd>⌘</kbd><kbd>V</kbd>.</li>
-              <li><strong>Quick fixes.</strong> Uppercase, trim, sort lines, pretty JSON, Base64, or copy the text from a screenshot.</li>
-              <li><strong>Private.</strong> History stays on this Mac. Password managers are never recorded, and you choose how long to keep it.</li>
-            </ul>
+            <h2 id="clipboard-title">Find something you copied.</h2>
+            <p>Type <code>clip</code> to search text, links, files, and even words in screenshots. Press Return to copy a result. History stays on your Mac and skips password managers.</p>
           </div>
           <figure class="auto-shot">
             <img
@@ -715,86 +525,10 @@
         aria-labelledby="privacy-title"
       >
         <div class="wrap">
-          <h2 id="privacy-title">Local by default.</h2>
-          <p class="privacy-lead">
-            No Jevcast account. No analytics. No crash reports. The app goes online for
-            the things below, and for web images in mail you read. Mail accounts you add talk only to their own servers, over TLS.
-            Automations run the command-line tools you signed in to yourself;
-            Jevcast adds no network calls of its own.
-          </p>
-          <ul class="net">
-            <li>
-              <span class="net-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" /></svg></span>
-              <h3>Update check</h3>
-              <code>api.github.com</code>
-              <p>Asks for the newest version number once a day. You can turn it off.</p>
-              <a
-                class="net-link"
-                href="https://github.com/RyanErkal/jevcast/blob/main/Sources/JevLauncher/UpdateService.swift"
-                >Read the code<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25" /></svg></a
-              >
-            </li>
-            <li>
-              <span class="net-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z" /></svg></span>
-              <h3>Jev</h3>
-              <code>typesafe.ai or openrouter.ai</code>
-              <p>Off until you add your own TypeSafe or OpenRouter key. Sends what you type or say, never audio or command text.</p>
-              <a
-                class="net-link"
-                href="https://github.com/RyanErkal/jevcast/blob/main/Sources/JevLauncher/JevService.swift"
-                >Read the code<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25" /></svg></a
-              >
-            </li>
-            <li>
-              <span class="net-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z" /></svg></span>
-              <h3>AI writing</h3>
-              <code>openrouter.ai</code>
-              <p>Off until you turn it on with your own OpenRouter key. Sends what you ask. Selected text, mail, calendar, and dictation only if you turn each one on.</p>
-              <a
-                class="net-link"
-                href="https://github.com/RyanErkal/jevcast/blob/main/Sources/JevLauncher/LauncherModel%2BAIWriting.swift"
-                >Read the code<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25" /></svg></a
-              >
-            </li>
-            <li>
-              <span class="net-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" /></svg></span>
-              <h3>Mail accounts</h3>
-              <code>your mail servers</code>
-              <p>Only for accounts you add in Settings › Mail. Talks to that account's own IMAP and SMTP servers over TLS, and nothing else. An invitation answer or an unsubscribe email goes only after you click. Google or Microsoft sign-in uses your own OAuth client and their sign-in pages.</p>
-              <a
-                class="net-link"
-                href="https://github.com/RyanErkal/jevcast/tree/main/Sources/LauncherCore/NativeMail"
-                >Read the code<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25" /></svg></a
-              >
-            </li>
-            <li>
-              <span class="net-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 0 1 3 12c0-1.605.42-3.113 1.157-4.418" /></svg></span>
-              <h3>Tailnet checks</h3>
-              <code>your own Tailscale devices</code>
-              <p>Off until you turn it on in Settings › General. Asks your other devices, only at their Tailscale addresses, for their load and the pages they share.</p>
-              <a
-                class="net-link"
-                href="https://github.com/RyanErkal/jevcast/blob/main/Sources/JevLauncher/TailnetReader.swift"
-                >Read the code<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25" /></svg></a
-              >
-            </li>
-            <li>
-              <span class="net-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 0 1 3 12c0-1.605.42-3.113 1.157-4.418" /></svg></span>
-              <h3>Web search</h3>
-              <code>your browser</code>
-              <p>Only when you pick a search or a link.</p>
-            </li>
-            <li>
-              <span class="net-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M8 2v4m8-4v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" /></svg></span>
-              <h3>Google Calendar</h3>
-              <code>Google sign-in and Calendar API</code>
-              <p>Only after you connect Google in Calendar. Reads the calendars you choose and their event details, also in the background while the notice before meetings is on. Uses its own read-only token in the Keychain. It does not use your Mail token.</p>
-              <a class="net-link" href="https://github.com/RyanErkal/jevcast/tree/main/Sources/LauncherCore/Calendar">Read the code<span aria-hidden="true"> ↗</span></a>
-            </li>
-          </ul>
-          <p class="privacy-foot">
-            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" /></svg>Files, voice, and clipboard never leave your Mac. HTML mail loads its web images, fonts, and style sheets by default, as Apple Mail does, and never runs scripts. Turn off Load Images from the Web in the ⋯ menu above a message.
-          </p>
+          <h2 id="privacy-title">What stays on your Mac?</h2>
+          <p class="privacy-lead">App and file search, window shortcuts, and clipboard history work locally. Jevcast needs no account and collects no analytics.</p>
+          <p class="privacy-lead">The app checks GitHub for updates. Mail can load remote images. You choose which accounts to connect and whether to send requests to AI providers.</p>
+          <a href="https://github.com/RyanErkal/jevcast#privacy">Network requests and permissions</a>
         </div>
       </section>
 
@@ -855,338 +589,16 @@ scripts/build.sh</code></pre>
           <div>
             <h2 id="changelog-title">What’s new</h2>
             <p class="news-lead">
-              Every release, in short.
               <a href="https://github.com/RyanErkal/jevcast/blob/main/CHANGELOG.md">Full changelog</a>
             </p>
           </div>
           <ol class="releases">
             <li class="release">
-              <div class="release-head"><span class="release-tag">1.23.0</span><time datetime="2026-11-10">10 November 2026</time></div>
+              <div class="release-head"><span class="release-tag">1.24.0</span><time datetime="2026-11-25">25 November 2026</time></div>
               <ul>
-                <li><strong>Undo in Mail.</strong> Archive, Delete, and Move offer Undo for eight seconds, and <kbd>⌘</kbd><kbd>Z</kbd> puts the message back.</li>
-                <li><strong>A calmer Mail.</strong> A simpler composer, larger and consistent text, search results that show why they matched, and quiet motion.</li>
-                <li><strong>Small fixes with reach.</strong> Every action in one <kbd>⌘</kbd><kbd>K</kbd> menu, clearer Week titles in Calendar, and a shorter Settings › Mail.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head"><span class="release-tag">1.22.0</span><time datetime="2026-11-09">9 November 2026</time></div>
-              <ul>
-                <li><strong>Calendar without Calendar.</strong> Add, change, drag, and delete events on your Mac's calendars. Show your Mac and several Google accounts together. A quiet mark shows before a meeting, with Join.</li>
-                <li><strong>Mail without Mail.</strong> Answer invitations, unsubscribe from lists, manage folders, and open mail links in Jevcast. New keys archive, flag, and move.</li>
-                <li><strong>Faster and calmer.</strong> The mail list no longer redraws while you type. Conversations show one title and close older replies. Google Calendar keeps what it fetched.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head"><span class="release-tag">1.21.3</span><time datetime="2026-10-09">9 October 2026</time></div>
-              <ul>
-                <li><strong>Compact Mail toolbars.</strong> One row each for mailbox tools and message actions.</li>
-                <li><strong>Deletion fixes.</strong> Delete moves loaded conversation replies to Trash. Delayed sync responses cannot restore a confirmed deletion to the local list.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head"><span class="release-tag">1.21.2</span><time datetime="2026-10-09">9 October 2026</time></div>
-              <ul>
-                <li><strong>Clearer Mail.</strong> Arrow keys keep the current conversation highlighted. Replies appear together, without nested list rows or a conversation strip.</li>
-                <li><strong>Quiet account status.</strong> A dot shows the connection state. Click it for details.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head"><span class="release-tag">1.21.1</span><time datetime="2026-10-09">9 October 2026</time></div>
-              <ul><li><strong>Source build fix.</strong> The Mail sidebar builds with Xcode 26. It keeps the same layout and controls.</li></ul>
-            </li>
-            <li class="release">
-              <div class="release-head"><span class="release-tag">1.21.0</span><time datetime="2026-10-09">9 October 2026</time></div>
-              <ul>
-                <li><strong>Mail stays in the launcher.</strong> Account recovery, offline storage, conversations, filters, bulk actions, aliases, and server drafts.</li>
-                <li><strong>Everyday mail tools.</strong> Rules, smart mailboxes, VIPs, notices, snooze, Send Later, and local archive import/export. Scheduled sends need Jevcast running and the Mac awake.</li>
-                <li><strong>Source release.</strong> Build from GitHub. Provider delivery and cross-device acceptance remain separate from offline checks.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.20.0</span>
-                <time datetime="2026-10-07">7 October 2026</time>
-              </div>
-              <ul>
-                <li><strong>Google Calendar.</strong> Sign in with read-only access and choose your calendars. Week and Day show an hourly grid, with all-day events and a current-time marker.</li>
-                <li><strong>Meeting details.</strong> Click an event for its notes, location, guests, and linked documents. Join Google Meet opens the meeting in your browser.</li>
-                <li><strong>Mail workspace.</strong> A sidebar puts your accounts, folders, favourites, and combined views in reach. Drafts and send results survive a restart, and uncertain sends wait for your review.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.19.0</span>
-                <time datetime="2026-10-04">4 October 2026</time>
-              </div>
-              <ul>
-                <li><strong>Quiet automation alerts.</strong> Automations never open a card by themselves. The pill beside the notch shows a mark: a tick, a failure, a review, a question, or an approval. Finished runs leave after a few seconds; questions and approvals wait for a click.</li>
-                <li><strong>Plain names.</strong> Quill is now AI writing: Ask AI, writing on selected text and mail, and Scheduled Briefs, set up in Settings › AI › Writing. Your settings carry over.</li>
-                <li><strong>Steady launcher.</strong> The launcher keeps your system appearance, so it stays dark over a white page in Dark Mode.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.18.1</span>
-                <time datetime="2026-10-03">3 October 2026</time>
-              </div>
-              <ul>
-                <li><strong>Your automation icons.</strong> Set an icon and colour for each job. The minimized island shows them when several jobs run.</li>
-                <li><strong>Refined islands.</strong> Black cards, a subtle glass edge, clear progress, and smooth controls. Click outside to close a card while work continues.</li>
-                <li><strong>Stable interactions.</strong> Open running cards stay open when more jobs arrive. Reply drafts stay in place, and menus always target the right run.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.17.2</span>
-                <time datetime="2026-10-03">3 October 2026</time>
-              </div>
-              <ul>
-                <li><strong>Window actions resize Chrome.</strong> Halves, thirds, and Maximise resize Chrome windows again, instead of only moving them. Apps with enhanced accessibility on behave the same way.</li>
-                <li><strong>Larger displays.</strong> A window moved to a larger display gets its full new size.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.17.1</span>
-                <time datetime="2026-10-03">3 October 2026</time>
-              </div>
-              <ul>
-                <li><strong>Readable commit IDs.</strong> Automation output shows the full Git commit a backup verified, when it is labelled as one. Secrets and other long tokens stay hidden.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.17.0</span>
-                <time datetime="2026-10-03">3 October 2026</time>
-              </div>
-              <ul>
-                <li><strong>Report workflows.</strong> An approved script plans the work. Each due report runs at most one fetch worker and one read-only analyst, and an approved script checks and saves it. Nothing due means no model.</li>
-                <li><strong>Success alerts that count.</strong> Turn on success alerts for a ready report or a finished backup. A card counts as shown only after the notch draws it.</li>
-                <li><strong>Safer runs.</strong> Codex runs use your ChatGPT sign-in only, start no extra agents, and stop at their time limit. A repeated failure alerts once.</li>
-                <li><strong>GPT-6.1 Sol</strong> in the model picker.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.16.1</span>
-                <time datetime="2026-10-03">3 October 2026</time>
-              </div>
-              <ul>
-                <li><strong>Settings search.</strong> <code>settings</code> puts the app first. Panes appear only for a named request, such as <code>bluetooth settings</code> or <code>focus settings</code>.</li>
-                <li><strong>App launch and ranking.</strong> Compact names such as <code>t3code</code> match spaced names. An exact name stays above favourites and past use. App launches check the copy macOS opens and bring it forward.</li>
-                <li><strong>Typing stays in control.</strong> Late Jev answers keep your selection. Search keeps text composition intact, and holding Return cannot confirm an action twice.</li>
-                <li><strong>Computer-use cleanup.</strong> Clean Up lists orphaned workers for review. Attached workers and the shared service stay protected. Stopping a group needs a second Return.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.16.0</span>
-                <time datetime="2026-10-02">2 October 2026</time>
-              </div>
-              <ul>
-                <li><strong>A full mail app.</strong> Replies open in the reading pane, as in Apple Mail: To, Cc, Bcc, a formatting bar, and the original below your text, exactly as it is sent.</li>
-                <li><strong>Gmail and Outlook sign-in.</strong> Use Google or Microsoft sign-in with your own free OAuth client. Every folder of every account is in one menu, and Empty clears Trash and Junk.</li>
-                <li><strong>Fast with big mailboxes.</strong> Mail keeps only what you look at, so an inbox with tens of thousands of messages shows in seconds.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.15.0</span>
-                <time datetime="2026-09-30">30 September 2026</time>
-              </div>
-              <ul>
-                <li><strong>Tailnet view.</strong> Type <code>tailnet</code> to see your Tailscale devices: direct or relayed, ping time, load, and the pages each one shares, with their names and icons. Type a page’s name, such as <code>qbit</code>, to open it from anywhere.</li>
-                <li><strong>Quick actions.</strong> Open Remote Desktop or Screen Sharing, and send files with Taildrop. Checks are off until you turn them on, and ask only Tailscale addresses.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.14.0</span>
-                <time datetime="2026-09-29">29 September 2026</time>
-              </div>
-              <ul>
-                <li><strong>Mail without Apple Mail.</strong> Add a Yahoo, iCloud, Gmail, or other IMAP account with an app password in Settings › Mail › Accounts. Jevcast syncs it itself, and new mail arrives within seconds.</li>
-                <li><strong>Safer replies.</strong> <kbd>⌘R</kbd> replies in the launcher’s Mail view, and Undo Send waits 5 seconds. A message you started is never replaced, and a failed send brings your text back.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.13.0</span>
-                <time datetime="2026-09-29">29 September 2026</time>
-              </div>
-              <ul>
-                <li><strong>A terminal in the launcher.</strong> Hyper–T or <code>/terminal</code> opens your login shell, drawn by libghostty with your Ghostty font and colours, on the launcher’s glass. Escape closes it and the shell keeps running.</li>
-                <li><strong>Fixes.</strong> Maps comes before its site search, timers survive a restart, the mail window has F, S, and C keys, and an old proposal no longer blocks an automation.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.12.3</span>
-                <time datetime="2026-09-28">28 September 2026</time>
-              </div>
-              <ul>
-                <li><strong>Mail reads like Mail.</strong> Every message you see counts as read, stays read, and shows as read on your phone too.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.12.2</span>
-                <time datetime="2026-09-27">27 September 2026</time>
-              </div>
-              <ul>
-                <li><strong>Smoother notch.</strong> Alerts grow out of the notch and tuck back in with calm, continuous motion.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.12.0</span>
-                <time datetime="2026-09-27">27 September 2026</time>
-              </div>
-              <ul>
-                <li><strong>Cleaner notch.</strong> Solid black, no glow, calm motion, and clear buttons.</li>
-                <li><strong>Keys in Settings.</strong> Every Hyper key and shortcut in its own Keys tab, as keycaps. Type <code>keys</code> to open it.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.11.0</span>
-                <time datetime="2026-09-27">27 September 2026</time>
-              </div>
-              <ul>
-                <li><strong>A new notch.</strong> Alerts grow out of the notch. Answer questions, approve changes, retry failures, or see every waiting automation in one list, without opening a window.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.10.1</span>
-                <time datetime="2026-09-27">27 September 2026</time>
-              </div>
-              <ul>
-                <li><strong>Gmail inboxes.</strong> Gmail accounts in Apple Mail now show their inbox, sent mail, and labels.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.10.0</span>
-                <time datetime="2026-09-27">27 September 2026</time>
-              </div>
-              <ul>
-                <li><strong>All your mail.</strong> The list pages through every message, All Mail shows every folder once, search reads message text, and it warns when Apple Mail is closed.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.9.2</span>
-                <time datetime="2026-09-27">27 September 2026</time>
-              </div>
-              <ul>
-                <li><strong>Bigger views.</strong> Mail and the other panel views open much larger, so whole emails fit.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.9.1</span>
-                <time datetime="2026-09-27">27 September 2026</time>
-              </div>
-              <ul>
-                <li><strong>Simpler Automations.</strong> Dashboards are gone. Quitting no longer hangs.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.9.0</span>
-                <time datetime="2026-09-27">27 September 2026</time>
-              </div>
-              <ul>
-                <li><strong>Pick provider and model.</strong> ChatGPT (GPT-6 Luna, Sol, Astra) or Claude (Opus 5.5) for each automation, with effort and speed.</li>
-                <li><strong>Mail</strong> fits wide emails, zooms, and expands to full width.</li>
-                <li><strong>Cleaner Settings</strong>, and Jevcast never runs twice.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.8.2</span>
-                <time datetime="2026-09-27">27 September 2026</time>
-              </div>
-              <ul>
-                <li><strong>Simpler Clipboard.</strong> Pins are gone. Every entry follows your history settings.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.8.1</span>
-                <time datetime="2026-09-27">27 September 2026</time>
-              </div>
-              <ul>
-                <li><strong>Esc closes Hyper views.</strong> Mail, Calendar, and Clipboard opened with Caps Lock close fully on Escape. Clipboard now just copies.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.8.0</span>
-                <time datetime="2026-09-26">26 September 2026</time>
-              </div>
-              <ul>
-                <li><strong>Clipboard manager.</strong> Images, files, videos, links, colours, and code with previews, search inside images, quick text fixes, and history that stays on your Mac.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.7.0</span>
-                <time datetime="2026-09-26">26 September 2026</time>
-              </div>
-              <ul>
-                <li><strong>Hyper key.</strong> Caps Lock becomes a modifier for your own shortcuts: Mail, Calendar, arrows, window halves, and apps. Off by default.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.6.0</span>
-                <time datetime="2026-09-26">26 September 2026</time>
-              </div>
-              <ul>
-                <li><strong>Automations.</strong> Scheduled scripts and Codex or Claude agents that run in the background, with approvals, undo, and alerts from the notch.</li>
-                <li><strong>Codex.</strong> See your Codex automations, read-only, with import.</li>
-                <li><strong>Quill.</strong> The writing helper has a new name, a model picker, and Fast as its own switch.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.5.1</span>
-                <time datetime="2026-09-25">25 September 2026</time>
-              </div>
-              <ul>
-                <li><strong>Faster Calendar.</strong> Months and weeks show at once, and the list no longer stalls the panel.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.5.0</span>
-                <time datetime="2026-09-24">24 September 2026</time>
-              </div>
-              <ul>
-                <li><strong>Views in the launcher.</strong> Mail with a preview, and Calendar by month, week, or list, right in the panel.</li>
-                <li><strong>More to type.</strong> <code>/</code> lists every function, “6pm atlanta in uk” converts times, and holding Right Command dictates.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.4.0</span>
-                <time datetime="2026-09-24">24 September 2026</time>
-              </div>
-              <ul>
-                <li><strong>Scheduled Quill tasks.</strong> “every weekday at 8am brief me on my meetings”, delivered as a notification.</li>
-                <li><strong>Jev in two steps.</strong> Jev checks the kind of request before it picks.</li>
-              </ul>
-            </li>
-            <li class="release">
-              <div class="release-head">
-                <span class="release-tag">1.3.0</span>
-                <time datetime="2026-09-24">24 September 2026</time>
-              </div>
-              <ul>
-                <li><strong>Your whole Mac in one box.</strong> Calendar, reminders, contacts, tabs, history, and mail.</li>
-                <li><strong>Quill.</strong> Optional answers, rewrites, and mail replies. Jev decides; Quill writes.</li>
+                <li>Mail reopens your last mailbox and leaves unread messages unread.</li>
+                <li>Right-click a conversation for actions, or filter for unread mail, flags, and attachments.</li>
+                <li>Delete All from Sender shows the message count before you confirm.</li>
               </ul>
             </li>
           </ol>
@@ -1198,93 +610,17 @@ scripts/build.sh</code></pre>
           <h2 id="faq-title">Questions</h2>
           <div class="faq-list">
             <details>
-              <summary><span>Does it replace Spotlight or Raycast?</span><svg class="icon chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg></summary>
-              <p>
-                It works next to them and never changes their shortcuts. The
-                shortcut is <kbd>⌥</kbd><kbd>Space</kbd>. If another app already
-                uses it, choose a different shortcut in the welcome window or in
-                Settings.
-              </p>
-            </details>
-            <details>
-              <summary><span>Why does it ask for Accessibility access?</span><svg class="icon chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg></summary>
-              <p>
-                Only to move and resize windows. If you do not use window
-                layouts, skip it. Everything else works without it.
-              </p>
-            </details>
-            <details>
-              <summary><span>Does it search inside documents?</span><svg class="icon chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg></summary>
-              <p>
-                No. It searches file names, kinds, folders, and dates from the
-                Spotlight index, in the folders you choose in Settings.
-              </p>
-            </details>
-            <details>
-              <summary><span>What is Jev?</span><svg class="icon chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg></summary>
-              <p>
-                Jev is an optional model from
-                <a href="https://typesafe.ai">TypeSafe</a>. With your own
-                TypeSafe or OpenRouter key, it reads each request after a short pause, typed
-                or spoken, such as “make this window bigger” or “open my coding
-                setup”, and picks one of the app’s known actions. It never
-                writes a command. Jevcast remembers what you chose, so a
-                repeated request needs no Jev call, and Settings › AI › Usage shows
-                what it costs. It is off by default, and the app works fully
-                without it.
-              </p>
+              <summary><span>Can I keep using Spotlight or Raycast?</span><svg class="icon chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg></summary>
+              <p>You can use them together. If Option–Space is taken, choose a different shortcut in Jevcast Settings.</p>
             </details>
             <details>
               <summary><span>How do updates work?</span><svg class="icon chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg></summary>
-              <p>
-                Once a day, the app asks GitHub if there is a newer version and
-                tells you when there is. You download the update yourself. Turn
-                the check off in Settings, General.
-              </p>
-            </details>
-            <details>
-              <summary><span>How do I remove it?</span><svg class="icon chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg></summary>
-              <p>
-                Quit it from the menu bar and move it from Applications to the
-                Trash. To remove its settings too, delete
-                <code
-                  >~/Library/Preferences/com.ryanerkal.jevlauncher.plist</code
-                >
-                and <code>~/Library/Caches/JevLauncher</code>. If you saved a
-                TypeSafe key, remove it in Settings, Input, first.
-              </p>
-            </details>
-            <details>
-              <summary><span>Is it really free?</span><svg class="icon chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg></summary>
-              <p>
-                Yes. The code is open source under the MIT license. You can read
-                it, build it, and change it on
-                <a href="https://github.com/RyanErkal/jevcast">GitHub</a>.
-              </p>
+              <p>Jevcast checks GitHub daily. When a release is ready, use the install instructions above to update.</p>
             </details>
           </div>
         </div>
       </section>
 
-      <section class="section closing" aria-labelledby="closing-title">
-        <div class="wrap closing-inner">
-          <h2 id="closing-title">
-            Build it from source, then press <kbd>⌥</kbd><kbd>Space</kbd>
-          </h2>
-          <a
-            class="button"
-            href="#install"
-          >
-            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
-            Install from source
-          </a>
-          <p class="specs">
-            Free under the MIT license <span aria-hidden="true">·</span> macOS
-            14 or later <span aria-hidden="true">·</span> Apple silicon and
-            Intel
-          </p>
-        </div>
-      </section>
     </main>
 
     <footer class="foot">
@@ -1311,8 +647,7 @@ scripts/build.sh</code></pre>
         </nav>
       </div>
       <p class="wrap legal">
-        MIT License. © 2026 Ryan Erkal. This site has no cookies and no
-        tracking scripts. Mac and macOS are trademarks of Apple Inc.
+        MIT License. © 2026 Ryan Erkal. Mac and macOS are trademarks of Apple Inc.
       </p>
     </footer>
     <p class="visually-hidden" id="copy-status" aria-live="polite"></p>
